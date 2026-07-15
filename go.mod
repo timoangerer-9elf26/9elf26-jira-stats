@@ -3,6 +3,7 @@ module github.com/timoangerer-9elf26/9elf26-jira-stats
 go 1.26.5
 
 require (
+	github.com/joho/godotenv v1.5.1
 	github.com/pressly/goose/v3 v3.27.2
 	modernc.org/sqlite v1.53.0
 )

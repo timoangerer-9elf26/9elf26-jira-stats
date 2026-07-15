@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/sync"
@@ -33,6 +35,13 @@ func main() {
 }
 
 func run() error {
+	// Load configuration from a local .env file if present, so settings can be
+	// kept in one gitignored file instead of exported by hand. Real environment
+	// variables always win over .env, and a missing .env is not an error.
+	if err := godotenv.Load(); err == nil {
+		log.Print("loaded configuration from .env")
+	}
+
 	addr := getenv("LISTEN_ADDR", ":8080")
 	dbPath := getenv("DB_PATH", "jira-stats.db")
 

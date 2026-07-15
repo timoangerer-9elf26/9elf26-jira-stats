@@ -28,8 +28,19 @@ a re-sync, not real data.
 
 ## Configuration
 
-All settings come from environment variables (no secrets in the repo). Copy
-`.env.example` to `.env` and edit. The real `.env` is gitignored.
+All settings come from environment variables (no secrets in the repo). The
+easiest way to supply them is a local `.env` file, which the app **loads
+automatically on startup** — so you configure it once and never export
+variables by hand:
+
+```sh
+cp .env.example .env      # then edit .env and fill in your Jira credentials
+```
+
+The real `.env` is gitignored and must never be committed. Real environment
+variables still take precedence over `.env`, and a missing `.env` is fine (the
+app just uses env vars / defaults). Only `.env.example` — with placeholder
+values — is tracked.
 
 | Variable         | Default              | Description                                                        |
 | ---------------- | -------------------- | ------------------------------------------------------------------ |
@@ -66,18 +77,21 @@ go generate ./...
 The app is a single static binary (pure-Go SQLite, `CGO_ENABLED=0`):
 
 ```sh
-# Build the binary (embeds templates, CSS, and HTMX):
-make build                                   # -> bin/jira-stats
+# 1. Configure once (see Configuration above):
+cp .env.example .env      # edit .env with your Jira credentials
+
+# 2. Build the binary (embeds templates, CSS, and HTMX):
+make build                # -> bin/jira-stats
 # or directly:
 CGO_ENABLED=0 go build -o bin/jira-stats ./cmd/jira-stats
 
-# Run it (reads configuration from the environment):
+# 3. Run it — configuration is injected from .env automatically:
 ./bin/jira-stats
 ```
 
-With no Jira credentials set, it serves the canned fake dataset — open
-<http://localhost:8080/>. For live data, set the `JIRA_*` variables (e.g. via
-`.env`) and restart.
+No manual `export` needed: the binary reads `.env` from the working directory on
+startup. Open <http://localhost:8080/>. With no Jira credentials set (blank
+`JIRA_*`), it serves the built-in canned fake dataset instead of live data.
 
 For a quick dev loop without building a binary:
 
