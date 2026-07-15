@@ -41,11 +41,12 @@ type Rollups interface {
 // Server holds the parsed templates and the rollup source, and implements
 // http.Handler via its router.
 type Server struct {
-	rollups   Rollups
-	templates *template.Template
-	mux       *http.ServeMux
-	now       func() time.Time
-	loc       *time.Location
+	rollups       Rollups
+	templates     *template.Template
+	mux           *http.ServeMux
+	now           func() time.Time
+	loc           *time.Location
+	velocityWeeks int
 }
 
 // Option configures a Server at construction.
@@ -55,6 +56,16 @@ type Option func(*Server)
 // presets ("this week" etc.), so tests can pin "now" deterministically.
 func WithClock(now func() time.Time) Option {
 	return func(s *Server) { s.now = now }
+}
+
+// WithVelocityWeeks overrides how many trailing ISO weeks the Velocity view
+// shows (spec: ~8–12). Non-positive values are ignored, keeping the default.
+func WithVelocityWeeks(n int) Option {
+	return func(s *Server) {
+		if n > 0 {
+			s.velocityWeeks = n
+		}
+	}
 }
 
 // NewServer parses the embedded templates, loads the display timezone, and
@@ -69,11 +80,12 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 		return nil, fmt.Errorf("load %s: %w", displayTimeZone, err)
 	}
 	s := &Server{
-		rollups:   rollups,
-		templates: tmpl,
-		mux:       http.NewServeMux(),
-		now:       time.Now,
-		loc:       loc,
+		rollups:       rollups,
+		templates:     tmpl,
+		mux:           http.NewServeMux(),
+		now:           time.Now,
+		loc:           loc,
+		velocityWeeks: defaultVelocityWeeks,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -87,6 +99,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /now/board", s.handleNowBoard)
 	s.mux.HandleFunc("GET /completed", s.handleCompleted)
 	s.mux.HandleFunc("GET /completed/results", s.handleCompletedResults)
+	s.mux.HandleFunc("GET /velocity", s.handleVelocity)
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(mustSub(assetsFS)))))
 }
 

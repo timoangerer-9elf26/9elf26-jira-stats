@@ -74,6 +74,24 @@
 </div>
 {{end}}
 
+{{/* velocity-bar renders one ISO week of the Velocity view as an accessible
+     CSS bar (no JS charting library). Takes a velocityWeek (Label, Points,
+     Percent). The full-height track marks the week even when it is empty, so
+     zero-completion weeks still render (no gaps in the series); the filled
+     portion carries an aria-label with the week and its points. */}}
+{{define "velocity-bar"}}
+<div class="flex flex-1 flex-col items-center gap-2" data-testid="velocity-week" data-week="{{.Label}}">
+  <div class="flex h-40 w-full items-end justify-center rounded-t bg-slate-100">
+    <div class="w-6 rounded-t {{if .Points}}bg-slate-900{{else}}bg-slate-300{{end}}"
+         style="height: {{.Percent}}%"
+         role="img"
+         aria-label="{{.Label}}: {{.Points}} points"></div>
+  </div>
+  <span class="text-sm font-semibold tabular-nums text-slate-700" data-testid="week-points:{{.Label}}">{{.Points}}</span>
+  <span class="text-xs uppercase tracking-wide text-slate-400" data-testid="week-label:{{.Label}}">{{.Label}}</span>
+</div>
+{{end}}
+
 {{/* completed-results is the Completed-view results fragment: the S/M/L/
      no-estimate counts and points for the selected range, plus the resolved
      range label. It is both embedded in the page and returned as the HTMX swap.
