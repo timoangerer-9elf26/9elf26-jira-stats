@@ -5,7 +5,6 @@ package jira
 
 import (
 	"context"
-	"errors"
 	"time"
 )
 
@@ -40,7 +39,3 @@ type ChangelogEntry struct {
 type Client interface {
 	FetchIssues(ctx context.Context) ([]Issue, error)
 }
-
-// ErrNotImplemented is returned by the real client until live Jira integration
-// lands in a later ticket.
-var ErrNotImplemented = errors.New("jira: live client not implemented yet")
