@@ -91,3 +91,35 @@ make test       # go test ./...
 Tests drive the real handlers at the HTTP boundary, backed by a temp SQLite
 database and a fake Jira — one seam covering sync, rollups, and rendering
 end-to-end. Run them with `make test` or `go test ./...`.
+
+### Smoke tests
+
+The smoke tests (`smoke/`) are the "does it come up and respond" check: they
+**build the real binary, boot it against the built-in fake Jira (no
+credentials), and assert every route serves** — the three views plus the
+embedded static assets. They complement the in-process integration tests by
+exercising the actual compiled binary and its startup path.
+
+They live behind the `smoke` build tag, so they never run in `make test`. Run
+them explicitly:
+
+```sh
+make smoke      # go test -tags smoke -count=1 ./smoke/
+```
+
+Requirements: Go only — no running services, no Jira credentials, no network.
+Each test picks a free port, starts the binary with `SYNC_INTERVAL=1s` and a
+temp database, waits until it serves, checks the routes, and shuts it down.
+
+### CI / pre-deploy gate
+
+`make check` runs the unit/integration tests **and** the smoke tests together —
+use it as the gate before shipping:
+
+```sh
+make check      # == make test && make smoke
+```
+
+CI runs the same steps on every push to `main` and every pull request
+(`.github/workflows/ci.yml`): `gofmt` check, `go vet`, static build, `go test
+./...`, then the smoke tests.

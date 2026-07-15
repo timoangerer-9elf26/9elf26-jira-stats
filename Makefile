@@ -28,8 +28,20 @@ build: ## Build the single static binary at bin/jira-stats.
 	CGO_ENABLED=0 go build -o bin/jira-stats ./cmd/jira-stats
 
 .PHONY: test
-test: ## Run the full test suite.
+test: ## Run the unit/integration test suite.
 	go test ./...
+
+# Smoke tests build the real binary, boot it against the built-in fake Jira,
+# and assert every route serves. Guarded by the `smoke` build tag so they stay
+# out of `make test`. Requires Go only (no running services, no credentials).
+.PHONY: smoke
+smoke: ## Build the binary and run end-to-end smoke tests.
+	go test -tags smoke -count=1 ./smoke/
+
+# The pre-ship gate: unit/integration tests plus smoke tests. Run this in CI /
+# before deploying.
+.PHONY: check
+check: test smoke ## Run all tests + smoke tests (CI / pre-deploy gate).
 
 .PHONY: run
 run: ## Run the dashboard locally (falls back to fake Jira without creds).

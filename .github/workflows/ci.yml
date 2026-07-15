@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          check-latest: true
+
+      - name: Verify formatting
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && echo "run gofmt" && exit 1)
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build static binary
+        run: CGO_ENABLED=0 go build -o bin/jira-stats ./cmd/jira-stats
+
+      - name: Unit & integration tests
+        run: go test ./...
+
+      # End-to-end smoke tests: build the binary, boot it against the built-in
+      # fake Jira, assert every route serves. No credentials or services needed.
+      - name: Smoke tests
+        run: go test -tags smoke -count=1 ./smoke/
