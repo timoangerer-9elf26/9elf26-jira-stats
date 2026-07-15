@@ -58,7 +58,10 @@ func (s *Server) handleCompleted(w http.ResponseWriter, r *http.Request) {
 // handleCompletedResults renders just the results fragment (the HTMX swap
 // target) for the requested range.
 func (s *Server) handleCompletedResults(w http.ResponseWriter, r *http.Request) {
-	s.renderCompleted(w, r, "completed-results")
+	// Render the whole panel (picker + results) so the active-preset highlight
+	// and the From/To inputs re-render to match the selected range, not just the
+	// numbers.
+	s.renderCompleted(w, r, "completed-panel")
 }
 
 func (s *Server) renderCompleted(w http.ResponseWriter, r *http.Request, name string) {

@@ -193,7 +193,49 @@ func TestCompletedPageReachableAndWiredForHTMX(t *testing.T) {
 	if !strings.Contains(body, `hx-get="/completed/results`) {
 		t.Errorf("picker not wired to swap results via HTMX:\n%s", body)
 	}
-	if !strings.Contains(body, `hx-target="#completed-results"`) {
-		t.Errorf("picker missing hx-target for results fragment:\n%s", body)
+	// The picker swaps the whole panel (picker + results), so the active-preset
+	// highlight and date inputs re-render to match the selection.
+	if !strings.Contains(body, `hx-target="#completed-panel"`) {
+		t.Errorf("picker must target #completed-panel so the picker re-renders:\n%s", body)
 	}
+}
+
+// TestCompletedResultsFragmentReflectsSelectedPreset is a regression test for a
+// bug where clicking a preset (e.g. "Last week") updated the numbers but left
+// the picker showing "Active sprint" as selected: the swap replaced only the
+// results, not the picker. The results fragment must now carry the picker with
+// the clicked preset marked active and the others not.
+func TestCompletedResultsFragmentReflectsSelectedPreset(t *testing.T) {
+	loc := berlin(t)
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
+	app := newTestAppAt(t, jira.NewFakeClient(), now)
+
+	body := get(t, app.URL+"/completed/results?preset=last-week")
+
+	// The picker must be part of the swapped fragment.
+	if !strings.Contains(body, `data-testid="date-range-picker"`) {
+		t.Fatalf("results fragment must include the picker so it re-renders:\n%s", body)
+	}
+	// The clicked preset ("Last week") is the active one; "Active sprint" is not.
+	if !buttonIsActive(body, "last-week") {
+		t.Errorf("last-week button should be marked active after selecting it:\n%s", body)
+	}
+	if buttonIsActive(body, "active-sprint") {
+		t.Errorf("active-sprint button should NOT be active after selecting last-week:\n%s", body)
+	}
+}
+
+// buttonIsActive reports whether the picker button for the given preset carries
+// aria-current="true" (i.e. is the highlighted selection).
+func buttonIsActive(html, preset string) bool {
+	marker := `data-preset="` + preset + `"`
+	start := strings.Index(html, marker)
+	if start == -1 {
+		return false
+	}
+	end := strings.Index(html[start:], "</button>")
+	if end == -1 {
+		return false
+	}
+	return strings.Contains(html[start:start+end], `aria-current="true"`)
 }
