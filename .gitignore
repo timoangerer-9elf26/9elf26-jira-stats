@@ -1,0 +1,22 @@
+# Build artifacts
+/jira-stats
+/bin/
+/dist/
+*.exe
+
+# Local config & secrets
+.env
+*.local
+
+# SQLite database files (rebuildable projection of Jira)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+
+# Tailwind / node tooling
+node_modules/
+/tmp/
+
+# Editor / OS
+.DS_Store
