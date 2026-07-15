@@ -15,12 +15,14 @@ import (
 //
 // Expected value from the canned dataset (open = status not Done, types
 // Task/Bug/Story; points S=1,M=2,L=3):
-//   DCAI-1 Story In Progress  L -> 3
-//   DCAI-2 Task  Ready to Do  M -> 2
-//   DCAI-3 Bug   In Progress  S -> 1
-//   DCAI-4 Task  In Progress  (none) -> 0
-//   DCAI-5 Story DONE         M -> excluded (Done)
-//   DCAI-6 Epic  In Progress  L -> excluded (not a rollup type)
+//
+//	DCAI-1 Story In Progress  L -> 3
+//	DCAI-2 Task  Ready to Do  M -> 2
+//	DCAI-3 Bug   In Progress  S -> 1
+//	DCAI-4 Task  In Progress  (none) -> 0
+//	DCAI-5 Story DONE         M -> excluded (Done)
+//	DCAI-6 Epic  In Progress  L -> excluded (not a rollup type)
+//
 // Total open points = 6.
 func TestIndexRendersTotalOpenPoints(t *testing.T) {
 	app := newTestApp(t, jira.NewFakeClient())
