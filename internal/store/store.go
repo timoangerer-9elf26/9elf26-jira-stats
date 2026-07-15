@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/pressly/goose/v3"
@@ -145,8 +146,8 @@ func (s *Store) SetLastSync(t time.Time) error {
 	return nil
 }
 
-// SizeTally counts open work items by estimate bucket (S/M/L or no-estimate)
-// and sums their points (S=1, M=2, L=3; no-estimate contributes 0).
+// SizeTally counts work items by estimate bucket (S/M/L or no-estimate) and
+// sums their points (S=1, M=2, L=3; no-estimate contributes 0).
 type SizeTally struct {
 	S          int
 	M          int
@@ -154,6 +155,36 @@ type SizeTally struct {
 	NoEstimate int
 	Points     int
 }
+
+// sizeTallyColumns is the shared SELECT list that projects a set of issue rows
+// into a SizeTally: the S/M/L/no-estimate counts and the S=1/M=2/L=3 points sum.
+// Both the open-board and completed rollups reuse it so the points arithmetic
+// lives in exactly one place. COALESCE keeps it safe for an ungrouped aggregate
+// over an empty set (SUM would otherwise return NULL). Scan with scanTally, in
+// this exact column order.
+const sizeTallyColumns = `
+		COALESCE(SUM(CASE size WHEN 'S' THEN 1 ELSE 0 END), 0) AS s,
+		COALESCE(SUM(CASE size WHEN 'M' THEN 1 ELSE 0 END), 0) AS m,
+		COALESCE(SUM(CASE size WHEN 'L' THEN 1 ELSE 0 END), 0) AS l,
+		COALESCE(SUM(CASE WHEN size IS NULL THEN 1 ELSE 0 END), 0) AS no_estimate,
+		COALESCE(SUM(CASE size WHEN 'S' THEN 1 WHEN 'M' THEN 2 WHEN 'L' THEN 3 ELSE 0 END), 0) AS points`
+
+// scanTally reads the sizeTallyColumns projection from a row.
+func scanTally(row interface{ Scan(...any) error }) (SizeTally, error) {
+	var t SizeTally
+	err := row.Scan(&t.S, &t.M, &t.L, &t.NoEstimate, &t.Points)
+	return t, err
+}
+
+// rollupTypes are the issue types counted in every rollup (hierarchy level 0);
+// Epics and Sub-tasks are stored but excluded.
+const rollupTypes = `'Task', 'Bug', 'Story'`
+
+// doneStatuses are the workflow statuses in Jira's "Done" category for DCAI. A
+// completion is a transition crossing from a non-Done status into one of these;
+// a move BETWEEN them is within-category and is not a new completion. Kept as a
+// small constant here — a later ticket may make the Done set configurable.
+var doneStatuses = []string{"DONE (This Sprint)", "Released / Deployed"}
 
 // StatusColumn is the tally of open work in a single workflow status — one
 // column of the "Now" board.
@@ -189,15 +220,10 @@ var workflowOrder = []string{
 // aggregates every open status.
 func (s *Store) OpenByStatus() (OpenBoard, error) {
 	const query = `
-		SELECT status,
-			SUM(CASE size WHEN 'S' THEN 1 ELSE 0 END) AS s,
-			SUM(CASE size WHEN 'M' THEN 1 ELSE 0 END) AS m,
-			SUM(CASE size WHEN 'L' THEN 1 ELSE 0 END) AS l,
-			SUM(CASE WHEN size IS NULL THEN 1 ELSE 0 END) AS no_estimate,
-			SUM(CASE size WHEN 'S' THEN 1 WHEN 'M' THEN 2 WHEN 'L' THEN 3 ELSE 0 END) AS points
+		SELECT status, ` + sizeTallyColumns + `
 		FROM issue
 		WHERE status_category != 'Done'
-		  AND type IN ('Task', 'Bug', 'Story')
+		  AND type IN (` + rollupTypes + `)
 		GROUP BY status`
 
 	rows, err := s.db.Query(query)
@@ -263,4 +289,49 @@ func (s *Store) LastSyncedAt() (t time.Time, ok bool, err error) {
 		return time.Time{}, false, fmt.Errorf("parse synced_at %q: %w", v.String, err)
 	}
 	return t, true, nil
+}
+
+// CompletedInRange tallies the work items whose completion falls in [from, to).
+//
+// "Completed at T" is the timestamp of a status transition crossing FROM a
+// non-Done status INTO a Done-category status (see doneStatuses). A move between
+// the two Done statuses is within-category and is not a new completion; on
+// reopen (Done -> non-Done -> Done) the LATEST crossing wins, so each issue is
+// counted at most once at its most recent crossing. Counts use the CURRENT size
+// (S=1/M=2/L=3, NULL = no estimate) and only the rollup issue types.
+//
+// Callers own the calendar: from/to are absolute instants (typically an ISO
+// week or preset range computed in Europe/Berlin). A completion is included
+// when its stored UTC instant is >= from and < to. The Velocity rollup reuses
+// this method — one call per ISO week — rather than reimplementing crossing
+// detection.
+func (s *Store) CompletedInRange(from, to time.Time) (SizeTally, error) {
+	in := strings.TrimSuffix(strings.Repeat("?,", len(doneStatuses)), ",")
+	query := `
+		SELECT ` + sizeTallyColumns + `
+		FROM issue
+		JOIN (
+			SELECT issue_key, MAX(transitioned_at) AS completed_at
+			FROM status_transition
+			WHERE field = 'status'
+			  AND to_status IN (` + in + `)
+			  AND (from_status IS NULL OR from_status NOT IN (` + in + `))
+			GROUP BY issue_key
+		) crossing ON crossing.issue_key = issue.key
+		WHERE issue.type IN (` + rollupTypes + `)
+		  AND crossing.completed_at >= ? AND crossing.completed_at < ?`
+
+	args := make([]any, 0, 2*len(doneStatuses)+2)
+	for range 2 {
+		for _, st := range doneStatuses {
+			args = append(args, st)
+		}
+	}
+	args = append(args, from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
+
+	tally, err := scanTally(s.db.QueryRow(query, args...))
+	if err != nil {
+		return SizeTally{}, fmt.Errorf("completed in range: %w", err)
+	}
+	return tally, nil
 }

@@ -14,6 +14,10 @@ import (
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 )
 
+// displayTimeZone is the timezone all date maths and week labels use (spec:
+// Europe/Berlin, Monday-start ISO weeks). Timestamps are stored UTC underneath.
+const displayTimeZone = "Europe/Berlin"
+
 // Regenerate the committed Tailwind stylesheet (see also `make css`). Node is
 // only needed to build CSS; `go build` embeds the committed output.css and
 // never invokes Tailwind.
@@ -30,6 +34,7 @@ var assetsFS embed.FS
 // HTTP seam testable and decoupled from the concrete store.
 type Rollups interface {
 	OpenByStatus() (store.OpenBoard, error)
+	CompletedInRange(from, to time.Time) (store.SizeTally, error)
 	LastSyncedAt() (t time.Time, ok bool, err error)
 }
 
@@ -39,15 +44,40 @@ type Server struct {
 	rollups   Rollups
 	templates *template.Template
 	mux       *http.ServeMux
+	now       func() time.Time
+	loc       *time.Location
 }
 
-// NewServer parses the embedded templates and wires the routes.
-func NewServer(rollups Rollups) (*Server, error) {
+// Option configures a Server at construction.
+type Option func(*Server)
+
+// WithClock overrides the wall clock used to resolve relative date-range
+// presets ("this week" etc.), so tests can pin "now" deterministically.
+func WithClock(now func() time.Time) Option {
+	return func(s *Server) { s.now = now }
+}
+
+// NewServer parses the embedded templates, loads the display timezone, and
+// wires the routes.
+func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 	tmpl, err := template.New("").Funcs(templateFuncs()).ParseFS(templatesFS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
-	s := &Server{rollups: rollups, templates: tmpl, mux: http.NewServeMux()}
+	loc, err := time.LoadLocation(displayTimeZone)
+	if err != nil {
+		return nil, fmt.Errorf("load %s: %w", displayTimeZone, err)
+	}
+	s := &Server{
+		rollups:   rollups,
+		templates: tmpl,
+		mux:       http.NewServeMux(),
+		now:       time.Now,
+		loc:       loc,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
 	s.routes()
 	return s, nil
 }
@@ -55,6 +85,8 @@ func NewServer(rollups Rollups) (*Server, error) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.handleIndex)
 	s.mux.HandleFunc("GET /now/board", s.handleNowBoard)
+	s.mux.HandleFunc("GET /completed", s.handleCompleted)
+	s.mux.HandleFunc("GET /completed/results", s.handleCompletedResults)
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(mustSub(assetsFS)))))
 }
 
