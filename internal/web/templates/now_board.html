@@ -1,0 +1,33 @@
+{{define "now-board"}}
+<section id="now-board"
+         hx-get="/now/board"
+         hx-trigger="every 30s"
+         hx-swap="outerHTML"
+         class="mt-8">
+  <div class="flex items-baseline justify-between">
+    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Open work by status</h2>
+    <span class="text-xs text-slate-400" data-testid="updated-ago">updated {{.UpdatedAgo}}</span>
+  </div>
+
+  <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    {{range .Board.Columns}}
+      {{template "status-column" .}}
+    {{else}}
+      <p class="col-span-full text-sm text-slate-500">No open work.</p>
+    {{end}}
+  </div>
+
+  {{with .Board.Total}}
+  <div class="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm" data-testid="grand-total">
+    <h3 class="text-sm font-medium uppercase tracking-wide text-slate-500">All open work</h3>
+    <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5">
+      {{template "stat-card" (dict "Label" "S" "Value" .S "Testid" "total:s")}}
+      {{template "stat-card" (dict "Label" "M" "Value" .M "Testid" "total:m")}}
+      {{template "stat-card" (dict "Label" "L" "Value" .L "Testid" "total:l")}}
+      {{template "stat-card" (dict "Label" "No estimate" "Value" .NoEstimate "Testid" "total:none")}}
+      {{template "stat-card" (dict "Label" "Points" "Value" .Points "Testid" "total:points")}}
+    </div>
+  </div>
+  {{end}}
+</section>
+{{end}}

@@ -9,6 +9,9 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"time"
+
+	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 )
 
 // Regenerate the committed Tailwind stylesheet (see also `make css`). Node is
@@ -22,11 +25,12 @@ var templatesFS embed.FS
 //go:embed assets/output.css assets/htmx.min.js
 var assetsFS embed.FS
 
-// Rollups is the read side the web layer depends on: pure rollup queries over
-// the synced store. Keeping it an interface keeps the HTTP seam testable and
-// decoupled from the concrete store.
+// Rollups is the read side the web layer depends on: rollup queries over the
+// synced store plus the data-freshness stamp. Keeping it an interface keeps the
+// HTTP seam testable and decoupled from the concrete store.
 type Rollups interface {
-	TotalOpenPoints() (int, error)
+	OpenByStatus() (store.OpenBoard, error)
+	LastSyncedAt() (t time.Time, ok bool, err error)
 }
 
 // Server holds the parsed templates and the rollup source, and implements
@@ -39,7 +43,7 @@ type Server struct {
 
 // NewServer parses the embedded templates and wires the routes.
 func NewServer(rollups Rollups) (*Server, error) {
-	tmpl, err := template.ParseFS(templatesFS, "templates/*.html")
+	tmpl, err := template.New("").Funcs(templateFuncs()).ParseFS(templatesFS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
 	}
@@ -50,6 +54,7 @@ func NewServer(rollups Rollups) (*Server, error) {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.handleIndex)
+	s.mux.HandleFunc("GET /now/board", s.handleNowBoard)
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(mustSub(assetsFS)))))
 }
 
@@ -58,16 +63,86 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+// nowView is the "Now" page/fragment model: the open board plus a
+// human-readable data-freshness label.
+type nowView struct {
+	Board      store.OpenBoard
+	UpdatedAgo string
+}
+
+// handleIndex renders the full "Now" page.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	points, err := s.rollups.TotalOpenPoints()
+	s.renderNow(w, "index.html")
+}
+
+// handleNowBoard renders just the self-polling board fragment (the HTMX
+// refresh target).
+func (s *Server) handleNowBoard(w http.ResponseWriter, r *http.Request) {
+	s.renderNow(w, "now-board")
+}
+
+func (s *Server) renderNow(w http.ResponseWriter, name string) {
+	view, err := s.nowView()
 	if err != nil {
 		http.Error(w, "failed to compute rollup", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "index.html", struct{ TotalOpenPoints int }{points}); err != nil {
+	if err := s.templates.ExecuteTemplate(w, name, view); err != nil {
 		http.Error(w, "failed to render page", http.StatusInternalServerError)
 	}
+}
+
+func (s *Server) nowView() (nowView, error) {
+	board, err := s.rollups.OpenByStatus()
+	if err != nil {
+		return nowView{}, err
+	}
+	updated := "just now"
+	switch t, ok, err := s.rollups.LastSyncedAt(); {
+	case err != nil:
+		return nowView{}, err
+	case ok:
+		updated = humanizeAgo(time.Since(t))
+	}
+	return nowView{Board: board, UpdatedAgo: updated}, nil
+}
+
+// humanizeAgo renders an elapsed duration as a compact "Ns/Nm/Nh ago" label,
+// clamping negative skew to zero.
+func humanizeAgo(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	}
+}
+
+// templateFuncs exposes helpers the partials need. dict builds a map so a
+// partial can receive several named values (Go templates take a single arg).
+func templateFuncs() template.FuncMap {
+	return template.FuncMap{"dict": dict}
+}
+
+func dict(pairs ...any) (map[string]any, error) {
+	if len(pairs)%2 != 0 {
+		return nil, fmt.Errorf("dict: odd argument count %d", len(pairs))
+	}
+	m := make(map[string]any, len(pairs)/2)
+	for i := 0; i < len(pairs); i += 2 {
+		key, ok := pairs[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict: key %d is not a string", i)
+		}
+		m[key] = pairs[i+1]
+	}
+	return m, nil
 }
 
 // mustSub returns the embedded assets rooted at the "assets" directory, so

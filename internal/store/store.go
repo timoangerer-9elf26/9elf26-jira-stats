@@ -7,6 +7,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/pressly/goose/v3"
@@ -144,21 +145,122 @@ func (s *Store) SetLastSync(t time.Time) error {
 	return nil
 }
 
-// TotalOpenPoints returns the sum of points (S=1, M=2, L=3; no-estimate=0)
-// across all open work items — issues whose current status is not in the Done
-// category, restricted to the rollup issue types Task/Bug/Story (Epics and
-// Sub-tasks are stored but excluded).
-func (s *Store) TotalOpenPoints() (int, error) {
+// SizeTally counts open work items by estimate bucket (S/M/L or no-estimate)
+// and sums their points (S=1, M=2, L=3; no-estimate contributes 0).
+type SizeTally struct {
+	S          int
+	M          int
+	L          int
+	NoEstimate int
+	Points     int
+}
+
+// StatusColumn is the tally of open work in a single workflow status — one
+// column of the "Now" board.
+type StatusColumn struct {
+	Status string
+	SizeTally
+}
+
+// OpenBoard is the "Now" view projection: open work tallied per open workflow
+// status (ordered by the workflow, unknown statuses last) plus a grand total
+// across every open status.
+type OpenBoard struct {
+	Columns []StatusColumn
+	Total   SizeTally
+}
+
+// workflowOrder is the DCAI workflow left-to-right. Open status columns render
+// in this order; a status not listed here (e.g. one newly added in Jira) sorts
+// after the known ones, alphabetically.
+var workflowOrder = []string{
+	"Refinement",
+	"Ready to Do",
+	"In Progress",
+	"Review / Testing",
+	"DONE (This Sprint)",
+	"Released / Deployed",
+}
+
+// OpenByStatus tallies open work items per workflow status. Open = current
+// status not in the Done category, restricted to the rollup issue types
+// Task/Bug/Story (Epics and Sub-tasks are stored but excluded). Columns are
+// ordered by the known workflow with unknown statuses last, and a grand total
+// aggregates every open status.
+func (s *Store) OpenByStatus() (OpenBoard, error) {
 	const query = `
-		SELECT COALESCE(SUM(
-			CASE size WHEN 'S' THEN 1 WHEN 'M' THEN 2 WHEN 'L' THEN 3 ELSE 0 END
-		), 0)
+		SELECT status,
+			SUM(CASE size WHEN 'S' THEN 1 ELSE 0 END) AS s,
+			SUM(CASE size WHEN 'M' THEN 1 ELSE 0 END) AS m,
+			SUM(CASE size WHEN 'L' THEN 1 ELSE 0 END) AS l,
+			SUM(CASE WHEN size IS NULL THEN 1 ELSE 0 END) AS no_estimate,
+			SUM(CASE size WHEN 'S' THEN 1 WHEN 'M' THEN 2 WHEN 'L' THEN 3 ELSE 0 END) AS points
 		FROM issue
 		WHERE status_category != 'Done'
-		  AND type IN ('Task', 'Bug', 'Story')`
-	var points int
-	if err := s.db.QueryRow(query).Scan(&points); err != nil {
-		return 0, fmt.Errorf("total open points: %w", err)
+		  AND type IN ('Task', 'Bug', 'Story')
+		GROUP BY status`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return OpenBoard{}, fmt.Errorf("open by status: %w", err)
 	}
-	return points, nil
+	defer rows.Close()
+
+	var board OpenBoard
+	for rows.Next() {
+		var c StatusColumn
+		if err := rows.Scan(&c.Status, &c.S, &c.M, &c.L, &c.NoEstimate, &c.Points); err != nil {
+			return OpenBoard{}, fmt.Errorf("scan open status: %w", err)
+		}
+		board.Columns = append(board.Columns, c)
+		board.Total.S += c.S
+		board.Total.M += c.M
+		board.Total.L += c.L
+		board.Total.NoEstimate += c.NoEstimate
+		board.Total.Points += c.Points
+	}
+	if err := rows.Err(); err != nil {
+		return OpenBoard{}, fmt.Errorf("iterate open statuses: %w", err)
+	}
+
+	sortColumnsByWorkflow(board.Columns)
+	return board, nil
+}
+
+// sortColumnsByWorkflow orders columns by the known workflow; any status not in
+// the workflow sorts after the known ones, alphabetically among themselves.
+func sortColumnsByWorkflow(cols []StatusColumn) {
+	rank := make(map[string]int, len(workflowOrder))
+	for i, status := range workflowOrder {
+		rank[status] = i
+	}
+	sort.SliceStable(cols, func(i, j int) bool {
+		ri, iKnown := rank[cols[i].Status]
+		rj, jKnown := rank[cols[j].Status]
+		switch {
+		case iKnown && jKnown:
+			return ri < rj
+		case iKnown != jKnown:
+			return iKnown // known statuses before unknown ones
+		default:
+			return cols[i].Status < cols[j].Status
+		}
+	})
+}
+
+// LastSyncedAt returns the most recent synced_at stamp across stored issue
+// snapshots — how fresh the projected data is. ok is false on an empty store.
+func (s *Store) LastSyncedAt() (t time.Time, ok bool, err error) {
+	var v sql.NullString
+	if err = s.db.QueryRow(`SELECT MAX(synced_at) FROM issue`).Scan(&v); err != nil {
+		return time.Time{}, false, fmt.Errorf("read last synced_at: %w", err)
+	}
+	if !v.Valid {
+		return time.Time{}, false, nil
+	}
+	t, err = time.Parse(time.RFC3339, v.String)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse synced_at %q: %w", v.String, err)
+	}
+	return t, true, nil
 }

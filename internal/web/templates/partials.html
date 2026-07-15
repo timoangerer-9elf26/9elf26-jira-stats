@@ -1,0 +1,35 @@
+{{/* status-column renders one workflow-status column of the open board. It
+     takes a store.StatusColumn (Status plus the embedded SizeTally). */}}
+{{define "status-column"}}
+<div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+     data-testid="status-column" data-status="{{.Status}}">
+  <h3 class="truncate text-sm font-semibold text-slate-700" title="{{.Status}}">{{.Status}}</h3>
+  <p class="mt-1 text-xs text-slate-400">
+    <span class="font-semibold text-slate-600 tabular-nums" data-testid="col:{{.Status}}:points">{{.Points}}</span> pts
+  </p>
+  <div class="mt-3 flex flex-wrap gap-2">
+    {{template "size-chip" (dict "Label" "S" "Count" .S "Testid" (printf "col:%s:s" .Status))}}
+    {{template "size-chip" (dict "Label" "M" "Count" .M "Testid" (printf "col:%s:m" .Status))}}
+    {{template "size-chip" (dict "Label" "L" "Count" .L "Testid" (printf "col:%s:l" .Status))}}
+    {{template "size-chip" (dict "Label" "–" "Count" .NoEstimate "Testid" (printf "col:%s:none" .Status))}}
+  </div>
+</div>
+{{end}}
+
+{{/* size-chip is a small labelled count badge (one estimate bucket). Takes a
+     dict of Label, Count and Testid. */}}
+{{define "size-chip"}}
+<span class="inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
+  <span class="text-slate-400">{{.Label}}</span>
+  <span class="tabular-nums text-slate-800" data-testid="{{.Testid}}">{{.Count}}</span>
+</span>
+{{end}}
+
+{{/* stat-card is a single headline metric. Takes a dict of Label, Value and
+     Testid. */}}
+{{define "stat-card"}}
+<div class="rounded-lg bg-slate-50 p-3 text-center">
+  <p class="text-xs uppercase tracking-wide text-slate-400">{{.Label}}</p>
+  <p class="mt-1 text-2xl font-bold tabular-nums text-slate-900" data-testid="{{.Testid}}">{{.Value}}</p>
+</div>
+{{end}}
