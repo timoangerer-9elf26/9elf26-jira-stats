@@ -6,9 +6,13 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
@@ -16,6 +20,10 @@ import (
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/sync"
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/web"
 )
+
+// syncOverlap is the clock-skew window subtracted from last_sync when bounding
+// the incremental query, so no issue changed near the boundary is missed.
+const syncOverlap = 2 * time.Minute
 
 func main() {
 	if err := run(); err != nil {
@@ -32,6 +40,11 @@ func run() error {
 		return err
 	}
 
+	interval, err := time.ParseDuration(getenv("SYNC_INTERVAL", "60s"))
+	if err != nil {
+		return fmt.Errorf("invalid SYNC_INTERVAL: %w", err)
+	}
+
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return err
@@ -43,20 +56,36 @@ func run() error {
 		return err
 	}
 
-	log.Printf("backfilling %s from Jira...", getenv("JIRA_PROJECT", "DCAI"))
-	n, err := sync.Backfill(context.Background(), client, st)
-	if err != nil {
-		return err
-	}
-	log.Printf("backfilled %d issues", n)
+	// The background sync loop keeps SQLite current: it backfills on first run
+	// (empty DB) and then does cheap incremental syncs on each interval. It runs
+	// for the lifetime of the process and stops cleanly on shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	syncer := sync.NewSyncer(client, st, syncOverlap)
+	go syncer.Run(ctx, interval)
+	log.Printf("syncing %s from Jira every %s", getenv("JIRA_PROJECT", "DCAI"), interval)
 
 	srv, err := web.NewServer(st)
 	if err != nil {
 		return err
 	}
 
+	httpSrv := &http.Server{Addr: addr, Handler: srv}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("http shutdown: %v", err)
+		}
+	}()
+
 	log.Printf("listening on %s", addr)
-	return http.ListenAndServe(addr, srv)
+	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }
 
 // jiraClient builds the live Jira client from environment configuration when

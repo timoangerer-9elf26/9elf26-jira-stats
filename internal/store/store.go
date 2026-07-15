@@ -5,7 +5,9 @@ package store
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
@@ -96,6 +98,50 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 	}
 
 	return tx.Commit()
+}
+
+// lastSyncKey is the meta row holding the RFC3339 UTC timestamp of the most
+// recent successful sync cycle.
+const lastSyncKey = "last_sync"
+
+// IssueCount returns the number of issue snapshots currently stored. The sync
+// loop uses it to decide between an initial full backfill and an incremental
+// sync.
+func (s *Store) IssueCount() (int, error) {
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM issue`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count issues: %w", err)
+	}
+	return n, nil
+}
+
+// LastSync returns the timestamp of the last recorded sync. ok is false when no
+// sync has been recorded yet (a fresh database).
+func (s *Store) LastSync() (t time.Time, ok bool, err error) {
+	var v string
+	switch err = s.db.QueryRow(`SELECT value FROM meta WHERE key = ?`, lastSyncKey).Scan(&v); {
+	case errors.Is(err, sql.ErrNoRows):
+		return time.Time{}, false, nil
+	case err != nil:
+		return time.Time{}, false, fmt.Errorf("read last_sync: %w", err)
+	}
+	t, err = time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse last_sync %q: %w", v, err)
+	}
+	return t, true, nil
+}
+
+// SetLastSync records the timestamp of a completed sync cycle (stored UTC).
+func (s *Store) SetLastSync(t time.Time) error {
+	if _, err := s.db.Exec(
+		`INSERT INTO meta (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		lastSyncKey, t.UTC().Format(time.RFC3339),
+	); err != nil {
+		return fmt.Errorf("set last_sync: %w", err)
+	}
+	return nil
 }
 
 // TotalOpenPoints returns the sum of points (S=1, M=2, L=3; no-estimate=0)

@@ -54,8 +54,22 @@ func NewLiveClient(cfg Config) *LiveClient {
 // Estimated-Time-change transitions. Issues whose embedded changelog is
 // truncated have their full history fetched from the per-issue endpoint.
 func (c *LiveClient) FetchIssues(ctx context.Context) ([]Issue, error) {
-	jql := fmt.Sprintf("project = %q ORDER BY created ASC", c.cfg.ProjectKey)
+	return c.search(ctx, fmt.Sprintf("project = %q ORDER BY created ASC", c.cfg.ProjectKey))
+}
 
+// FetchIssuesUpdatedSince walks only issues updated at or after the given bound
+// via the same search path, so incremental syncs stay cheap. Jira interprets
+// the JQL date in its own timezone; the caller's overlap window absorbs any
+// resulting skew.
+func (c *LiveClient) FetchIssuesUpdatedSince(ctx context.Context, since time.Time) ([]Issue, error) {
+	jql := fmt.Sprintf("project = %q AND updated >= %q ORDER BY created ASC",
+		c.cfg.ProjectKey, since.Format("2006-01-02 15:04"))
+	return c.search(ctx, jql)
+}
+
+// search runs a token-paginated JQL search (expand=changelog) and maps every
+// matching issue into the domain snapshot shape.
+func (c *LiveClient) search(ctx context.Context, jql string) ([]Issue, error) {
 	var issues []Issue
 	pageToken := ""
 	for {

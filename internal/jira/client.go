@@ -37,5 +37,10 @@ type ChangelogEntry struct {
 // only seam through which the sync engine reaches Jira, and the only thing a
 // test needs to fake to exercise the whole pipeline.
 type Client interface {
+	// FetchIssues walks the whole project (used for the initial backfill).
 	FetchIssues(ctx context.Context) ([]Issue, error)
+	// FetchIssuesUpdatedSince fetches only issues updated at or after the given
+	// bound (used for cheap incremental syncs). The bound is expected to already
+	// include any clock-skew overlap the caller wants.
+	FetchIssuesUpdatedSince(ctx context.Context, since time.Time) ([]Issue, error)
 }
