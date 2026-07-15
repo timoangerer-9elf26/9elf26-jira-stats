@@ -78,11 +78,11 @@ func (s *Server) renderCompleted(w http.ResponseWriter, r *http.Request, name st
 // resolveRange turns the request query into a concrete [From, To) window. All
 // week maths run in the display timezone with Monday-start ISO weeks.
 //
-// "Active sprint": the store records only a sprint label per issue, not sprint
-// start/end dates or which sprint is active, so the real sprint window cannot be
-// derived from stored data. As a pragmatic, clearly-documented stand-in we use
-// the current Berlin ISO week (a one-week sprint being the team's norm). A later
-// ticket that persists sprint dates can replace just this branch.
+// "Active sprint" resolves to the real sprint window captured during sync
+// (active_sprint_start..active_sprint_end, converted to the display timezone).
+// When no active-sprint window is known (fresh DB, or no synced issue is in an
+// active sprint) it falls back to the current Berlin ISO week, the team's
+// one-week-sprint norm.
 func (s *Server) resolveRange(q url.Values) dateRange {
 	now := s.now().In(s.loc)
 	thisMonday := weekStart(now, s.loc)
@@ -96,7 +96,12 @@ func (s *Server) resolveRange(q url.Values) dateRange {
 		return s.makeRange(lastMonday, nextMonday, key)
 	case "custom":
 		return s.customRange(q.Get("from"), q.Get("to"), thisMonday, nextMonday)
-	case "this-week", "active-sprint":
+	case "active-sprint":
+		if sprint, ok, err := s.rollups.ActiveSprintWindow(); err == nil && ok {
+			return s.makeRange(sprint.Start.In(s.loc), sprint.End.In(s.loc), key)
+		}
+		return s.makeRange(thisMonday, nextMonday, key)
+	case "this-week":
 		return s.makeRange(thisMonday, nextMonday, key)
 	default:
 		return s.makeRange(thisMonday, nextMonday, defaultPreset)

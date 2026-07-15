@@ -36,6 +36,9 @@ type Rollups interface {
 	OpenByStatus() (store.OpenBoard, error)
 	CompletedInRange(from, to time.Time) (store.SizeTally, error)
 	LastSyncedAt() (t time.Time, ok bool, err error)
+	// ActiveSprintWindow reports the active sprint recorded during sync (name and
+	// [Start, End) bounds). ok is false when no active sprint is known.
+	ActiveSprintWindow() (store.ActiveSprint, bool, error)
 }
 
 // Server holds the parsed templates and the rollup source, and implements
@@ -119,10 +122,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// nowView is the "Now" page/fragment model: the open board plus a
+// nowView is the "Now" page/fragment model: the open board scoped to the active
+// sprint, the active sprint's name (empty when none is known), plus a
 // human-readable data-freshness label.
 type nowView struct {
 	Board      store.OpenBoard
+	SprintName string
 	UpdatedAgo string
 }
 
@@ -165,6 +170,13 @@ func (s *Server) nowView() (nowView, error) {
 	if err != nil {
 		return nowView{}, err
 	}
+	sprintName := ""
+	switch sprint, ok, err := s.rollups.ActiveSprintWindow(); {
+	case err != nil:
+		return nowView{}, err
+	case ok:
+		sprintName = sprint.Name
+	}
 	updated := "just now"
 	switch t, ok, err := s.rollups.LastSyncedAt(); {
 	case err != nil:
@@ -172,7 +184,7 @@ func (s *Server) nowView() (nowView, error) {
 	case ok:
 		updated = humanizeAgo(time.Since(t))
 	}
-	return nowView{Board: board, UpdatedAgo: updated}, nil
+	return nowView{Board: board, SprintName: sprintName, UpdatedAgo: updated}, nil
 }
 
 // humanizeAgo renders an elapsed duration as a compact "Ns/Nm/Nh ago" label,

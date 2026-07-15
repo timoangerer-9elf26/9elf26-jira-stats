@@ -18,9 +18,16 @@ type Issue struct {
 	Status         string // current workflow status, e.g. "In Progress"
 	StatusCategory string // Jira status category: "To Do", "In Progress", "Done"
 	Size           string // T-shirt size label: "S", "M", "L", or "" (no estimate)
-	Sprint         string
-	Assignee       string
-	Changelog      []ChangelogEntry
+	Sprint         string // current (last) sprint name on the issue, "" if none
+	// ActiveSprint is the name of the ACTIVE sprint (state=="active") the issue
+	// belongs to, or "" when the issue is in no active sprint (closed/future/none).
+	// All issues on a board share the same active sprint, so its window is the
+	// same across every issue that carries it.
+	ActiveSprint      string
+	ActiveSprintStart time.Time // start of the active sprint (zero when unknown)
+	ActiveSprintEnd   time.Time // end of the active sprint (zero when unknown)
+	Assignee          string
+	Changelog         []ChangelogEntry
 }
 
 // ChangelogEntry is a single field change recorded in a Jira issue's history.

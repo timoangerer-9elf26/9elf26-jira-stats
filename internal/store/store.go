@@ -75,16 +75,41 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 	if iss.Size != "" {
 		size = iss.Size
 	}
+	var activeSprint any
+	if iss.ActiveSprint != "" {
+		activeSprint = iss.ActiveSprint
+	}
 	if _, err := tx.Exec(
-		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, assignee, synced_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, synced_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
 		     type=excluded.type, summary=excluded.summary, status=excluded.status,
 		     status_category=excluded.status_category, size=excluded.size,
-		     sprint=excluded.sprint, assignee=excluded.assignee, synced_at=excluded.synced_at`,
-		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, iss.Assignee, syncedAt,
+		     sprint=excluded.sprint, active_sprint=excluded.active_sprint,
+		     assignee=excluded.assignee, synced_at=excluded.synced_at`,
+		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, syncedAt,
 	); err != nil {
 		return fmt.Errorf("upsert issue %s: %w", iss.Key, err)
+	}
+
+	// Capture the active sprint window in meta from any issue that carries it.
+	// All issues on a board share the same active sprint, so these writes are
+	// idempotent across the synced set; only active-sprint issues touch it, so a
+	// closed/future/no-sprint issue never clobbers a known window.
+	if iss.ActiveSprint != "" {
+		for _, kv := range [][2]string{
+			{activeSprintNameKey, iss.ActiveSprint},
+			{activeSprintStartKey, iss.ActiveSprintStart.UTC().Format(time.RFC3339)},
+			{activeSprintEndKey, iss.ActiveSprintEnd.UTC().Format(time.RFC3339)},
+		} {
+			if _, err := tx.Exec(
+				`INSERT INTO meta (key, value) VALUES (?, ?)
+				 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+				kv[0], kv[1],
+			); err != nil {
+				return fmt.Errorf("set %s: %w", kv[0], err)
+			}
+		}
 	}
 
 	for _, e := range iss.Changelog {
@@ -105,6 +130,67 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 // lastSyncKey is the meta row holding the RFC3339 UTC timestamp of the most
 // recent successful sync cycle.
 const lastSyncKey = "last_sync"
+
+// The active-sprint window captured during sync: its name and RFC3339 UTC
+// start/end instants. Read back via ActiveSprintWindow to scope the "Now" and
+// "Completed active sprint" views to the real sprint.
+const (
+	activeSprintNameKey  = "active_sprint_name"
+	activeSprintStartKey = "active_sprint_start"
+	activeSprintEndKey   = "active_sprint_end"
+)
+
+// ActiveSprint is the active sprint window recorded during sync: the sprint
+// name and its [Start, End) bounds (zero when the boundary was unknown).
+type ActiveSprint struct {
+	Name  string
+	Start time.Time
+	End   time.Time
+}
+
+// ActiveSprintWindow returns the active sprint window seen during sync. ok is
+// false when no active sprint has been recorded (a fresh DB, or no synced issue
+// belonged to an active sprint). Missing/blank start or end instants read back
+// as the zero time.
+func (s *Store) ActiveSprintWindow() (ActiveSprint, bool, error) {
+	name, ok, err := s.readMeta(activeSprintNameKey)
+	if err != nil || !ok {
+		return ActiveSprint{}, false, err
+	}
+	sprint := ActiveSprint{Name: name}
+	if sprint.Start, err = s.readMetaTime(activeSprintStartKey); err != nil {
+		return ActiveSprint{}, false, err
+	}
+	if sprint.End, err = s.readMetaTime(activeSprintEndKey); err != nil {
+		return ActiveSprint{}, false, err
+	}
+	return sprint, true, nil
+}
+
+// readMeta reads a single meta value; ok is false when the key is absent.
+func (s *Store) readMeta(key string) (value string, ok bool, err error) {
+	switch err = s.db.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&value); {
+	case errors.Is(err, sql.ErrNoRows):
+		return "", false, nil
+	case err != nil:
+		return "", false, fmt.Errorf("read meta %s: %w", key, err)
+	}
+	return value, true, nil
+}
+
+// readMetaTime reads a meta value as an RFC3339 instant, yielding the zero time
+// when the key is absent or blank.
+func (s *Store) readMetaTime(key string) (time.Time, error) {
+	v, ok, err := s.readMeta(key)
+	if err != nil || !ok || v == "" {
+		return time.Time{}, err
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse meta %s %q: %w", key, v, err)
+	}
+	return t, nil
+}
 
 // IssueCount returns the number of issue snapshots currently stored. The sync
 // loop uses it to decide between an initial full backfill and an incremental
@@ -213,10 +299,12 @@ var workflowOrder = []string{
 	"Released / Deployed",
 }
 
-// OpenByStatus tallies open work items per workflow status. Open = current
-// status not in the Done category, restricted to the rollup issue types
-// Task/Bug/Story (Epics and Sub-tasks are stored but excluded). Columns are
-// ordered by the known workflow with unknown statuses last, and a grand total
+// OpenByStatus tallies open work items in the ACTIVE sprint per workflow
+// status. Open = current status not in the Done category, restricted to the
+// rollup issue types Task/Bug/Story (Epics and Sub-tasks are stored but
+// excluded) and to issues in the active sprint (active_sprint IS NOT NULL);
+// whole-project open work outside the sprint is not shown. Columns are ordered
+// by the known workflow with unknown statuses last, and a grand total
 // aggregates every open status.
 func (s *Store) OpenByStatus() (OpenBoard, error) {
 	const query = `
@@ -224,6 +312,7 @@ func (s *Store) OpenByStatus() (OpenBoard, error) {
 		FROM issue
 		WHERE status_category != 'Done'
 		  AND type IN (` + rollupTypes + `)
+		  AND active_sprint IS NOT NULL
 		GROUP BY status`
 
 	rows, err := s.db.Query(query)

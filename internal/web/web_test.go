@@ -10,23 +10,35 @@ import (
 )
 
 // nowFixture is a known open-work mix driven through the whole slice (fake Jira
-// -> sync -> temp SQLite -> real handlers): several open statuses with S/M/L and
-// unsized issues, plus an Epic, a Sub-task and Done-category issues that must
-// never appear as open work.
+// -> sync -> temp SQLite -> real handlers). The active-sprint (KW29) open
+// Task/Bug/Story issues are the only ones the "Now" board should count: several
+// open statuses with S/M/L and unsized issues. Everything else must be excluded
+// — wrong types (Epic, Sub-task), Done-category issues, and issues that are open
+// Task/Bug/Story but NOT in the active sprint (a closed sprint, or no sprint).
 func nowFixture() *jira.FakeClient {
+	active := func(iss jira.Issue) jira.Issue {
+		iss.ActiveSprint = "KW29"
+		return iss
+	}
 	return &jira.FakeClient{Issues: []jira.Issue{
-		{Key: "DCAI-10", Type: "Story", Summary: "a", Status: "Refinement", StatusCategory: "To Do", Size: "S"},
-		{Key: "DCAI-11", Type: "Task", Summary: "b", Status: "Refinement", StatusCategory: "To Do", Size: ""},
-		{Key: "DCAI-12", Type: "Bug", Summary: "c", Status: "Ready to Do", StatusCategory: "To Do", Size: "M"},
-		{Key: "DCAI-13", Type: "Story", Summary: "d", Status: "In Progress", StatusCategory: "In Progress", Size: "L"},
-		{Key: "DCAI-14", Type: "Task", Summary: "e", Status: "In Progress", StatusCategory: "In Progress", Size: "S"},
-		{Key: "DCAI-15", Type: "Bug", Summary: "f", Status: "Review / Testing", StatusCategory: "In Progress", Size: "M"},
-		{Key: "DCAI-16", Type: "Story", Summary: "g", Status: "Review / Testing", StatusCategory: "In Progress", Size: ""},
-		// Excluded: wrong types (Epic, Sub-task) and Done-category issues.
-		{Key: "DCAI-17", Type: "Epic", Summary: "h", Status: "In Progress", StatusCategory: "In Progress", Size: "L"},
-		{Key: "DCAI-18", Type: "Sub-task", Summary: "i", Status: "In Progress", StatusCategory: "In Progress", Size: "S"},
-		{Key: "DCAI-19", Type: "Story", Summary: "j", Status: "DONE (This Sprint)", StatusCategory: "Done", Size: "M"},
+		active(jira.Issue{Key: "DCAI-10", Type: "Story", Summary: "a", Status: "Refinement", StatusCategory: "To Do", Size: "S"}),
+		active(jira.Issue{Key: "DCAI-11", Type: "Task", Summary: "b", Status: "Refinement", StatusCategory: "To Do", Size: ""}),
+		active(jira.Issue{Key: "DCAI-12", Type: "Bug", Summary: "c", Status: "Ready to Do", StatusCategory: "To Do", Size: "M"}),
+		active(jira.Issue{Key: "DCAI-13", Type: "Story", Summary: "d", Status: "In Progress", StatusCategory: "In Progress", Size: "L"}),
+		active(jira.Issue{Key: "DCAI-14", Type: "Task", Summary: "e", Status: "In Progress", StatusCategory: "In Progress", Size: "S"}),
+		active(jira.Issue{Key: "DCAI-15", Type: "Bug", Summary: "f", Status: "Review / Testing", StatusCategory: "In Progress", Size: "M"}),
+		active(jira.Issue{Key: "DCAI-16", Type: "Story", Summary: "g", Status: "Review / Testing", StatusCategory: "In Progress", Size: ""}),
+		// Excluded: wrong types (Epic, Sub-task) and Done-category issues, even in
+		// the active sprint (DCAI-19 is a Done Story in KW29).
+		active(jira.Issue{Key: "DCAI-17", Type: "Epic", Summary: "h", Status: "In Progress", StatusCategory: "In Progress", Size: "L"}),
+		active(jira.Issue{Key: "DCAI-18", Type: "Sub-task", Summary: "i", Status: "In Progress", StatusCategory: "In Progress", Size: "S"}),
+		active(jira.Issue{Key: "DCAI-19", Type: "Story", Summary: "j", Status: "DONE (This Sprint)", StatusCategory: "Done", Size: "M"}),
 		{Key: "DCAI-20", Type: "Story", Summary: "k", Status: "Released / Deployed", StatusCategory: "Done", Size: "L"},
+		// Excluded by the sprint scope: open Task/Bug/Story outside the active
+		// sprint. DCAI-21 is in a CLOSED sprint; DCAI-22 is in no sprint. If either
+		// leaked in, the In Progress / Ready to Do tallies below would change.
+		{Key: "DCAI-21", Type: "Story", Summary: "l", Status: "In Progress", StatusCategory: "In Progress", Size: "L", Sprint: "KW28"},
+		{Key: "DCAI-22", Type: "Task", Summary: "m", Status: "Ready to Do", StatusCategory: "To Do", Size: "M"},
 	}}
 }
 
@@ -64,6 +76,11 @@ func TestNowViewRendersOpenBoard(t *testing.T) {
 		}
 	}
 
+	// The active-sprint name is shown in the Now heading.
+	if !strings.Contains(body, "Open work in KW29") {
+		t.Errorf("Now view heading missing active-sprint name:\n%s", body)
+	}
+
 	// Done-category statuses must not appear as columns.
 	for _, absent := range []string{`data-status="DONE (This Sprint)"`, `data-status="Released / Deployed"`} {
 		if strings.Contains(body, absent) {
@@ -78,6 +95,28 @@ func TestNowViewRendersOpenBoard(t *testing.T) {
 		`data-status="In Progress"`,
 		`data-status="Review / Testing"`,
 	)
+}
+
+// TestNowViewNoActiveSprintRendersFriendlyEmptyState drives the Now view with a
+// fixture whose only issues are outside the active sprint (a closed sprint and
+// none), so the sprint-scoped board is empty and no active sprint is known. The
+// view must render a friendly empty state (200, no panic), not the excluded work.
+func TestNowViewNoActiveSprintRendersFriendlyEmptyState(t *testing.T) {
+	app := newTestApp(t, &jira.FakeClient{Issues: []jira.Issue{
+		{Key: "DCAI-21", Type: "Story", Summary: "l", Status: "In Progress", StatusCategory: "In Progress", Size: "L", Sprint: "KW28"},
+		{Key: "DCAI-22", Type: "Task", Summary: "m", Status: "Ready to Do", StatusCategory: "To Do", Size: "M"},
+	}})
+	body := get(t, app.URL+"/") // get() fails on a non-200 status.
+
+	if !strings.Contains(body, "No open work") {
+		t.Errorf("Now view without an active sprint should show a friendly empty state:\n%s", body)
+	}
+	// None of the out-of-sprint work should appear as a column.
+	for _, absent := range []string{`data-status="In Progress"`, `data-status="Ready to Do"`} {
+		if strings.Contains(body, absent) {
+			t.Errorf("Now view showed out-of-sprint column %q; must be excluded", absent)
+		}
+	}
 }
 
 // TestNowViewSelfPollsAndShowsFreshness asserts the HTMX self-poll wiring and

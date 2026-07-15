@@ -6,7 +6,10 @@
     "Status": "In Progress",
     "StatusCategory": "In Progress",
     "Size": "L",
-    "Sprint": "Sprint 42",
+    "Sprint": "KW29",
+    "ActiveSprint": "KW29",
+    "ActiveSprintStart": "2026-07-13T00:00:00Z",
+    "ActiveSprintEnd": "2026-07-20T00:00:00Z",
     "Assignee": "Ada",
     "Changelog": [
       {"ID": "1001", "Field": "status", "From": "Ready to Do", "To": "In Progress", "Timestamp": "2026-07-13T09:00:00Z"}
@@ -19,7 +22,10 @@
     "Status": "Ready to Do",
     "StatusCategory": "To Do",
     "Size": "M",
-    "Sprint": "Sprint 42",
+    "Sprint": "KW29",
+    "ActiveSprint": "KW29",
+    "ActiveSprintStart": "2026-07-13T00:00:00Z",
+    "ActiveSprintEnd": "2026-07-20T00:00:00Z",
     "Assignee": "Grace",
     "Changelog": []
   },
@@ -30,7 +36,10 @@
     "Status": "In Progress",
     "StatusCategory": "In Progress",
     "Size": "S",
-    "Sprint": "Sprint 42",
+    "Sprint": "KW29",
+    "ActiveSprint": "KW29",
+    "ActiveSprintStart": "2026-07-13T00:00:00Z",
+    "ActiveSprintEnd": "2026-07-20T00:00:00Z",
     "Assignee": "Alan",
     "Changelog": [
       {"ID": "1002", "Field": "status", "From": "Ready to Do", "To": "In Progress", "Timestamp": "2026-07-14T11:30:00Z"}
@@ -43,7 +52,10 @@
     "Status": "In Progress",
     "StatusCategory": "In Progress",
     "Size": "",
-    "Sprint": "Sprint 42",
+    "Sprint": "KW29",
+    "ActiveSprint": "KW29",
+    "ActiveSprintStart": "2026-07-13T00:00:00Z",
+    "ActiveSprintEnd": "2026-07-20T00:00:00Z",
     "Assignee": "",
     "Changelog": []
   },
@@ -54,7 +66,10 @@
     "Status": "DONE (This Sprint)",
     "StatusCategory": "Done",
     "Size": "M",
-    "Sprint": "Sprint 42",
+    "Sprint": "KW29",
+    "ActiveSprint": "KW29",
+    "ActiveSprintStart": "2026-07-13T00:00:00Z",
+    "ActiveSprintEnd": "2026-07-20T00:00:00Z",
     "Assignee": "Ada",
     "Changelog": [
       {"ID": "1003", "Field": "status", "From": "In Progress", "To": "Review / Testing", "Timestamp": "2026-07-12T15:00:00Z"},
@@ -68,8 +83,22 @@
     "Status": "In Progress",
     "StatusCategory": "In Progress",
     "Size": "L",
-    "Sprint": "Sprint 42",
+    "Sprint": "KW29",
+    "ActiveSprint": "KW29",
+    "ActiveSprintStart": "2026-07-13T00:00:00Z",
+    "ActiveSprintEnd": "2026-07-20T00:00:00Z",
     "Assignee": "Grace",
+    "Changelog": []
+  },
+  {
+    "Key": "DCAI-7",
+    "Type": "Story",
+    "Summary": "Legacy cleanup from a closed sprint",
+    "Status": "In Progress",
+    "StatusCategory": "In Progress",
+    "Size": "M",
+    "Sprint": "KW28",
+    "Assignee": "Alan",
     "Changelog": []
   }
 ]

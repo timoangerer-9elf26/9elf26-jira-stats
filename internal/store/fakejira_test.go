@@ -42,7 +42,10 @@ var searchPages = map[string]string{
             "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate", "name": "In Progress"}},
             "assignee": {"displayName": "Ada"},
             "customfield_10040": {"value": "Large"},
-            "customfield_10020": [{"name": "Sprint 42", "state": "active"}]
+            "customfield_10020": [
+              {"name": "Sprint 41", "state": "closed", "startDate": "2026-07-06T07:00:00.000Z", "endDate": "2026-07-13T07:00:00.000Z"},
+              {"name": "Sprint 42", "state": "active", "startDate": "2026-07-13T07:00:00.000Z", "endDate": "2026-07-20T07:00:00.000Z"}
+            ]
           },
           "changelog": {
             "startAt": 0, "maxResults": 100, "total": 2,
@@ -62,7 +65,7 @@ var searchPages = map[string]string{
             "status": {"name": "Ready to Do", "statusCategory": {"key": "new", "name": "To Do"}},
             "assignee": null,
             "customfield_10040": {"value": "Medium"},
-            "customfield_10020": [{"name": "Sprint 42", "state": "active"}]
+            "customfield_10020": [{"name": "Sprint 42", "state": "active", "startDate": "2026-07-13T07:00:00.000Z", "endDate": "2026-07-20T07:00:00.000Z"}]
           },
           "changelog": {
             "startAt": 0, "maxResults": 100, "total": 1,

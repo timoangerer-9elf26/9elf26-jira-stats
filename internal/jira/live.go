@@ -120,7 +120,7 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		return Issue{}, fmt.Errorf("changelog for %s: %w", dto.Key, err)
 	}
 
-	return Issue{
+	iss := Issue{
 		Key:            dto.Key,
 		Type:           dto.Fields.IssueType.Name,
 		Summary:        dto.Fields.Summary,
@@ -130,7 +130,19 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		Sprint:         currentSprint(dto.Fields.Sprint),
 		Assignee:       assigneeName(dto.Fields.Assignee),
 		Changelog:      entries,
-	}, nil
+	}
+
+	if sp, ok := activeSprint(dto.Fields.Sprint); ok {
+		iss.ActiveSprint = sp.Name
+		if iss.ActiveSprintStart, err = optionalJiraTime(sp.StartDate); err != nil {
+			return Issue{}, fmt.Errorf("active sprint start for %s: %w", dto.Key, err)
+		}
+		if iss.ActiveSprintEnd, err = optionalJiraTime(sp.EndDate); err != nil {
+			return Issue{}, fmt.Errorf("active sprint end for %s: %w", dto.Key, err)
+		}
+	}
+
+	return iss, nil
 }
 
 // fetchFullChangelog pages the per-issue /changelog endpoint until the whole
@@ -228,7 +240,10 @@ type selectDTO struct {
 }
 
 type sprintDTO struct {
-	Name string `json:"name"`
+	Name      string `json:"name"`
+	State     string `json:"state"` // "active", "closed", or "future"
+	StartDate string `json:"startDate"`
+	EndDate   string `json:"endDate"`
 }
 
 // changelogDTO is the search-embedded changelog; changelogResponse is the
@@ -283,6 +298,28 @@ func currentSprint(sprints []sprintDTO) string {
 		return ""
 	}
 	return sprints[len(sprints)-1].Name
+}
+
+// activeSprint returns the issue's active sprint entry (state == "active"), if
+// any. An issue belongs to the active sprint iff one of its sprint entries is
+// active; all issues on a board share the same active sprint, so this both
+// identifies membership and yields the sprint's name and window.
+func activeSprint(sprints []sprintDTO) (sprintDTO, bool) {
+	for _, sp := range sprints {
+		if sp.State == "active" {
+			return sp, true
+		}
+	}
+	return sprintDTO{}, false
+}
+
+// optionalJiraTime parses a Jira sprint boundary timestamp, treating an empty
+// value as the zero time (the boundary is simply unknown).
+func optionalJiraTime(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	return parseJiraTime(s)
 }
 
 func assigneeName(u *userDTO) string {

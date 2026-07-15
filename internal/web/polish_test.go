@@ -102,6 +102,9 @@ func (failingRollups) CompletedInRange(_, _ time.Time) (store.SizeTally, error) 
 func (failingRollups) LastSyncedAt() (time.Time, bool, error) {
 	return time.Time{}, false, errBoom
 }
+func (failingRollups) ActiveSprintWindow() (store.ActiveSprint, bool, error) {
+	return store.ActiveSprint{}, false, errBoom
+}
 
 var errBoom = &boomError{}
 

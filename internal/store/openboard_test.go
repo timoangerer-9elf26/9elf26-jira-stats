@@ -15,6 +15,7 @@ import (
 func TestOpenByStatusTalliesOpenWorkByStatus(t *testing.T) {
 	st := openTempStore(t)
 
+	// save adds an issue in the active sprint (the "Now" board scope).
 	save := func(key, typ, status, category, size string) {
 		t.Helper()
 		if err := st.SaveIssue(jira.Issue{
@@ -24,13 +25,14 @@ func TestOpenByStatusTalliesOpenWorkByStatus(t *testing.T) {
 			Status:         status,
 			StatusCategory: category,
 			Size:           size,
+			ActiveSprint:   "KW29",
 		}, "2026-07-15T10:00:00Z"); err != nil {
 			t.Fatalf("save %s: %v", key, err)
 		}
 	}
 
 	// Open work spread across several workflow statuses, with a mix of sizes and
-	// some unsized (no-estimate) issues.
+	// some unsized (no-estimate) issues — all in the active sprint.
 	save("DCAI-10", "Story", "Refinement", "To Do", "S")
 	save("DCAI-11", "Task", "Refinement", "To Do", "")
 	save("DCAI-12", "Bug", "Ready to Do", "To Do", "M")
@@ -46,6 +48,14 @@ func TestOpenByStatusTalliesOpenWorkByStatus(t *testing.T) {
 	save("DCAI-18", "Sub-task", "In Progress", "In Progress", "S")
 	save("DCAI-19", "Story", "DONE (This Sprint)", "Done", "M")
 	save("DCAI-20", "Story", "Released / Deployed", "Done", "L")
+	// Open Task/Bug/Story but NOT in the active sprint: excluded by the sprint
+	// scope even though they would otherwise be open work.
+	if err := st.SaveIssue(jira.Issue{
+		Key: "DCAI-30", Type: "Story", Summary: "DCAI-30", Status: "In Progress",
+		StatusCategory: "In Progress", Size: "L", // no ActiveSprint
+	}, "2026-07-15T10:00:00Z"); err != nil {
+		t.Fatalf("save DCAI-30: %v", err)
+	}
 
 	board, err := st.OpenByStatus()
 	if err != nil {

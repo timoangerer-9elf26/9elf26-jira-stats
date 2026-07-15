@@ -5,7 +5,7 @@
          hx-swap="outerHTML"
          class="mt-8">
   <div class="flex items-baseline justify-between">
-    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Open work by status</h2>
+    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500" data-testid="now-heading">Open work{{if .SprintName}} in {{.SprintName}}{{end}}</h2>
     <span class="text-xs text-slate-400" data-testid="updated-ago">updated {{.UpdatedAgo}}</span>
   </div>
 
@@ -13,7 +13,7 @@
     {{range .Board.Columns}}
       {{template "status-column" .}}
     {{else}}
-      <p class="col-span-full text-sm text-slate-500">No open work.</p>
+      <p class="col-span-full text-sm text-slate-500" data-testid="now-empty">No open work{{if .SprintName}} in {{.SprintName}}{{else}} in the active sprint{{end}}.</p>
     {{end}}
   </div>
 
