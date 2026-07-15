@@ -1,3 +1,63 @@
+{{/* page-head renders the shared document <head>: charset/viewport, the
+     embedded Tailwind stylesheet and vendored HTMX, and a per-page <title>
+     (the string argument). */}}
+{{define "page-head"}}
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.}}</title>
+  <link rel="stylesheet" href="/static/output.css">
+  <script src="/static/htmx.min.js"></script>
+</head>
+{{end}}
+
+{{/* nav is the one shared top navigation across all three views. The string
+     argument is the active view key ("now" | "completed" | "velocity"); the
+     matching tab is marked current. */}}
+{{define "nav"}}
+<nav data-testid="nav" aria-label="Primary" class="flex gap-1 border-b border-slate-200">
+  {{template "nav-link" (dict "Href" "/" "Label" "Now" "Key" "now" "Active" .)}}
+  {{template "nav-link" (dict "Href" "/completed" "Label" "Completed" "Key" "completed" "Active" .)}}
+  {{template "nav-link" (dict "Href" "/velocity" "Label" "Velocity" "Key" "velocity" "Active" .)}}
+</nav>
+{{end}}
+
+{{/* nav-link is one tab of the shared nav. Takes a dict of Href, Label, Key and
+     the currently-Active key; the active tab gets aria-current and an
+     underlined, emphasized style. */}}
+{{define "nav-link"}}
+<a href="{{.Href}}" data-nav="{{.Key}}"{{if eq .Key .Active}} aria-current="page"{{end}}
+   class="-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors
+          {{if eq .Key .Active}}border-slate-900 text-slate-900{{else}}border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-900{{end}}">{{.Label}}</a>
+{{end}}
+
+{{/* page-header is the shared title block below the nav. The string argument is
+     the per-view subtitle shown under the constant product title. */}}
+{{define "page-header"}}
+<header class="mt-6">
+  <h1 class="text-2xl font-semibold tracking-tight">9elf26 Jira Stats</h1>
+  <p class="mt-1 text-sm text-slate-500">{{.}}</p>
+</header>
+{{end}}
+
+{{/* app-error is the friendly full-page error state shown when a rollup query
+     fails, so a broken read renders a clear message instead of a bare 500. */}}
+{{define "app-error"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "page-head" "Something went wrong — 9elf26 Jira Stats"}}
+<body class="min-h-screen bg-slate-50 text-slate-900">
+  <div class="mx-auto max-w-6xl px-6 py-12">
+    {{template "nav" ""}}
+    <div data-testid="app-error" class="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+      <h1 class="text-base font-semibold">Couldn't load this view</h1>
+      <p class="mt-1">A rollup query failed. The dashboard may still be syncing — please try again in a moment.</p>
+    </div>
+  </div>
+</body>
+</html>
+{{end}}
+
 {{/* status-column renders one workflow-status column of the open board. It
      takes a store.StatusColumn (Status plus the embedded SizeTally). */}}
 {{define "status-column"}}
@@ -102,6 +162,9 @@
     <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Completed work</h2>
     <span class="text-xs text-slate-400" data-testid="completed-range">{{.Range.Label}}</span>
   </div>
+  {{if .Empty}}
+  <p data-testid="completed-empty" class="mt-4 text-sm text-slate-500">No completed work in this range yet.</p>
+  {{else}}
   <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5">
     {{with .Tally}}
     {{template "stat-card" (dict "Label" "S" "Value" .S "Testid" "completed:s")}}
@@ -111,5 +174,6 @@
     {{template "stat-card" (dict "Label" "Points" "Value" .Points "Testid" "completed:points")}}
     {{end}}
   </div>
+  {{end}}
 </div>
 {{end}}

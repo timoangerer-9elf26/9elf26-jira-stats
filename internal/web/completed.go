@@ -41,10 +41,13 @@ type dateRange struct {
 }
 
 // completedView is the model for the Completed page and its results fragment.
+// Empty is true when nothing completed in the resolved range, so the results
+// show a friendly note instead of a row of zeros.
 type completedView struct {
 	Tally   store.SizeTally
 	Range   dateRange
 	Presets []preset
+	Empty   bool
 }
 
 // handleCompleted renders the full standalone Completed page.
@@ -62,10 +65,10 @@ func (s *Server) renderCompleted(w http.ResponseWriter, r *http.Request, name st
 	rng := s.resolveRange(r.URL.Query())
 	tally, err := s.rollups.CompletedInRange(rng.From, rng.To)
 	if err != nil {
-		http.Error(w, "failed to compute rollup", http.StatusInternalServerError)
+		s.renderError(w)
 		return
 	}
-	view := completedView{Tally: tally, Range: rng, Presets: completedPresets}
+	view := completedView{Tally: tally, Range: rng, Presets: completedPresets, Empty: tally == store.SizeTally{}}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, name, view); err != nil {
 		http.Error(w, "failed to render page", http.StatusInternalServerError)

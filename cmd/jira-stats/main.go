@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -36,13 +37,19 @@ func run() error {
 	dbPath := getenv("DB_PATH", "jira-stats.db")
 
 	tz := getenv("TZ", "Europe/Berlin")
-	if _, err := time.LoadLocation(tz); err != nil {
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
 		return err
 	}
 
 	interval, err := time.ParseDuration(getenv("SYNC_INTERVAL", "60s"))
 	if err != nil {
 		return fmt.Errorf("invalid SYNC_INTERVAL: %w", err)
+	}
+
+	velocityWeeks, err := parseVelocityWeeks(getenv("VELOCITY_WEEKS", "10"))
+	if err != nil {
+		return err
 	}
 
 	st, err := store.Open(dbPath)
@@ -66,7 +73,7 @@ func run() error {
 	go syncer.Run(ctx, interval)
 	log.Printf("syncing %s from Jira every %s", getenv("JIRA_PROJECT", "DCAI"), interval)
 
-	srv, err := web.NewServer(st)
+	srv, err := web.NewServer(st, web.WithLocation(loc), web.WithVelocityWeeks(velocityWeeks))
 	if err != nil {
 		return err
 	}
@@ -108,6 +115,16 @@ func jiraClient() (jira.Client, error) {
 		ProjectKey: getenv("JIRA_PROJECT", "DCAI"),
 		BoardID:    getenv("JIRA_BOARD_ID", "8"),
 	}), nil
+}
+
+// parseVelocityWeeks reads the VELOCITY_WEEKS setting: how many trailing ISO
+// weeks the Velocity view shows. It must be a positive integer.
+func parseVelocityWeeks(v string) (int, error) {
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("invalid VELOCITY_WEEKS %q: must be a positive integer", v)
+	}
+	return n, nil
 }
 
 func getenv(key, fallback string) string {

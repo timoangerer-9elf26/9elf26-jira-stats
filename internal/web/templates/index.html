@@ -1,23 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>9elf26 Jira Stats</title>
-  <link rel="stylesheet" href="/static/output.css">
-  <script src="/static/htmx.min.js"></script>
-</head>
+{{template "page-head" "Now — 9elf26 Jira Stats"}}
 <body class="min-h-screen bg-slate-50 text-slate-900">
   <main class="mx-auto max-w-6xl px-6 py-12">
-    <nav class="text-sm text-slate-500">
-      <span class="font-medium text-slate-900">Now</span>
-      <span class="mx-2 text-slate-300">/</span>
-      <a href="/completed" class="hover:text-slate-900">Completed</a>
-      <span class="mx-2 text-slate-300">/</span>
-      <a href="/velocity" class="hover:text-slate-900">Velocity</a>
-    </nav>
-    <h1 class="mt-2 text-2xl font-semibold tracking-tight">9elf26 Jira Stats</h1>
-    <p class="mt-1 text-sm text-slate-500">Now &mdash; a live board of open work by workflow status.</p>
+    {{template "nav" "now"}}
+    {{template "page-header" "Now — a live board of open work by workflow status."}}
     {{template "now-board" .}}
   </main>
 </body>

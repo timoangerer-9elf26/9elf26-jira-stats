@@ -58,6 +58,17 @@ func WithClock(now func() time.Time) Option {
 	return func(s *Server) { s.now = now }
 }
 
+// WithLocation overrides the timezone used for all date maths and week labels
+// (default Europe/Berlin), so the deployment's TZ setting is honored. A nil
+// location is ignored, keeping the default.
+func WithLocation(loc *time.Location) Option {
+	return func(s *Server) {
+		if loc != nil {
+			s.loc = loc
+		}
+	}
+}
+
 // WithVelocityWeeks overrides how many trailing ISO weeks the Velocity view
 // shows (spec: ~8–12). Non-positive values are ignored, keeping the default.
 func WithVelocityWeeks(n int) Option {
@@ -129,11 +140,22 @@ func (s *Server) handleNowBoard(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderNow(w http.ResponseWriter, name string) {
 	view, err := s.nowView()
 	if err != nil {
-		http.Error(w, "failed to compute rollup", http.StatusInternalServerError)
+		s.renderError(w)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, name, view); err != nil {
+		http.Error(w, "failed to render page", http.StatusInternalServerError)
+	}
+}
+
+// renderError renders the shared friendly error page for a failed rollup query,
+// so a broken read shows a clear message (HTTP 500) rather than a bare status or
+// a stack trace.
+func (s *Server) renderError(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusInternalServerError)
+	if err := s.templates.ExecuteTemplate(w, "app-error", nil); err != nil {
 		http.Error(w, "failed to render page", http.StatusInternalServerError)
 	}
 }

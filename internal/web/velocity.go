@@ -22,15 +22,18 @@ type velocityWeek struct {
 
 // velocityView is the Velocity page model: the trailing ISO weeks oldest-first
 // with no gaps — every week in the window is present, empty weeks included.
+// Empty is true when no week in the window has any completed points, so the
+// view can show a friendly note (e.g. before the first sync populates history).
 type velocityView struct {
 	Weeks []velocityWeek
+	Empty bool
 }
 
 // handleVelocity renders the full standalone Velocity page.
 func (s *Server) handleVelocity(w http.ResponseWriter, r *http.Request) {
 	view, err := s.velocityView()
 	if err != nil {
-		http.Error(w, "failed to compute rollup", http.StatusInternalServerError)
+		s.renderError(w)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -65,7 +68,7 @@ func (s *Server) velocityView() (velocityView, error) {
 	for i := range weeks {
 		weeks[i].Percent = barPercent(weeks[i].Points, maxPoints)
 	}
-	return velocityView{Weeks: weeks}, nil
+	return velocityView{Weeks: weeks, Empty: maxPoints == 0}, nil
 }
 
 // isoWeekLabel formats a week's Monday as its Europe/Berlin ISO-week label
