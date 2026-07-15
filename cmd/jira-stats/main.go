@@ -82,7 +82,11 @@ func run() error {
 	go syncer.Run(ctx, interval)
 	log.Printf("syncing %s from Jira every %s", getenv("JIRA_PROJECT", "DCAI"), interval)
 
-	srv, err := web.NewServer(st, web.WithLocation(loc), web.WithVelocityWeeks(velocityWeeks))
+	srv, err := web.NewServer(st,
+		web.WithLocation(loc),
+		web.WithVelocityWeeks(velocityWeeks),
+		web.WithJiraBaseURL(os.Getenv("JIRA_BASE_URL")),
+	)
 	if err != nil {
 		return err
 	}

@@ -299,6 +299,33 @@ var workflowOrder = []string{
 	"Released / Deployed",
 }
 
+// workflowRank maps each known workflow status to its left-to-right position,
+// derived once from workflowOrder so the ordering lives in exactly one place.
+var workflowRank = func() map[string]int {
+	m := make(map[string]int, len(workflowOrder))
+	for i, status := range workflowOrder {
+		m[status] = i
+	}
+	return m
+}()
+
+// workflowLess reports whether status a precedes status b in the DCAI workflow.
+// Known statuses sort in workflow order ahead of any unknown status (e.g. one
+// newly added in Jira); unknown statuses sort alphabetically among themselves.
+// It is the single ordering rule shared by every per-status projection.
+func workflowLess(a, b string) bool {
+	ra, aKnown := workflowRank[a]
+	rb, bKnown := workflowRank[b]
+	switch {
+	case aKnown && bKnown:
+		return ra < rb
+	case aKnown != bKnown:
+		return aKnown // known statuses before unknown ones
+	default:
+		return a < b
+	}
+}
+
 // OpenByStatus tallies open work items in the ACTIVE sprint per workflow
 // status. Open = current status not in the Done category, restricted to the
 // rollup issue types Task/Bug/Story (Epics and Sub-tasks are stored but
@@ -345,21 +372,8 @@ func (s *Store) OpenByStatus() (OpenBoard, error) {
 // sortColumnsByWorkflow orders columns by the known workflow; any status not in
 // the workflow sorts after the known ones, alphabetically among themselves.
 func sortColumnsByWorkflow(cols []StatusColumn) {
-	rank := make(map[string]int, len(workflowOrder))
-	for i, status := range workflowOrder {
-		rank[status] = i
-	}
 	sort.SliceStable(cols, func(i, j int) bool {
-		ri, iKnown := rank[cols[i].Status]
-		rj, jKnown := rank[cols[j].Status]
-		switch {
-		case iKnown && jKnown:
-			return ri < rj
-		case iKnown != jKnown:
-			return iKnown // known statuses before unknown ones
-		default:
-			return cols[i].Status < cols[j].Status
-		}
+		return workflowLess(cols[i].Status, cols[j].Status)
 	})
 }
 
@@ -423,4 +437,78 @@ func (s *Store) CompletedInRange(from, to time.Time) (SizeTally, error) {
 		return SizeTally{}, fmt.Errorf("completed in range: %w", err)
 	}
 	return tally, nil
+}
+
+// BoardCard is one issue on the sprint board — the fields a card renders.
+type BoardCard struct {
+	Key     string
+	Summary string
+	Size    string // T-shirt label 'S'/'M'/'L', or "" for no estimate
+	Type    string // Task, Bug or Story
+}
+
+// BoardColumn is one workflow-status column of the sprint board and the
+// active-sprint cards currently in that status.
+type BoardColumn struct {
+	Status string
+	Cards  []BoardCard
+}
+
+// Board is the active-sprint Kanban projection: one column per workflow status
+// present in the active sprint, in workflow order (unknown statuses last). The
+// board is NOT filtered to open work, so Done-category columns (e.g. DONE (This
+// Sprint), Released / Deployed) appear alongside the open ones — it mirrors the
+// Jira sprint board for data-quality validation.
+type Board struct {
+	Columns []BoardColumn
+}
+
+// ActiveSprintBoard projects the ACTIVE sprint as a Kanban board: every
+// active-sprint issue (active_sprint IS NOT NULL) of a rollup type
+// (Task/Bug/Story; Epics and Sub-tasks are stored but excluded, consistent with
+// the rollups) grouped into a column per workflow status. Columns follow the
+// workflow order with unknown statuses last; cards within a column are ordered
+// by issue key for a stable render. Unlike OpenByStatus this keeps Done-category
+// statuses, since a sprint board shows its done columns too.
+func (s *Store) ActiveSprintBoard() (Board, error) {
+	const query = `
+		SELECT status, key, summary, size, type
+		FROM issue
+		WHERE active_sprint IS NOT NULL
+		  AND type IN (` + rollupTypes + `)
+		ORDER BY key`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return Board{}, fmt.Errorf("active sprint board: %w", err)
+	}
+	defer rows.Close()
+
+	// Collect cards per status, preserving the key-ordered arrival order, then
+	// build the columns in workflow order.
+	byStatus := map[string][]BoardCard{}
+	var statuses []string
+	for rows.Next() {
+		var status string
+		var card BoardCard
+		var size sql.NullString
+		if err := rows.Scan(&status, &card.Key, &card.Summary, &size, &card.Type); err != nil {
+			return Board{}, fmt.Errorf("scan board card: %w", err)
+		}
+		card.Size = size.String // "" when NULL (no estimate)
+		if _, seen := byStatus[status]; !seen {
+			statuses = append(statuses, status)
+		}
+		byStatus[status] = append(byStatus[status], card)
+	}
+	if err := rows.Err(); err != nil {
+		return Board{}, fmt.Errorf("iterate board cards: %w", err)
+	}
+
+	sort.SliceStable(statuses, func(i, j int) bool { return workflowLess(statuses[i], statuses[j]) })
+	board := Board{Columns: make([]BoardColumn, 0, len(statuses))}
+	for _, status := range statuses {
+		board.Columns = append(board.Columns, BoardColumn{Status: status, Cards: byStatus[status]})
+	}
+	return board, nil
 }

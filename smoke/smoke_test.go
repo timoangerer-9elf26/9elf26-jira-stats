@@ -137,6 +137,7 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 		marker string // substring that must appear in the body ("" = 200 only)
 	}{
 		{"/", "Now"},
+		{"/board", "Board"},
 		{"/completed", "Completed"},
 		{"/velocity", "Velocity"},
 		{"/now/board", ""},

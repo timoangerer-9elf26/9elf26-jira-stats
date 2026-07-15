@@ -44,6 +44,7 @@ func TestSharedNavRendersWithActiveItem(t *testing.T) {
 
 	cases := []struct{ path, activeKey string }{
 		{"/", "now"},
+		{"/board", "board"},
 		{"/completed", "completed"},
 		{"/velocity", "velocity"},
 	}
@@ -53,7 +54,7 @@ func TestSharedNavRendersWithActiveItem(t *testing.T) {
 		if !strings.Contains(body, `data-testid="nav"`) {
 			t.Errorf("%s: missing shared nav\n%s", c.path, body)
 		}
-		for _, link := range []string{`href="/"`, `href="/completed"`, `href="/velocity"`} {
+		for _, link := range []string{`href="/"`, `href="/board"`, `href="/completed"`, `href="/velocity"`} {
 			if !strings.Contains(body, link) {
 				t.Errorf("%s: nav missing link %q", c.path, link)
 			}
@@ -105,6 +106,9 @@ func (failingRollups) LastSyncedAt() (time.Time, bool, error) {
 func (failingRollups) ActiveSprintWindow() (store.ActiveSprint, bool, error) {
 	return store.ActiveSprint{}, false, errBoom
 }
+func (failingRollups) ActiveSprintBoard() (store.Board, error) {
+	return store.Board{}, errBoom
+}
 
 var errBoom = &boomError{}
 
@@ -122,7 +126,7 @@ func TestRollupErrorRendersFriendlyMessage(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	for _, path := range []string{"/", "/completed", "/velocity"} {
+	for _, path := range []string{"/", "/board", "/completed", "/velocity"} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)

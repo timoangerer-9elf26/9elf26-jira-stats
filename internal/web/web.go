@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
@@ -39,6 +40,9 @@ type Rollups interface {
 	// ActiveSprintWindow reports the active sprint recorded during sync (name and
 	// [Start, End) bounds). ok is false when no active sprint is known.
 	ActiveSprintWindow() (store.ActiveSprint, bool, error)
+	// ActiveSprintBoard is the whole active sprint as a per-status Kanban board
+	// (Done columns included) for the /board data-quality view.
+	ActiveSprintBoard() (store.Board, error)
 }
 
 // Server holds the parsed templates and the rollup source, and implements
@@ -50,6 +54,7 @@ type Server struct {
 	now           func() time.Time
 	loc           *time.Location
 	velocityWeeks int
+	jiraBaseURL   string
 }
 
 // Option configures a Server at construction.
@@ -70,6 +75,14 @@ func WithLocation(loc *time.Location) Option {
 			s.loc = loc
 		}
 	}
+}
+
+// WithJiraBaseURL sets the Jira site base URL used to build board-card links
+// (`<base>/browse/<KEY>`). The trailing slash is trimmed so the joined path
+// never doubles up. When left empty (unset in config), board cards render
+// without a link rather than a broken href.
+func WithJiraBaseURL(base string) Option {
+	return func(s *Server) { s.jiraBaseURL = strings.TrimRight(base, "/") }
 }
 
 // WithVelocityWeeks overrides how many trailing ISO weeks the Velocity view
@@ -111,6 +124,7 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.handleIndex)
 	s.mux.HandleFunc("GET /now/board", s.handleNowBoard)
+	s.mux.HandleFunc("GET /board", s.handleBoard)
 	s.mux.HandleFunc("GET /completed", s.handleCompleted)
 	s.mux.HandleFunc("GET /completed/results", s.handleCompletedResults)
 	s.mux.HandleFunc("GET /velocity", s.handleVelocity)
