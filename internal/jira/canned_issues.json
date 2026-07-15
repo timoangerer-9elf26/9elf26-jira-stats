@@ -1,0 +1,75 @@
+[
+  {
+    "Key": "DCAI-1",
+    "Type": "Story",
+    "Summary": "Wire up the dashboard shell",
+    "Status": "In Progress",
+    "StatusCategory": "In Progress",
+    "Size": "L",
+    "Sprint": "Sprint 42",
+    "Assignee": "Ada",
+    "Changelog": [
+      {"ID": "1001", "Field": "status", "From": "Ready to Do", "To": "In Progress", "Timestamp": "2026-07-13T09:00:00Z"}
+    ]
+  },
+  {
+    "Key": "DCAI-2",
+    "Type": "Task",
+    "Summary": "Define the issue snapshot schema",
+    "Status": "Ready to Do",
+    "StatusCategory": "To Do",
+    "Size": "M",
+    "Sprint": "Sprint 42",
+    "Assignee": "Grace",
+    "Changelog": []
+  },
+  {
+    "Key": "DCAI-3",
+    "Type": "Bug",
+    "Summary": "Rollup ignores no-estimate tickets",
+    "Status": "In Progress",
+    "StatusCategory": "In Progress",
+    "Size": "S",
+    "Sprint": "Sprint 42",
+    "Assignee": "Alan",
+    "Changelog": [
+      {"ID": "1002", "Field": "status", "From": "Ready to Do", "To": "In Progress", "Timestamp": "2026-07-14T11:30:00Z"}
+    ]
+  },
+  {
+    "Key": "DCAI-4",
+    "Type": "Task",
+    "Summary": "Unestimated chore",
+    "Status": "In Progress",
+    "StatusCategory": "In Progress",
+    "Size": "",
+    "Sprint": "Sprint 42",
+    "Assignee": "",
+    "Changelog": []
+  },
+  {
+    "Key": "DCAI-5",
+    "Type": "Story",
+    "Summary": "Vendor htmx and embed assets",
+    "Status": "DONE (This Sprint)",
+    "StatusCategory": "Done",
+    "Size": "M",
+    "Sprint": "Sprint 42",
+    "Assignee": "Ada",
+    "Changelog": [
+      {"ID": "1003", "Field": "status", "From": "In Progress", "To": "Review / Testing", "Timestamp": "2026-07-12T15:00:00Z"},
+      {"ID": "1004", "Field": "status", "From": "Review / Testing", "To": "DONE (This Sprint)", "Timestamp": "2026-07-13T08:00:00Z"}
+    ]
+  },
+  {
+    "Key": "DCAI-6",
+    "Type": "Epic",
+    "Summary": "Sprint stats dashboard (container)",
+    "Status": "In Progress",
+    "StatusCategory": "In Progress",
+    "Size": "L",
+    "Sprint": "Sprint 42",
+    "Assignee": "Grace",
+    "Changelog": []
+  }
+]

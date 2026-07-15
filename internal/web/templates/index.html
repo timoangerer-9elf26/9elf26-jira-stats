@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>9elf26 Jira Stats</title>
+  <link rel="stylesheet" href="/static/output.css">
+  <script src="/static/htmx.min.js"></script>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-900">
+  <main class="mx-auto max-w-3xl px-6 py-12">
+    <h1 class="text-2xl font-semibold tracking-tight">9elf26 Jira Stats</h1>
+    <p class="mt-1 text-sm text-slate-500">Walking skeleton &mdash; one real rollup from synced data.</p>
+
+    <section class="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Total open points</h2>
+      <p class="mt-2 text-5xl font-bold tabular-nums" data-testid="total-open-points">{{.TotalOpenPoints}}</p>
+    </section>
+  </main>
+</body>
+</html>
