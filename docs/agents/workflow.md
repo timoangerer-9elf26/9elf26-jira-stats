@@ -22,9 +22,9 @@ A PR must be green before merging. CI (`.github/workflows/ci.yml`, job **`build-
 make check      # unit/integration tests + smoke tests
 ```
 
-**Enforcement status: convention, not yet GitHub-enforced.** Making `build-and-test` a *required* status check (so GitHub refuses to merge a red or not-yet-reported PR) needs a repository ruleset or branch protection — and GitHub gates that behind **GitHub Pro for a private repo, or making the repo public** (the API returns `403 "Upgrade to GitHub Pro or make this repository public"`). This repo is currently private on the free plan, so the gate is enforced by **discipline**: don't merge red; the merging agent confirms CI/`make check` is green first.
+**Enforcement status: GitHub-enforced.** The repository ruleset **`require-ci-green`** (active, no bypass — applies to everyone including the maintainer) requires the `build-and-test` check on `main`, so GitHub refuses to merge a PR whose CI failed or hasn't reported. In practice this means `gh pr merge` is blocked until the PR's CI run is green — so wait for CI (or run `make check` first to avoid pushing a red PR). Enforcement became possible once the repo was made **public** (required-status-check rulesets are gated behind GitHub Pro on private repos).
 
-To turn on real enforcement once the repo is on a supporting plan (Pro) or made public, apply this ruleset (loose mode, no bypass so it applies to everyone including the maintainer):
+The ruleset is reproducible via `gh api` (loose mode, no bypass); re-apply it if it's ever deleted:
 
 ```sh
 gh api -X POST repos/timoangerer-9elf26/9elf26-jira-stats/rulesets --input - <<'JSON'
