@@ -47,6 +47,17 @@ check: test smoke ## Run all tests + smoke tests (CI / pre-deploy gate).
 run: ## Run the dashboard locally (falls back to fake Jira without creds).
 	go run ./cmd/jira-stats
 
+# Ephemeral, per-review launcher: builds the binary, picks a free port, boots it
+# against the fake backend with a pinned clock, and records tmp/review/{url,pid,log}.
+# All logic lives in the scripts (see docs/adr/0001-...); these are thin wrappers.
+.PHONY: review-up
+review-up: ## Boot an ephemeral review instance; writes tmp/review/{url,pid,log}.
+	@scripts/review-up.sh
+
+.PHONY: review-down
+review-down: ## Stop the review instance and remove its temp DB + tmp/review state.
+	@scripts/review-down.sh
+
 # Hot-reload dev loop: rebuilds and restarts on every .go/.html/.css save via
 # air (config in .air.toml). Templates/CSS are embedded, so air's rebuild is
 # what makes edits show up; pair with the Now board's 30s browser poll.
