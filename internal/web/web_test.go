@@ -28,11 +28,20 @@ func nowFixture() *jira.FakeClient {
 		active(jira.Issue{Key: "DCAI-14", Type: "Task", Summary: "e", Status: "In Progress", StatusCategory: "In Progress", Size: "S"}),
 		active(jira.Issue{Key: "DCAI-15", Type: "Bug", Summary: "f", Status: "Review / Testing", StatusCategory: "In Progress", Size: "M"}),
 		active(jira.Issue{Key: "DCAI-16", Type: "Story", Summary: "g", Status: "Review / Testing", StatusCategory: "In Progress", Size: ""}),
-		// Excluded: wrong types (Epic, Sub-task) and Done-category issues, even in
-		// the active sprint (DCAI-19 is a Done Story in KW29).
+		// Excluded: wrong types (Epic, Sub-task) and non-open statuses, even in the
+		// active sprint. "Open" is a positive membership test of the four open
+		// buckets, so none of these count:
 		active(jira.Issue{Key: "DCAI-17", Type: "Epic", Summary: "h", Status: "In Progress", StatusCategory: "In Progress", Size: "L"}),
 		active(jira.Issue{Key: "DCAI-18", Type: "Sub-task", Summary: "i", Status: "In Progress", StatusCategory: "In Progress", Size: "S"}),
 		active(jira.Issue{Key: "DCAI-19", Type: "Story", Summary: "j", Status: "DONE (This Sprint)", StatusCategory: "Done", Size: "M"}),
+		// Ready for Release is a Done state — finished, not open — so it stays off
+		// the Now board (and Velocity counts it; see the cross-view agreement test).
+		active(jira.Issue{Key: "DCAI-23", Type: "Bug", Summary: "n", Status: "Ready for Release", StatusCategory: "Done", Size: "L"}),
+		// Triage is pre-sprint: Jira's category is "To Do", so a status_category
+		// "not Done" test would WRONGLY show it as open. The explicit bucket excludes it.
+		active(jira.Issue{Key: "DCAI-24", Type: "Story", Summary: "o", Status: "Triage", StatusCategory: "To Do", Size: "S"}),
+		// Canceled is abandoned: excluded from both open and finished.
+		active(jira.Issue{Key: "DCAI-25", Type: "Task", Summary: "p", Status: "Canceled", StatusCategory: "Done", Size: "M"}),
 		{Key: "DCAI-20", Type: "Story", Summary: "k", Status: "Released / Deployed", StatusCategory: "Done", Size: "L"},
 		// Excluded by the sprint scope: open Task/Bug/Story outside the active
 		// sprint. DCAI-21 is in a CLOSED sprint; DCAI-22 is in no sprint. If either
@@ -81,10 +90,18 @@ func TestNowViewRendersOpenBoard(t *testing.T) {
 		t.Errorf("Now view heading missing active-sprint name:\n%s", body)
 	}
 
-	// Done-category statuses must not appear as columns.
-	for _, absent := range []string{`data-status="DONE (This Sprint)"`, `data-status="Released / Deployed"`} {
+	// Only the four open buckets appear. Every non-open status — the Done states
+	// (including Ready for Release), pre-sprint Triage and abandoned Canceled —
+	// must not appear as a column, even though they are active-sprint work.
+	for _, absent := range []string{
+		`data-status="DONE (This Sprint)"`,
+		`data-status="Ready for Release"`,
+		`data-status="Released / Deployed"`,
+		`data-status="Triage"`,
+		`data-status="Canceled"`,
+	} {
 		if strings.Contains(body, absent) {
-			t.Errorf("Now view shows Done-category column %q; must be excluded", absent)
+			t.Errorf("Now view shows non-open column %q; must be excluded", absent)
 		}
 	}
 
