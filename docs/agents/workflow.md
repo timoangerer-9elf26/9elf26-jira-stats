@@ -16,15 +16,15 @@ Group small, unrelated one-offs into a single PR rather than making a PR per tri
 
 ## The gate
 
-A PR must be green before merging — and this is **enforced by GitHub**, not just convention. A repository ruleset on `main` requires the CI status check **`build-and-test`** (the job in `.github/workflows/ci.yml`); GitHub refuses to merge a PR whose CI failed or hasn't reported. So run the same suite locally before pushing to avoid a red PR:
+A PR must be green before merging. CI (`.github/workflows/ci.yml`, job **`build-and-test`**) runs the full suite — gofmt, `go vet`, build, `go test ./...`, smoke — on every push to `main` and every PR, and cancels superseded runs on a PR (`concurrency` with `cancel-in-progress`). Run the same suite locally before pushing:
 
 ```sh
 make check      # unit/integration tests + smoke tests
 ```
 
-CI runs the same steps (gofmt, vet, build, `go test ./...`, smoke) on every push to `main` and every PR, and cancels superseded runs on a PR (`concurrency` with `cancel-in-progress`).
+**Enforcement status: convention, not yet GitHub-enforced.** Making `build-and-test` a *required* status check (so GitHub refuses to merge a red or not-yet-reported PR) needs a repository ruleset or branch protection — and GitHub gates that behind **GitHub Pro for a private repo, or making the repo public** (the API returns `403 "Upgrade to GitHub Pro or make this repository public"`). This repo is currently private on the free plan, so the gate is enforced by **discipline**: don't merge red; the merging agent confirms CI/`make check` is green first.
 
-The ruleset is reproducible via `gh api` (loose mode, no bypass so it applies to everyone including the maintainer):
+To turn on real enforcement once the repo is on a supporting plan (Pro) or made public, apply this ruleset (loose mode, no bypass so it applies to everyone including the maintainer):
 
 ```sh
 gh api -X POST repos/timoangerer-9elf26/9elf26-jira-stats/rulesets --input - <<'JSON'
