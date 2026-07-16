@@ -287,22 +287,51 @@ type OpenBoard struct {
 	Total   SizeTally
 }
 
-// workflowOrder is the DCAI workflow left-to-right. Open status columns render
-// in this order; a status not listed here (e.g. one newly added in Jira) sorts
-// after the known ones, alphabetically.
+// workflowOrder is the FULL DCAI workflow left-to-right, the single source of
+// truth for column order (from the Jira status dropdown, the authoritative
+// source). Per-status columns render in this order; a status not listed here
+// (e.g. one newly added in Jira) sorts after the known ones, alphabetically.
+// Note this lists every valid status including the two the sprint board keeps
+// off-board (Triage, Canceled) — boardColumnOrder derives the board's seeded set
+// from this list.
 var workflowOrder = []string{
+	"Triage",
 	"Refinement",
-	"Ready to Do",
+	"Ready To Do",
 	"In Progress",
 	"Review / Testing",
+	"Ready for Release",
 	"DONE (This Sprint)",
 	"Released / Deployed",
+	"Canceled",
 }
+
+// boardExcludedStatuses are workflow statuses intentionally kept off the sprint
+// board (a maintainer decision): active-sprint issues in these never render —
+// no column, no card. Keyed by normalizeStatus for case-insensitive matching.
+var boardExcludedStatuses = map[string]bool{
+	normalizeStatus("Triage"):   true,
+	normalizeStatus("Canceled"): true,
+}
+
+// boardColumnOrder is the fixed, ordered set of workflow columns the sprint
+// board always renders (left→right), even when empty. It is workflowOrder minus
+// the board-excluded statuses, so the column order lives in exactly one place.
+var boardColumnOrder = func() []string {
+	cols := make([]string, 0, len(workflowOrder))
+	for _, status := range workflowOrder {
+		if !boardExcludedStatuses[normalizeStatus(status)] {
+			cols = append(cols, status)
+		}
+	}
+	return cols
+}()
 
 // workflowRank maps each known workflow status to its left-to-right position,
 // derived once from workflowOrder so the ordering lives in exactly one place.
-// Keys are normalized (see normalizeStatus) so Jira casing quirks — e.g.
-// "Ready To Do" vs the constant's "Ready to Do" — still match their position.
+// Keys are normalized (see normalizeStatus) so Jira casing quirks — e.g. a
+// status synced as "Ready to Do" vs the constant's "Ready To Do" — still match
+// their position.
 var workflowRank = func() map[string]int {
 	m := make(map[string]int, len(workflowOrder))
 	for i, status := range workflowOrder {
@@ -465,23 +494,37 @@ type BoardColumn struct {
 	Cards  []BoardCard
 }
 
-// Board is the active-sprint Kanban projection: one column per workflow status
-// present in the active sprint, in workflow order (unknown statuses last). The
-// board is NOT filtered to open work, so Done-category columns (e.g. DONE (This
-// Sprint), Released / Deployed) appear alongside the open ones — it mirrors the
-// Jira sprint board for data-quality validation.
+// Board is the active-sprint Kanban projection: the fixed, ordered set of
+// workflow columns (boardColumnOrder), always present when an active sprint
+// exists — even the empty ones. The board is NOT filtered to open work, so
+// Done-category columns (e.g. DONE (This Sprint), Released / Deployed) appear
+// alongside the open ones — it mirrors the Jira sprint board for data-quality
+// validation. When no active sprint is recorded, Columns is empty and the view
+// renders its "no active sprint" state instead.
 type Board struct {
 	Columns []BoardColumn
 }
 
-// ActiveSprintBoard projects the ACTIVE sprint as a Kanban board: every
-// active-sprint issue (active_sprint IS NOT NULL) of a rollup type
-// (Task/Bug/Story; Epics and Sub-tasks are stored but excluded, consistent with
-// the rollups) grouped into a column per workflow status. Columns follow the
-// workflow order with unknown statuses last; cards within a column are ordered
-// by issue key for a stable render. Unlike OpenByStatus this keeps Done-category
-// statuses, since a sprint board shows its done columns too.
+// ActiveSprintBoard projects the ACTIVE sprint as a Kanban board. Seeding the
+// fixed column set (boardColumnOrder) is gated on an active sprint existing: with
+// none recorded it returns an empty Board so the view shows its "no active
+// sprint" state rather than seven empty columns. When an active sprint exists it
+// always renders those columns — even empty ones — and places every active-sprint
+// issue (active_sprint IS NOT NULL) of a rollup type (Task/Bug/Story; Epics and
+// Sub-tasks are stored but excluded, consistent with the rollups) into its column
+// by case-insensitive status match. Issues in a board-excluded status (Triage,
+// Canceled) are dropped. A card in a status that is neither seeded nor excluded
+// (a brand-new Jira status) surfaces as an extra column AFTER the known ones
+// rather than being dropped, so the board never silently loses a card. Cards
+// within a column keep issue-key order for a stable render.
 func (s *Store) ActiveSprintBoard() (Board, error) {
+	// Seeding the fixed columns is gated on an active sprint existing.
+	if _, ok, err := s.ActiveSprintWindow(); err != nil {
+		return Board{}, err
+	} else if !ok {
+		return Board{}, nil
+	}
+
 	const query = `
 		SELECT status, key, summary, size, type
 		FROM issue
@@ -495,10 +538,21 @@ func (s *Store) ActiveSprintBoard() (Board, error) {
 	}
 	defer rows.Close()
 
-	// Collect cards per status, preserving the key-ordered arrival order, then
-	// build the columns in workflow order.
-	byStatus := map[string][]BoardCard{}
-	var statuses []string
+	// Seed the fixed columns up front so every one renders even when empty, and
+	// index them by normalized status for case-insensitive card placement.
+	seeded := make([]BoardColumn, len(boardColumnOrder))
+	seededIndex := make(map[string]int, len(boardColumnOrder))
+	for i, status := range boardColumnOrder {
+		seeded[i] = BoardColumn{Status: status}
+		seededIndex[normalizeStatus(status)] = i
+	}
+
+	// Cards in a status that is neither seeded nor board-excluded (a brand-new
+	// Jira status) collect here, preserving key-ordered arrival, and surface as
+	// extra columns after the known ones.
+	extraByStatus := map[string][]BoardCard{}
+	var extraStatuses []string
+
 	for rows.Next() {
 		var status string
 		var card BoardCard
@@ -507,19 +561,28 @@ func (s *Store) ActiveSprintBoard() (Board, error) {
 			return Board{}, fmt.Errorf("scan board card: %w", err)
 		}
 		card.Size = size.String // "" when NULL (no estimate)
-		if _, seen := byStatus[status]; !seen {
-			statuses = append(statuses, status)
+		norm := normalizeStatus(status)
+		switch i, seededHere := seededIndex[norm]; {
+		case boardExcludedStatuses[norm]:
+			// Off-board by maintainer decision: drop the card entirely.
+		case seededHere:
+			seeded[i].Cards = append(seeded[i].Cards, card)
+		default:
+			if _, seen := extraByStatus[status]; !seen {
+				extraStatuses = append(extraStatuses, status)
+			}
+			extraByStatus[status] = append(extraByStatus[status], card)
 		}
-		byStatus[status] = append(byStatus[status], card)
 	}
 	if err := rows.Err(); err != nil {
 		return Board{}, fmt.Errorf("iterate board cards: %w", err)
 	}
 
-	sort.SliceStable(statuses, func(i, j int) bool { return workflowLess(statuses[i], statuses[j]) })
-	board := Board{Columns: make([]BoardColumn, 0, len(statuses))}
-	for _, status := range statuses {
-		board.Columns = append(board.Columns, BoardColumn{Status: status, Cards: byStatus[status]})
+	sort.SliceStable(extraStatuses, func(i, j int) bool { return workflowLess(extraStatuses[i], extraStatuses[j]) })
+	board := Board{Columns: make([]BoardColumn, 0, len(seeded)+len(extraStatuses))}
+	board.Columns = append(board.Columns, seeded...)
+	for _, status := range extraStatuses {
+		board.Columns = append(board.Columns, BoardColumn{Status: status, Cards: extraByStatus[status]})
 	}
 	return board, nil
 }
