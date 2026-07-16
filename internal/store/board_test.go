@@ -119,6 +119,54 @@ func TestActiveSprintBoardEmptyWhenNoActiveSprint(t *testing.T) {
 	}
 }
 
+// TestActiveSprintBoardOrdersReadyToDoByWorkflowCaseInsensitively guards the
+// fix for the "Ready To Do" column sorting to the end of the board. The real
+// Jira status is spelled "Ready To Do" (capital T), which differs in casing
+// from the workflow constant; the workflow ordering must match case-insensitively
+// so the column lands between "Refinement" and "In Progress".
+func TestActiveSprintBoardOrdersReadyToDoByWorkflowCaseInsensitively(t *testing.T) {
+	st := openTempStore(t)
+
+	active := func(key, typ, status, category string) {
+		t.Helper()
+		if err := st.SaveIssue(jira.Issue{
+			Key:            key,
+			Type:           typ,
+			Summary:        "summary of " + key,
+			Status:         status,
+			StatusCategory: category,
+			ActiveSprint:   "KW29",
+		}, "2026-07-15T10:00:00Z"); err != nil {
+			t.Fatalf("save %s: %v", key, err)
+		}
+	}
+
+	active("DCAI-10", "Story", "Refinement", "To Do")
+	// The actual Jira casing: "Ready To Do" (capital T), not the constant's
+	// "Ready to Do". It must still sort into its workflow position.
+	active("DCAI-11", "Story", "Ready To Do", "To Do")
+	active("DCAI-12", "Task", "In Progress", "In Progress")
+
+	board, err := st.ActiveSprintBoard()
+	if err != nil {
+		t.Fatalf("ActiveSprintBoard: %v", err)
+	}
+
+	wantOrder := []string{"Refinement", "Ready To Do", "In Progress"}
+	gotOrder := make([]string, len(board.Columns))
+	for i, c := range board.Columns {
+		gotOrder[i] = c.Status
+	}
+	if len(gotOrder) != len(wantOrder) {
+		t.Fatalf("columns = %v, want %v", gotOrder, wantOrder)
+	}
+	for i, want := range wantOrder {
+		if gotOrder[i] != want {
+			t.Fatalf("column %d = %q, want %q (order %v)", i, gotOrder[i], want, gotOrder)
+		}
+	}
+}
+
 func assertCards(t *testing.T, status string, got, want []BoardCard) {
 	t.Helper()
 	if len(got) != len(want) {
