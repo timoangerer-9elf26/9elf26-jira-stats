@@ -2,9 +2,10 @@ package store
 
 // Projection-level tests for the "Completed" rollup (Done-crossing semantics).
 //
-// A completion is the transition crossing FROM a non-Done status INTO a
-// Done-category status ("DONE (This Sprint)" or "Released / Deployed"). Moves
-// within the Done category do not recount; on reopen the latest crossing wins.
+// A completion is the transition crossing FROM a non-Done status INTO the
+// explicit Done set ("DONE (This Sprint)", "Ready for Release" or
+// "Released / Deployed"). Moves within the Done set do not recount; on reopen
+// the latest crossing wins.
 // Counts use the CURRENT size (S=1/M=2/L=3, NULL = no estimate) and only
 // Task/Bug/Story types. A completion falls in a range if its instant is in
 // [from, to). All range boundaries here are computed in Europe/Berlin,
@@ -52,7 +53,8 @@ func saveWithTransitions(t *testing.T, st *Store, key, typ, size string, current
 	}
 	// current status_category: Done if the current status is a Done status.
 	cat := "In Progress"
-	if current == "DONE (This Sprint)" || current == "Released / Deployed" {
+	switch current {
+	case "DONE (This Sprint)", "Ready for Release", "Released / Deployed":
 		cat = "Done"
 	}
 	if err := st.SaveIssue(jira.Issue{
@@ -181,4 +183,56 @@ func TestCompletedInRangeBerlinWeekBoundary(t *testing.T) {
 		t.Fatalf("CompletedInRange this week: %v", err)
 	}
 	assertTally(t, "this week (from Monday)", got, SizeTally{})
+}
+
+// TestCompletedInRangeCountsCrossingIntoReadyForRelease asserts a ticket whose
+// (latest) Done-crossing lands in "Ready for Release" is counted as completed —
+// Ready for Release is part of the authoritative Done set, so a crossing
+// straight from a non-Done status into it is a completion.
+func TestCompletedInRangeCountsCrossingIntoReadyForRelease(t *testing.T) {
+	loc := berlin(t)
+	st := openTempStore(t)
+
+	from, to := mondayWeek(t, loc, 2026, time.July, 15)
+	cross := time.Date(2026, time.July, 15, 14, 0, 0, 0, loc)
+
+	saveWithTransitions(t, st, "DCAI-40", "Story", "M", "Ready for Release",
+		xition{"rfr1", "Review / Testing", "Ready for Release", cross})
+
+	got, err := st.CompletedInRange(from, to)
+	if err != nil {
+		t.Fatalf("CompletedInRange: %v", err)
+	}
+	assertTally(t, "crossed into Ready for Release", got, SizeTally{M: 1, Points: 2})
+}
+
+// TestCompletedInRangeDoneToReadyForReleaseIsWithinSet asserts a move from
+// DONE (This Sprint) to Ready for Release is a within-Done-set move, not a new
+// completion: the ticket is counted once at its original crossing week and not
+// recounted in the week of the within-set move.
+func TestCompletedInRangeDoneToReadyForReleaseIsWithinSet(t *testing.T) {
+	loc := berlin(t)
+	st := openTempStore(t)
+
+	crossWeekFrom, crossWeekTo := mondayWeek(t, loc, 2026, time.July, 15)
+	moveWeekFrom, moveWeekTo := mondayWeek(t, loc, 2026, time.July, 22)
+
+	cross := time.Date(2026, time.July, 15, 9, 0, 0, 0, loc) // crossing into Done
+	move := time.Date(2026, time.July, 23, 9, 0, 0, 0, loc)  // within-Done move, later week
+
+	saveWithTransitions(t, st, "DCAI-41", "Story", "L", "Ready for Release",
+		xition{"m1", "Review / Testing", "DONE (This Sprint)", cross},
+		xition{"m2", "DONE (This Sprint)", "Ready for Release", move})
+
+	got, err := st.CompletedInRange(crossWeekFrom, crossWeekTo)
+	if err != nil {
+		t.Fatalf("CompletedInRange crossing week: %v", err)
+	}
+	assertTally(t, "original crossing week", got, SizeTally{L: 1, Points: 3})
+
+	got, err = st.CompletedInRange(moveWeekFrom, moveWeekTo)
+	if err != nil {
+		t.Fatalf("CompletedInRange within-set move week: %v", err)
+	}
+	assertTally(t, "within-Done-set move week", got, SizeTally{})
 }

@@ -74,8 +74,8 @@ func TestBoardShowsActiveSprintCardsInColumns(t *testing.T) {
 		`data-status="Ready To Do"`,
 		`data-status="In Progress"`,
 		`data-status="Review / Testing"`,
-		`data-status="Ready for Release"`,
 		`data-status="DONE (This Sprint)"`,
+		`data-status="Ready for Release"`,
 		`data-status="Released / Deployed"`,
 	)
 

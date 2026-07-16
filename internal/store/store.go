@@ -266,11 +266,48 @@ func scanTally(row interface{ Scan(...any) error }) (SizeTally, error) {
 // Epics and Sub-tasks are stored but excluded.
 const rollupTypes = `'Task', 'Bug', 'Story'`
 
-// doneStatuses are the workflow statuses in Jira's "Done" category for DCAI. A
-// completion is a transition crossing from a non-Done status into one of these;
-// a move BETWEEN them is within-category and is not a new completion. Kept as a
-// small constant here — a later ticket may make the Done set configurable.
-var doneStatuses = []string{"DONE (This Sprint)", "Released / Deployed"}
+// openStatuses and doneStatuses are the authoritative DCAI status buckets — the
+// SINGLE source of truth for open/finished across every view (Now board,
+// Weekly, Velocity, Completed). They come straight from CONTEXT.md's "Ticket
+// status buckets", NOT from Jira's status_category, which does not match the
+// DCAI buckets: Jira categorizes Canceled as "Done" and Triage as "To Do", so a
+// category-based test would wrongly count Canceled as finished and Triage as
+// open. Both buckets are matched case-insensitively (see normalizeStatus).
+//
+// openStatuses is a POSITIVE membership test: "open" means one of exactly these
+// four live-sprint statuses, not "any status Jira doesn't call Done". Triage
+// (pre-sprint), Canceled (abandoned) and every Done status are therefore not
+// open, and an unknown status never counts as open either.
+var openStatuses = []string{
+	"Refinement",
+	"Ready To Do",
+	"In Progress",
+	"Review / Testing",
+}
+
+// doneStatuses is the authoritative "finished" bucket: work completed within the
+// sprint. Ready for Release sits AFTER DONE (This Sprint) in the workflow and is
+// a done state, so it belongs here; Canceled is abandoned (not finished) and is
+// excluded. A completion is a transition crossing from a non-Done status into
+// this set; a move BETWEEN the three is within-set and is not a new completion.
+var doneStatuses = []string{
+	"DONE (This Sprint)",
+	"Ready for Release",
+	"Released / Deployed",
+}
+
+// statusInClause builds a case-insensitive `LOWER(col) IN (...)` match against a
+// status bucket: the "?,?,..." placeholder list plus the normalized status
+// values to bind. Both are derived from the one bucket definition so open/done
+// membership tests never drift from openStatuses/doneStatuses.
+func statusInClause(statuses []string) (placeholders string, args []any) {
+	placeholders = strings.TrimSuffix(strings.Repeat("?,", len(statuses)), ",")
+	args = make([]any, len(statuses))
+	for i, st := range statuses {
+		args[i] = normalizeStatus(st)
+	}
+	return placeholders, args
+}
 
 // StatusColumn is the tally of open work in a single workflow status — one
 // column of the "Now" board.
@@ -300,8 +337,8 @@ var workflowOrder = []string{
 	"Ready To Do",
 	"In Progress",
 	"Review / Testing",
-	"Ready for Release",
 	"DONE (This Sprint)",
+	"Ready for Release",
 	"Released / Deployed",
 	"Canceled",
 }
@@ -367,22 +404,26 @@ func workflowLess(a, b string) bool {
 }
 
 // OpenByStatus tallies open work items in the ACTIVE sprint per workflow
-// status. Open = current status not in the Done category, restricted to the
-// rollup issue types Task/Bug/Story (Epics and Sub-tasks are stored but
-// excluded) and to issues in the active sprint (active_sprint IS NOT NULL);
-// whole-project open work outside the sprint is not shown. Columns are ordered
-// by the known workflow with unknown statuses last, and a grand total
-// aggregates every open status.
+// status. Open is a POSITIVE membership test against the authoritative
+// openStatuses bucket (case-insensitive) — NOT "status_category != 'Done'" —
+// so Triage (which Jira categorizes as "To Do"), Canceled, the Done statuses
+// and any unknown status are all excluded. It is restricted to the rollup issue
+// types Task/Bug/Story (Epics and Sub-tasks are stored but excluded) and to
+// issues in the active sprint (active_sprint IS NOT NULL); whole-project open
+// work outside the sprint is not shown. Columns are ordered by the known
+// workflow with unknown statuses last, and a grand total aggregates every open
+// status.
 func (s *Store) OpenByStatus() (OpenBoard, error) {
-	const query = `
+	openIn, openArgs := statusInClause(openStatuses)
+	query := `
 		SELECT status, ` + sizeTallyColumns + `
 		FROM issue
-		WHERE status_category != 'Done'
+		WHERE LOWER(status) IN (` + openIn + `)
 		  AND type IN (` + rollupTypes + `)
 		  AND active_sprint IS NOT NULL
 		GROUP BY status`
 
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(query, openArgs...)
 	if err != nil {
 		return OpenBoard{}, fmt.Errorf("open by status: %w", err)
 	}
@@ -449,7 +490,7 @@ func (s *Store) LastSyncedAt() (t time.Time, ok bool, err error) {
 // this method — one call per ISO week — rather than reimplementing crossing
 // detection.
 func (s *Store) CompletedInRange(from, to time.Time) (SizeTally, error) {
-	in := strings.TrimSuffix(strings.Repeat("?,", len(doneStatuses)), ",")
+	doneIn, doneArgs := statusInClause(doneStatuses)
 	query := `
 		SELECT ` + sizeTallyColumns + `
 		FROM issue
@@ -457,19 +498,16 @@ func (s *Store) CompletedInRange(from, to time.Time) (SizeTally, error) {
 			SELECT issue_key, MAX(transitioned_at) AS completed_at
 			FROM status_transition
 			WHERE field = 'status'
-			  AND to_status IN (` + in + `)
-			  AND (from_status IS NULL OR from_status NOT IN (` + in + `))
+			  AND LOWER(to_status) IN (` + doneIn + `)
+			  AND (from_status IS NULL OR LOWER(from_status) NOT IN (` + doneIn + `))
 			GROUP BY issue_key
 		) crossing ON crossing.issue_key = issue.key
 		WHERE issue.type IN (` + rollupTypes + `)
 		  AND crossing.completed_at >= ? AND crossing.completed_at < ?`
 
 	args := make([]any, 0, 2*len(doneStatuses)+2)
-	for range 2 {
-		for _, st := range doneStatuses {
-			args = append(args, st)
-		}
-	}
+	args = append(args, doneArgs...)
+	args = append(args, doneArgs...)
 	args = append(args, from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
 
 	tally, err := scanTally(s.db.QueryRow(query, args...))

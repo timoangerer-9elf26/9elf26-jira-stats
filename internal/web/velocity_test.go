@@ -141,6 +141,52 @@ func TestVelocityWeekCountConfigurable(t *testing.T) {
 	assertOrder(t, body, `data-week="KW26"`, `data-week="KW27"`, `data-week="KW28"`, `data-week="KW29"`)
 }
 
+// TestNowAndVelocityAgreeReadyForReleaseIsFinished is the cross-view consistency
+// guard for #30: a ticket whose latest status is "Ready for Release" must be
+// treated as FINISHED (not open) by both the Now board and Velocity. Both read
+// the same explicit buckets, so the board excludes it while Velocity counts its
+// completion — they can never disagree the way a status_category-based board
+// could. A genuinely open ticket is included so the board still renders.
+func TestNowAndVelocityAgreeReadyForReleaseIsFinished(t *testing.T) {
+	loc := berlin(t)
+	// "now" is Wed 2026-07-15; this ISO week is Mon 2026-07-13 = KW29.
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
+
+	active := func(iss jira.Issue) jira.Issue { iss.ActiveSprint = "KW29"; return iss }
+	app := newTestAppWith(t, &jira.FakeClient{Issues: []jira.Issue{
+		// Genuinely open work — appears on the Now board.
+		active(jira.Issue{Key: "DCAI-40", Type: "Story", Summary: "open one", Status: "In Progress", StatusCategory: "In Progress", Size: "S"}),
+		// Crossed into Ready for Release this week: finished, not open.
+		active(jira.Issue{Key: "DCAI-50", Type: "Bug", Summary: "released one", Status: "Ready for Release", StatusCategory: "Done", Size: "M",
+			Changelog: []jira.ChangelogEntry{
+				{ID: "rfr", Field: "status", From: "Review / Testing", To: "Ready for Release", Timestamp: time.Date(2026, time.July, 14, 9, 0, 0, 0, loc)},
+			}}),
+	}}, now)
+
+	// Now board: the open ticket appears; the Ready-for-Release ticket does not,
+	// and the board total counts only the open work (S = 1 point).
+	nowBody := get(t, app.URL+"/")
+	if !strings.Contains(nowBody, `data-status="In Progress"`) {
+		t.Errorf("Now board missing the open In Progress column:\n%s", nowBody)
+	}
+	if strings.Contains(nowBody, `data-status="Ready for Release"`) {
+		t.Errorf("Now board shows Ready for Release as open; it is finished:\n%s", nowBody)
+	}
+	if strings.Contains(nowBody, "DCAI-50") {
+		t.Errorf("Now board leaked the finished Ready-for-Release ticket DCAI-50:\n%s", nowBody)
+	}
+	if !strings.Contains(nowBody, `data-testid="total:points">1<`) {
+		t.Errorf("Now board total should count only the open ticket (1 point):\n%s", nowBody)
+	}
+
+	// Velocity: the SAME ticket is counted as completed this week (M = 2 points),
+	// so the two views agree it is finished.
+	velBody := get(t, app.URL+"/velocity")
+	if !strings.Contains(velBody, `data-testid="week-points:KW29">2<`) {
+		t.Errorf("Velocity should count the Ready-for-Release completion this week (2 points):\n%s", velBody)
+	}
+}
+
 // TestVelocityReachableFromNow asserts the Velocity view is linked from an
 // existing page so it is reachable (full cross-view nav is a later ticket).
 func TestVelocityReachableFromNow(t *testing.T) {

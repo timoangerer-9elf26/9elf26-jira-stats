@@ -24,8 +24,8 @@ var boardColumns = []string{
 	"Ready To Do",
 	"In Progress",
 	"Review / Testing",
-	"Ready for Release",
 	"DONE (This Sprint)",
+	"Ready for Release",
 	"Released / Deployed",
 }
 
@@ -287,6 +287,40 @@ func TestActiveSprintBoardAppendsUnknownStatusColumn(t *testing.T) {
 	assertCards(t, "Brand New Status", last.Cards, []BoardCard{
 		{Key: "DCAI-99", Summary: "summary of DCAI-99", Size: "", Type: "Task"},
 	})
+}
+
+// TestWorkflowOrderPlacesReadyForReleaseAfterDone asserts the single source of
+// truth for column order (workflowOrder) lists Ready for Release immediately
+// after DONE (This Sprint) and before Released / Deployed — the DCAI workflow
+// order that both /board and /now render by. Guards against regressing the
+// ordering fix.
+func TestWorkflowOrderPlacesReadyForReleaseAfterDone(t *testing.T) {
+	rankOf := func(status string) (int, bool) {
+		for i, s := range workflowOrder {
+			if s == status {
+				return i, true
+			}
+		}
+		return 0, false
+	}
+	done, ok := rankOf("DONE (This Sprint)")
+	if !ok {
+		t.Fatalf("workflowOrder missing DONE (This Sprint): %v", workflowOrder)
+	}
+	rfr, ok := rankOf("Ready for Release")
+	if !ok {
+		t.Fatalf("workflowOrder missing Ready for Release: %v", workflowOrder)
+	}
+	released, ok := rankOf("Released / Deployed")
+	if !ok {
+		t.Fatalf("workflowOrder missing Released / Deployed: %v", workflowOrder)
+	}
+	if rfr != done+1 {
+		t.Errorf("Ready for Release should sit immediately after DONE (This Sprint): DONE=%d, Ready for Release=%d (order %v)", done, rfr, workflowOrder)
+	}
+	if released != rfr+1 {
+		t.Errorf("Released / Deployed should sit immediately after Ready for Release: Ready for Release=%d, Released / Deployed=%d (order %v)", rfr, released, workflowOrder)
+	}
 }
 
 func assertCards(t *testing.T, status string, got, want []BoardCard) {
