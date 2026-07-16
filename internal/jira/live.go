@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -160,6 +162,11 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		return Issue{}, fmt.Errorf("changelog for %s: %w", dto.Key, err)
 	}
 
+	sprintChanges, err := toSprintChanges(histories)
+	if err != nil {
+		return Issue{}, fmt.Errorf("sprint changelog for %s: %w", dto.Key, err)
+	}
+
 	iss := Issue{
 		Key:            dto.Key,
 		Type:           dto.Fields.IssueType.Name,
@@ -170,6 +177,7 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		Sprint:         currentSprint(dto.Fields.Sprint),
 		Assignee:       assigneeName(dto.Fields.Assignee),
 		Changelog:      entries,
+		SprintChanges:  sprintChanges,
 	}
 
 	// Record active-sprint MEMBERSHIP (the name) only; the sprint's window comes
@@ -321,8 +329,10 @@ type historyDTO struct {
 type itemDTO struct {
 	Field   string `json:"field"`
 	FieldID string `json:"fieldId"`
-	From    string `json:"fromString"`
-	To      string `json:"toString"`
+	From    string `json:"fromString"` // human-readable prior value (status/sprint names)
+	To      string `json:"toString"`   // human-readable new value
+	FromID  string `json:"from"`       // raw prior value: comma-separated sprint ids
+	ToID    string `json:"to"`         // raw new value: comma-separated sprint ids
 }
 
 // --- mapping helpers ---
@@ -434,6 +444,97 @@ func fieldKey(field string) string {
 		return "status"
 	}
 	return "estimated_time"
+}
+
+// toSprintChanges flattens the "Sprint" changelog items into per-sprint
+// membership transitions. Each Sprint item carries the before/after sprint sets
+// as comma-separated ids (from/to) with parallel names (fromString/toString); a
+// single change can add and/or remove several sprints, so it expands to one
+// SprintMembershipChange per sprint id whose membership actually changed —
+// entered (in the "to" set but not "from") or left (in "from" but not "to").
+// Sprints present in both sets are unchanged and yield nothing. Output is
+// ordered by history then sprint id so re-syncs are deterministic.
+func toSprintChanges(histories []historyDTO) ([]SprintMembershipChange, error) {
+	var changes []SprintMembershipChange
+	for _, h := range histories {
+		for _, it := range h.Items {
+			if it.Field != "Sprint" && it.FieldID != sprintFieldID {
+				continue
+			}
+			from, err := parseSprintRefs(it.FromID, it.From)
+			if err != nil {
+				return nil, err
+			}
+			to, err := parseSprintRefs(it.ToID, it.To)
+			if err != nil {
+				return nil, err
+			}
+			ts, err := parseJiraTime(h.Created)
+			if err != nil {
+				return nil, err
+			}
+
+			for _, id := range sortedIDs(to) {
+				if _, stillThere := from[id]; !stillThere {
+					changes = append(changes, SprintMembershipChange{
+						EntryID: h.ID, SprintID: id, SprintName: to[id], Entered: true, Timestamp: ts,
+					})
+				}
+			}
+			for _, id := range sortedIDs(from) {
+				if _, stillThere := to[id]; !stillThere {
+					changes = append(changes, SprintMembershipChange{
+						EntryID: h.ID, SprintID: id, SprintName: from[id], Entered: false, Timestamp: ts,
+					})
+				}
+			}
+		}
+	}
+	return changes, nil
+}
+
+// parseSprintRefs zips a comma-separated sprint-id list (from/to) with its
+// parallel name list (fromString/toString) into an id→name map. Blank ids are
+// skipped (an empty set, e.g. a ticket entering its first sprint); a name index
+// past the ids is tolerated as "". A non-numeric id is a parse error.
+func parseSprintRefs(ids, names string) (map[int]string, error) {
+	refs := map[int]string{}
+	idParts := splitCSV(ids)
+	nameParts := splitCSV(names)
+	for i, raw := range idParts {
+		id, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, fmt.Errorf("parse sprint id %q: %w", raw, err)
+		}
+		name := ""
+		if i < len(nameParts) {
+			name = nameParts[i]
+		}
+		refs[id] = name
+	}
+	return refs, nil
+}
+
+// splitCSV splits a Jira changelog comma-separated list, trimming spaces and
+// dropping empties (so "" yields no parts).
+func splitCSV(s string) []string {
+	var parts []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, p)
+		}
+	}
+	return parts
+}
+
+// sortedIDs returns a map's sprint ids in ascending order for deterministic output.
+func sortedIDs(m map[int]string) []int {
+	ids := make([]int, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	return ids
 }
 
 // parseJiraTime parses Jira's changelog timestamp (e.g.
