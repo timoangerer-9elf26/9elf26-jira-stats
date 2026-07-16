@@ -61,6 +61,11 @@ func run() error {
 		return err
 	}
 
+	reviewClock, err := parseReviewNow(os.Getenv("REVIEW_NOW"))
+	if err != nil {
+		return err
+	}
+
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return err
@@ -82,11 +87,18 @@ func run() error {
 	go syncer.Run(ctx, interval)
 	log.Printf("syncing %s from Jira every %s", getenv("JIRA_PROJECT", "DCAI"), interval)
 
-	srv, err := web.NewServer(st,
+	opts := []web.Option{
 		web.WithLocation(loc),
 		web.WithVelocityWeeks(velocityWeeks),
 		web.WithJiraBaseURL(os.Getenv("JIRA_BASE_URL")),
-	)
+	}
+	// Only override the web clock when REVIEW_NOW is set; leaving it out keeps the
+	// server's default time.Now for every production deployment.
+	if reviewClock != nil {
+		opts = append(opts, web.WithClock(reviewClock))
+	}
+
+	srv, err := web.NewServer(st, opts...)
 	if err != nil {
 		return err
 	}
@@ -138,6 +150,25 @@ func parseVelocityWeeks(v string) (int, error) {
 		return 0, fmt.Errorf("invalid VELOCITY_WEEKS %q: must be a positive integer", v)
 	}
 	return n, nil
+}
+
+// parseReviewNow reads the optional REVIEW_NOW override: an RFC3339 timestamp
+// that pins the web clock used to resolve relative date ranges, so the
+// date-bearing views (Completed presets, Velocity weeks, Daily window) render
+// reproducibly against the canned fake backend during live/visual review (see
+// docs/adr/0001-agent-driven-acceptance-review-harness.md). An empty value means
+// unset — the server keeps its default time.Now — so it returns a nil clock and
+// no override is applied. A non-empty but unparseable value fails fast at
+// startup, consistent with SYNC_INTERVAL.
+func parseReviewNow(v string) (func() time.Time, error) {
+	if v == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return nil, fmt.Errorf("invalid REVIEW_NOW %q: %w", v, err)
+	}
+	return func() time.Time { return t }, nil
 }
 
 func getenv(key, fallback string) string {
