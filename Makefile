@@ -46,3 +46,16 @@ check: test smoke ## Run all tests + smoke tests (CI / pre-deploy gate).
 .PHONY: run
 run: ## Run the dashboard locally (falls back to fake Jira without creds).
 	go run ./cmd/jira-stats
+
+# Hot-reload dev loop: rebuilds and restarts on every .go/.html/.css save via
+# air (config in .air.toml). Templates/CSS are embedded, so air's rebuild is
+# what makes edits show up; pair with the Now board's 30s browser poll.
+# Install once: go install github.com/air-verse/air@latest
+.PHONY: dev
+dev: ## Run with hot reload (rebuilds on save; requires air).
+	@command -v air >/dev/null 2>&1 || { \
+		echo "air not found. Install it with:"; \
+		echo "  go install github.com/air-verse/air@latest"; \
+		exit 1; \
+	}
+	air
