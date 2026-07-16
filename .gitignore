@@ -21,5 +21,8 @@ node_modules/
 # Ephemeral review-launcher state (scripts/review-up.sh)
 /tmp/review/
 
+# Playwright MCP output (screenshots/traces the acceptance-review driver writes)
+.playwright-mcp/
+
 # Editor / OS
 .DS_Store
