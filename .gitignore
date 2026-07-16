@@ -18,5 +18,8 @@
 node_modules/
 /tmp/
 
+# Ephemeral review-launcher state (scripts/review-up.sh)
+/tmp/review/
+
 # Editor / OS
 .DS_Store
