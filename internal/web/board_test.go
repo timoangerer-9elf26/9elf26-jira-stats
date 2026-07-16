@@ -66,12 +66,17 @@ func TestBoardShowsActiveSprintCardsInColumns(t *testing.T) {
 	app := newBoardApp(t, boardFixture(), web.WithJiraBaseURL("https://9elf26.atlassian.net/"))
 	body := get(t, app.URL+"/board")
 
-	// Columns present in workflow order, INCLUDING the Done-category column.
+	// The full fixed set of workflow columns renders in order, INCLUDING the
+	// empty ones (Ready To Do, Ready for Release, Released / Deployed) and the
+	// Done-category columns.
 	assertOrder(t, body,
 		`data-status="Refinement"`,
+		`data-status="Ready To Do"`,
 		`data-status="In Progress"`,
 		`data-status="Review / Testing"`,
+		`data-status="Ready for Release"`,
 		`data-status="DONE (This Sprint)"`,
+		`data-status="Released / Deployed"`,
 	)
 
 	// Each card shows key, title, size and a type badge.
@@ -105,8 +110,9 @@ func TestBoardShowsActiveSprintCardsInColumns(t *testing.T) {
 		t.Errorf("board heading missing active-sprint name\n%s", body)
 	}
 
-	// Excluded work must not appear anywhere.
-	for _, absent := range []string{"DCAI-14", "DCAI-15", "DCAI-20", "Old work", `data-status="Released / Deployed"`} {
+	// Excluded work must not appear anywhere (the empty Released / Deployed
+	// column still renders — it just carries no cards).
+	for _, absent := range []string{"DCAI-14", "DCAI-15", "DCAI-20", "Old work"} {
 		if strings.Contains(body, absent) {
 			t.Errorf("board leaked excluded content %q", absent)
 		}
