@@ -100,6 +100,23 @@ make run        # go run ./cmd/jira-stats
 make test       # go test ./...
 ```
 
+### Hot reload
+
+`make dev` rebuilds and restarts the binary on every `.go`/`.html`/`.css` save,
+using [air](https://github.com/air-verse/air) (config in `.air.toml`):
+
+```sh
+go install github.com/air-verse/air@latest   # once
+make dev                                      # watches + rebuilds on save
+```
+
+Because the templates and CSS are **embedded** into the binary (`//go:embed`),
+they are parsed once at startup — so a template edit only appears after a
+rebuild, which is exactly what `make dev` triggers. Combined with the Now
+board's 30s browser poll, changes show up shortly after you save; other views
+update on the next reload. (A Tailwind class change still needs `make css` to
+regenerate the committed `output.css`; air then rebuilds with it.)
+
 ## Testing
 
 Tests drive the real handlers at the HTTP boundary, backed by a temp SQLite
