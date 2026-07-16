@@ -109,6 +109,29 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 		}
 	}
 
+	// Sprint-membership history: each entering/leaving of a sprint, deduped by
+	// (changelog entry id, sprint id) so a single Sprint change adding/removing
+	// several sprints stays distinct and re-syncs insert no duplicates.
+	for _, sc := range iss.SprintChanges {
+		entered := 0
+		if sc.Entered {
+			entered = 1
+		}
+		var sprintName any
+		if sc.SprintName != "" {
+			sprintName = sc.SprintName
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO sprint_membership_transition
+			     (changelog_entry_id, issue_key, sprint_id, sprint_name, entered, transitioned_at)
+			 VALUES (?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(changelog_entry_id, sprint_id) DO NOTHING`,
+			sc.EntryID, iss.Key, sc.SprintID, sprintName, entered, sc.Timestamp.UTC().Format(time.RFC3339),
+		); err != nil {
+			return fmt.Errorf("insert sprint membership %s/%d: %w", sc.EntryID, sc.SprintID, err)
+		}
+	}
+
 	return tx.Commit()
 }
 
@@ -182,6 +205,11 @@ func (s *Store) Sprints() ([]Sprint, error) {
 // (docs/adr/0002). The window is open-ended (end = now), resolved by the caller,
 // so no end instant is carried here.
 type ActiveSprint struct {
+	// ID is the Jira sprint id — the key the sprint-membership history is stored
+	// under (sprint_membership_transition.sprint_id). It reconciles the per-issue
+	// active_sprint snapshot (keyed by NAME) with the history (keyed by ID): given
+	// the active window, a caller can query membership by this id.
+	ID        int
 	Name      string
 	Activated time.Time
 }
@@ -193,26 +221,93 @@ type ActiveSprint struct {
 // start date. It is the single source for the Now heading, the sprint board's
 // existence gate, the Daily heading, and the Completed "active sprint" preset.
 func (s *Store) ActiveSprintWindow() (ActiveSprint, bool, error) {
+	var id int
 	var name string
 	var activated sql.NullString
 	err := s.db.QueryRow(
-		`SELECT name, activated_at FROM sprint
+		`SELECT id, name, activated_at FROM sprint
 		 WHERE LOWER(state) = 'active'
 		 ORDER BY activated_at DESC
-		 LIMIT 1`).Scan(&name, &activated)
+		 LIMIT 1`).Scan(&id, &name, &activated)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return ActiveSprint{}, false, nil
 	case err != nil:
 		return ActiveSprint{}, false, fmt.Errorf("read active sprint: %w", err)
 	}
-	sprint := ActiveSprint{Name: name}
+	sprint := ActiveSprint{ID: id, Name: name}
 	if activated.Valid && activated.String != "" {
 		if sprint.Activated, err = time.Parse(time.RFC3339, activated.String); err != nil {
 			return ActiveSprint{}, false, fmt.Errorf("parse activation instant %q: %w", activated.String, err)
 		}
 	}
 	return sprint, true, nil
+}
+
+// IssuesInSprintAt reconstructs which issues were members of the sprint with the
+// given id at instant `at`, by replaying the membership-transition log: for each
+// issue, the latest entering/leaving transition at or before `at` decides
+// membership (entered => in, left => out). It mirrors how status history
+// reconstructs status at an instant. Returns the member issue keys sorted for a
+// stable result. This is the started-with/added primitive for the Weekly view:
+// members at the sprint's activation instant are "started with"; members later
+// that were not members at activation are "added during the window".
+func (s *Store) IssuesInSprintAt(sprintID int, at time.Time) ([]string, error) {
+	const query = `
+		SELECT issue_key FROM (
+			SELECT issue_key, entered,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY issue_key
+			           ORDER BY transitioned_at DESC, changelog_entry_id DESC
+			       ) AS rn
+			FROM sprint_membership_transition
+			WHERE sprint_id = ? AND transitioned_at <= ?
+		)
+		WHERE rn = 1 AND entered = 1
+		ORDER BY issue_key`
+
+	rows, err := s.db.Query(query, sprintID, at.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, fmt.Errorf("issues in sprint %d at %v: %w", sprintID, at, err)
+	}
+	defer rows.Close()
+
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("scan sprint member: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sprint members: %w", err)
+	}
+	return keys, nil
+}
+
+// SprintEntry returns the instant an issue first entered the sprint with the
+// given id (its earliest "entered" membership transition). ok is false when no
+// entering transition is recorded (the issue was never captured joining that
+// sprint). It answers "when did issue X enter sprint S", enabling "added during
+// the window" detection against the sprint's activation instant.
+func (s *Store) SprintEntry(sprintID int, issueKey string) (time.Time, bool, error) {
+	var at sql.NullString
+	err := s.db.QueryRow(
+		`SELECT MIN(transitioned_at) FROM sprint_membership_transition
+		 WHERE sprint_id = ? AND issue_key = ? AND entered = 1`,
+		sprintID, issueKey).Scan(&at)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("sprint entry %d/%s: %w", sprintID, issueKey, err)
+	}
+	if !at.Valid || at.String == "" {
+		return time.Time{}, false, nil
+	}
+	t, err := time.Parse(time.RFC3339, at.String)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse sprint entry instant %q: %w", at.String, err)
+	}
+	return t, true, nil
 }
 
 // scanSprint reads one sprint row (id, name, state, activated_at, completed_at),

@@ -134,6 +134,31 @@ func TestBackfillProjectsFakeJiraIntoStore(t *testing.T) {
 	assertEq(t, "DCAI-3 Done crossing",
 		countRows(t, st, "SELECT COUNT(*) FROM status_transition WHERE issue_key='DCAI-3' AND to_status='DONE (This Sprint)' AND from_status='Review / Testing'"), 1)
 
+	// --- Sprint-membership history (parsed from the real "Sprint" changelog) ---
+	// DCAI-1's changelog moves it from {41} to {41,42}: only sprint 42 (id, the
+	// active sprint) is entered, at 2026-07-13T06:00:00Z (08:00 +0200). Sprint 41
+	// is unchanged and records nothing.
+	assertEq(t, "DCAI-1 sprint 42 entry rows",
+		countRows(t, st, "SELECT COUNT(*) FROM sprint_membership_transition WHERE issue_key='DCAI-1' AND sprint_id=42 AND entered=1"), 1)
+	assertEq(t, "no rows for unchanged sprint 41",
+		countRows(t, st, "SELECT COUNT(*) FROM sprint_membership_transition WHERE sprint_id=41"), 0)
+
+	entry, ok, err := st.SprintEntry(42, "DCAI-1")
+	if err != nil || !ok {
+		t.Fatalf("SprintEntry(42, DCAI-1) ok=%v err=%v", ok, err)
+	}
+	assertEq(t, "DCAI-1 sprint 42 entry instant", entry.UTC().Format(time.RFC3339), "2026-07-13T06:00:00Z")
+
+	// DCAI-1 entered sprint 42 (06:00Z) before its activation (07:05Z), so it is a
+	// member at activation — "present from the start".
+	members, err := st.IssuesInSprintAt(42, sprint.Activated)
+	if err != nil {
+		t.Fatalf("IssuesInSprintAt: %v", err)
+	}
+	if len(members) != 1 || members[0] != "DCAI-1" {
+		t.Fatalf("members of sprint 42 at activation = %v, want [DCAI-1]", members)
+	}
+
 	// --- Dedup on re-sync ---
 	if _, err := sync.Backfill(context.Background(), client, st); err != nil {
 		t.Fatalf("re-backfill: %v", err)
@@ -143,6 +168,9 @@ func TestBackfillProjectsFakeJiraIntoStore(t *testing.T) {
 	}
 	if got := countRows(t, st, "SELECT COUNT(*) FROM issue"); got != 3 {
 		t.Fatalf("after re-sync issue rows = %d, want 3", got)
+	}
+	if got := countRows(t, st, "SELECT COUNT(*) FROM sprint_membership_transition"); got != 1 {
+		t.Fatalf("after re-sync sprint membership rows = %d, want 1 (dedup failed)", got)
 	}
 }
 

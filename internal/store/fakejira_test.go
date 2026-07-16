@@ -66,10 +66,12 @@ var searchPages = map[string]string{
             ]
           },
           "changelog": {
-            "startAt": 0, "maxResults": 100, "total": 2,
+            "startAt": 0, "maxResults": 100, "total": 3,
             "histories": [
               {"id": "9000", "created": "2026-07-10T09:00:00.000+0200",
                "items": [{"field": "Estimated Time", "fieldId": "customfield_10040", "fromString": "Medium", "toString": "Large"}]},
+              {"id": "9005", "created": "2026-07-13T08:00:00.000+0200",
+               "items": [{"field": "Sprint", "fieldId": "customfield_10020", "from": "41", "to": "41, 42", "fromString": "Sprint 41", "toString": "Sprint 41, Sprint 42"}]},
               {"id": "9001", "created": "2026-07-13T09:00:00.000+0200",
                "items": [{"field": "status", "fromString": "Ready to Do", "toString": "In Progress"}]}
             ]

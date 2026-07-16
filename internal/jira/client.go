@@ -26,6 +26,25 @@ type Issue struct {
 	ActiveSprint string
 	Assignee     string
 	Changelog    []ChangelogEntry
+	// SprintChanges is the issue's sprint-membership history: each entering or
+	// leaving of a single sprint, derived from the "Sprint" changelog field. It
+	// lets the store reconstruct which sprint(s) the issue belonged to at any past
+	// instant (alongside, not replacing, the ActiveSprint snapshot above).
+	SprintChanges []SprintMembershipChange
+}
+
+// SprintMembershipChange is one issue's entering or leaving of a single sprint,
+// derived from a "Sprint" changelog entry. A single Jira Sprint change can add
+// and/or remove several sprints at once, so it expands to one of these per
+// sprint id whose membership actually changed. It is keyed on the sprint id (the
+// stored sprint entity's identity); SprintName is kept for readability. EntryID
+// is the stable Jira changelog entry id, deduped with SprintID on re-sync.
+type SprintMembershipChange struct {
+	EntryID    string    // stable Jira changelog entry id
+	SprintID   int       // Jira sprint id (matches the sprint entity's id)
+	SprintName string    // sprint name at the time of the change
+	Entered    bool      // true = entered the sprint; false = left it
+	Timestamp  time.Time // instant of the change
 }
 
 // Sprint is a board sprint as a first-class entity with its ACTUAL lifecycle
