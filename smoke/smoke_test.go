@@ -50,6 +50,14 @@ func freePort(t *testing.T) string {
 // waits until it serves, and returns its base URL. Cleanup stops the process.
 func startDashboard(t *testing.T) string {
 	t.Helper()
+	return startDashboardEnv(t)
+}
+
+// startDashboardEnv is startDashboard with extra "KEY=VALUE" env entries
+// appended (so callers can pin settings like REVIEW_NOW). Later entries win, so
+// the extras override the defaults set here.
+func startDashboardEnv(t *testing.T, extraEnv ...string) string {
+	t.Helper()
 	bin := buildBinary(t)
 	addr := freePort(t)
 
@@ -61,6 +69,7 @@ func startDashboard(t *testing.T) string {
 		// Deliberately unset JIRA_* so the binary falls back to the fake.
 		"JIRA_BASE_URL=", "JIRA_EMAIL=", "JIRA_API_TOKEN=",
 	)
+	cmd.Env = append(cmd.Env, extraEnv...)
 	if out, err := os.Create(filepath.Join(t.TempDir(), "server.log")); err == nil {
 		cmd.Stdout, cmd.Stderr = out, out
 	}
@@ -158,6 +167,32 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 				t.Fatalf("GET %s: body missing marker %q", tc.path, tc.marker)
 			}
 		})
+	}
+}
+
+// TestReviewNowPinsDateViews boots the binary with REVIEW_NOW pinned to a fixed
+// instant and asserts the date-bearing views resolve against it deterministically
+// (independent of the wall clock this test runs on). The pinned instant
+// 2026-07-15T12:00:00Z is 14:00 Europe/Berlin on Wednesday 15 Jul 2026, which
+// sits in ISO week KW29 (Mon 13 Jul – Sun 19 Jul), so:
+//   - /completed?preset=this-week echoes the range "13 Jul – 19 Jul 2026", and
+//   - /velocity's latest bar is labelled KW29.
+//
+// Both labels are computed from `now` alone (not the synced tally), so the
+// assertion holds without waiting on the background sync.
+func TestReviewNowPinsDateViews(t *testing.T) {
+	base := startDashboardEnv(t, "REVIEW_NOW=2026-07-15T12:00:00Z")
+
+	if code, body := get(t, base+"/completed?preset=this-week"); code != http.StatusOK {
+		t.Fatalf("GET /completed?preset=this-week: got status %d, want 200", code)
+	} else if want := "13 Jul – 19 Jul 2026"; !strings.Contains(body, want) {
+		t.Fatalf("/completed?preset=this-week: body missing pinned range %q", want)
+	}
+
+	if code, body := get(t, base+"/velocity"); code != http.StatusOK {
+		t.Fatalf("GET /velocity: got status %d, want 200", code)
+	} else if want := `data-week="KW29"`; !strings.Contains(body, want) {
+		t.Fatalf("/velocity: body missing pinned week label %q", want)
 	}
 }
 
