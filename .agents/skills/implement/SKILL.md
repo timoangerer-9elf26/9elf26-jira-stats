@@ -12,4 +12,6 @@ Run typechecking regularly, single test files regularly, and the full test suite
 
 Once done, use /code-review to review the work.
 
+Then, if the change touches a route or view, run acceptance-review to verify each acceptance criterion against the running app.
+
 Commit your work to the current branch.
