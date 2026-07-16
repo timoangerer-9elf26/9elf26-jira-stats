@@ -92,25 +92,10 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 		return fmt.Errorf("upsert issue %s: %w", iss.Key, err)
 	}
 
-	// Capture the active sprint window in meta from any issue that carries it.
-	// All issues on a board share the same active sprint, so these writes are
-	// idempotent across the synced set; only active-sprint issues touch it, so a
-	// closed/future/no-sprint issue never clobbers a known window.
-	if iss.ActiveSprint != "" {
-		for _, kv := range [][2]string{
-			{activeSprintNameKey, iss.ActiveSprint},
-			{activeSprintStartKey, iss.ActiveSprintStart.UTC().Format(time.RFC3339)},
-			{activeSprintEndKey, iss.ActiveSprintEnd.UTC().Format(time.RFC3339)},
-		} {
-			if _, err := tx.Exec(
-				`INSERT INTO meta (key, value) VALUES (?, ?)
-				 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-				kv[0], kv[1],
-			); err != nil {
-				return fmt.Errorf("set %s: %w", kv[0], err)
-			}
-		}
-	}
+	// NB: the active-sprint WINDOW is no longer captured here. It is now derived
+	// from the sprint entity (see SaveSprint / ActiveSprintWindow); the
+	// active_sprint column above still records per-issue MEMBERSHIP so the Now
+	// board and Daily view can scope to active-sprint work.
 
 	for _, e := range iss.Changelog {
 		if _, err := tx.Exec(
@@ -131,63 +116,132 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 // recent successful sync cycle.
 const lastSyncKey = "last_sync"
 
-// The active-sprint window captured during sync: its name and RFC3339 UTC
-// start/end instants. Read back via ActiveSprintWindow to scope the "Now" and
-// "Completed active sprint" views to the real sprint.
-const (
-	activeSprintNameKey  = "active_sprint_name"
-	activeSprintStartKey = "active_sprint_start"
-	activeSprintEndKey   = "active_sprint_end"
-)
-
-// ActiveSprint is the active sprint window recorded during sync: the sprint
-// name and its [Start, End) bounds (zero when the boundary was unknown).
-type ActiveSprint struct {
-	Name  string
-	Start time.Time
-	End   time.Time
+// Sprint is a stored board sprint entity: its identity, state, and the ACTUAL
+// lifecycle instants (activation and completion). ActivatedAt is zero until the
+// sprint is started; CompletedAt is zero until it is completed. Planned
+// start/end dates are deliberately not stored (not trusted for windowing).
+type Sprint struct {
+	ID          int
+	Name        string
+	State       string
+	ActivatedAt time.Time
+	CompletedAt time.Time
 }
 
-// ActiveSprintWindow returns the active sprint window seen during sync. ok is
-// false when no active sprint has been recorded (a fresh DB, or no synced issue
-// belonged to an active sprint). Missing/blank start or end instants read back
-// as the zero time.
+// SaveSprint upserts a sprint entity (by Jira sprint id). Zero lifecycle
+// instants persist as NULL, so an active/future sprint's completion — and a
+// future sprint's activation — read back as the zero time.
+func (s *Store) SaveSprint(sp jira.Sprint) error {
+	var activated, completed any
+	if !sp.ActivatedAt.IsZero() {
+		activated = sp.ActivatedAt.UTC().Format(time.RFC3339)
+	}
+	if !sp.CompletedAt.IsZero() {
+		completed = sp.CompletedAt.UTC().Format(time.RFC3339)
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO sprint (id, name, state, activated_at, completed_at)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		     name=excluded.name, state=excluded.state,
+		     activated_at=excluded.activated_at, completed_at=excluded.completed_at`,
+		sp.ID, sp.Name, sp.State, activated, completed,
+	); err != nil {
+		return fmt.Errorf("upsert sprint %d: %w", sp.ID, err)
+	}
+	return nil
+}
+
+// Sprints returns every stored sprint entity, ordered by id. It is the one
+// source for sprint lifecycle reads: completed sprints expose their completion
+// instant here (CompletedAt), active/future ones read back with a zero
+// CompletedAt.
+func (s *Store) Sprints() ([]Sprint, error) {
+	rows, err := s.db.Query(`SELECT id, name, state, activated_at, completed_at FROM sprint ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list sprints: %w", err)
+	}
+	defer rows.Close()
+
+	var sprints []Sprint
+	for rows.Next() {
+		sp, err := scanSprint(rows)
+		if err != nil {
+			return nil, err
+		}
+		sprints = append(sprints, sp)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sprints: %w", err)
+	}
+	return sprints, nil
+}
+
+// ActiveSprint is the active sprint window derived from the sprint entity: its
+// name and its activation instant, which is the live-sprint window START
+// (docs/adr/0002). The window is open-ended (end = now), resolved by the caller,
+// so no end instant is carried here.
+type ActiveSprint struct {
+	Name      string
+	Activated time.Time
+}
+
+// ActiveSprintWindow returns the currently active sprint (state = "active") as a
+// window: its name and activation instant. ok is false when no sprint is active
+// (a fresh DB, or between sprints). This supersedes the old meta planned-date
+// window: the window start is the ACTUAL activation instant, never a planned
+// start date. It is the single source for the Now heading, the sprint board's
+// existence gate, the Daily heading, and the Completed "active sprint" preset.
 func (s *Store) ActiveSprintWindow() (ActiveSprint, bool, error) {
-	name, ok, err := s.readMeta(activeSprintNameKey)
-	if err != nil || !ok {
-		return ActiveSprint{}, false, err
+	var name string
+	var activated sql.NullString
+	err := s.db.QueryRow(
+		`SELECT name, activated_at FROM sprint
+		 WHERE LOWER(state) = 'active'
+		 ORDER BY activated_at DESC
+		 LIMIT 1`).Scan(&name, &activated)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return ActiveSprint{}, false, nil
+	case err != nil:
+		return ActiveSprint{}, false, fmt.Errorf("read active sprint: %w", err)
 	}
 	sprint := ActiveSprint{Name: name}
-	if sprint.Start, err = s.readMetaTime(activeSprintStartKey); err != nil {
-		return ActiveSprint{}, false, err
-	}
-	if sprint.End, err = s.readMetaTime(activeSprintEndKey); err != nil {
-		return ActiveSprint{}, false, err
+	if activated.Valid && activated.String != "" {
+		if sprint.Activated, err = time.Parse(time.RFC3339, activated.String); err != nil {
+			return ActiveSprint{}, false, fmt.Errorf("parse activation instant %q: %w", activated.String, err)
+		}
 	}
 	return sprint, true, nil
 }
 
-// readMeta reads a single meta value; ok is false when the key is absent.
-func (s *Store) readMeta(key string) (value string, ok bool, err error) {
-	switch err = s.db.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&value); {
-	case errors.Is(err, sql.ErrNoRows):
-		return "", false, nil
-	case err != nil:
-		return "", false, fmt.Errorf("read meta %s: %w", key, err)
+// scanSprint reads one sprint row (id, name, state, activated_at, completed_at),
+// mapping NULL/blank lifecycle instants to the zero time.
+func scanSprint(row interface{ Scan(...any) error }) (Sprint, error) {
+	var sp Sprint
+	var activated, completed sql.NullString
+	if err := row.Scan(&sp.ID, &sp.Name, &sp.State, &activated, &completed); err != nil {
+		return Sprint{}, fmt.Errorf("scan sprint: %w", err)
 	}
-	return value, true, nil
+	var err error
+	if sp.ActivatedAt, err = parseNullableInstant(activated); err != nil {
+		return Sprint{}, err
+	}
+	if sp.CompletedAt, err = parseNullableInstant(completed); err != nil {
+		return Sprint{}, err
+	}
+	return sp, nil
 }
 
-// readMetaTime reads a meta value as an RFC3339 instant, yielding the zero time
-// when the key is absent or blank.
-func (s *Store) readMetaTime(key string) (time.Time, error) {
-	v, ok, err := s.readMeta(key)
-	if err != nil || !ok || v == "" {
-		return time.Time{}, err
+// parseNullableInstant parses a nullable RFC3339 column into a time, yielding
+// the zero time when the value is NULL or blank.
+func parseNullableInstant(v sql.NullString) (time.Time, error) {
+	if !v.Valid || v.String == "" {
+		return time.Time{}, nil
 	}
-	t, err := time.Parse(time.RFC3339, v)
+	t, err := time.Parse(time.RFC3339, v.String)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("parse meta %s %q: %w", key, v, err)
+		return time.Time{}, fmt.Errorf("parse instant %q: %w", v.String, err)
 	}
 	return t, nil
 }

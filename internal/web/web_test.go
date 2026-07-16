@@ -20,7 +20,7 @@ func nowFixture() *jira.FakeClient {
 		iss.ActiveSprint = "KW29"
 		return iss
 	}
-	return &jira.FakeClient{Issues: []jira.Issue{
+	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
 		active(jira.Issue{Key: "DCAI-10", Type: "Story", Summary: "a", Status: "Refinement", StatusCategory: "To Do", Size: "S"}),
 		active(jira.Issue{Key: "DCAI-11", Type: "Task", Summary: "b", Status: "Refinement", StatusCategory: "To Do", Size: ""}),
 		active(jira.Issue{Key: "DCAI-12", Type: "Bug", Summary: "c", Status: "Ready to Do", StatusCategory: "To Do", Size: "M"}),

@@ -37,8 +37,8 @@ type Rollups interface {
 	OpenByStatus() (store.OpenBoard, error)
 	CompletedInRange(from, to time.Time) (store.SizeTally, error)
 	LastSyncedAt() (t time.Time, ok bool, err error)
-	// ActiveSprintWindow reports the active sprint recorded during sync (name and
-	// [Start, End) bounds). ok is false when no active sprint is known.
+	// ActiveSprintWindow reports the active sprint entity (name and activation
+	// instant). ok is false when no sprint is active.
 	ActiveSprintWindow() (store.ActiveSprint, bool, error)
 	// ActiveSprintBoard is the whole active sprint as a per-status Kanban board
 	// (Done columns included) for the /board data-quality view.

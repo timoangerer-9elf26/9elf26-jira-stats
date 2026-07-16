@@ -21,13 +21,26 @@ type Issue struct {
 	Sprint         string // current (last) sprint name on the issue, "" if none
 	// ActiveSprint is the name of the ACTIVE sprint (state=="active") the issue
 	// belongs to, or "" when the issue is in no active sprint (closed/future/none).
-	// All issues on a board share the same active sprint, so its window is the
-	// same across every issue that carries it.
-	ActiveSprint      string
-	ActiveSprintStart time.Time // start of the active sprint (zero when unknown)
-	ActiveSprintEnd   time.Time // end of the active sprint (zero when unknown)
-	Assignee          string
-	Changelog         []ChangelogEntry
+	// This is per-issue MEMBERSHIP only; the sprint's window (activation instant)
+	// comes from the Sprint entity, not from planned dates carried on the issue.
+	ActiveSprint string
+	Assignee     string
+	Changelog    []ChangelogEntry
+}
+
+// Sprint is a board sprint as a first-class entity with its ACTUAL lifecycle
+// instants — the trusted timestamps for windowing. ActivatedAt is Jira's
+// activatedDate (the instant "Start sprint" was clicked); CompletedAt is Jira's
+// completeDate (the instant it was completed). Both are the zero time when the
+// event has not happened (a future sprint has no activation; an active sprint no
+// completion). The PLANNED start/end dates are deliberately NOT carried here:
+// they are not trusted for windowing (see docs/adr/0002 and CONTEXT.md "Sprint").
+type Sprint struct {
+	ID          int
+	Name        string
+	State       string    // "active", "closed", or "future"
+	ActivatedAt time.Time // activation instant (zero until the sprint is started)
+	CompletedAt time.Time // completion instant (zero until the sprint is completed)
 }
 
 // ChangelogEntry is a single field change recorded in a Jira issue's history.
@@ -50,4 +63,8 @@ type Client interface {
 	// bound (used for cheap incremental syncs). The bound is expected to already
 	// include any clock-skew overlap the caller wants.
 	FetchIssuesUpdatedSince(ctx context.Context, since time.Time) ([]Issue, error)
+	// FetchSprints returns the board's sprints as first-class entities, each with
+	// its actual lifecycle instants (see Sprint). It is fetched on every sync so
+	// the store's sprint entities track Jira.
+	FetchSprints(ctx context.Context) ([]Sprint, error)
 }

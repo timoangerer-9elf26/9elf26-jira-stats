@@ -144,42 +144,39 @@ func TestCompletedResultsThisWeekPresetDrivesQuery(t *testing.T) {
 	}
 }
 
-// TestCompletedActiveSprintPresetUsesStoredWindow asserts the "Active sprint"
-// preset resolves to the real sprint window captured during sync
-// (active_sprint_start..active_sprint_end), not the current ISO week. The clock
-// is pinned to a week OUTSIDE the sprint, so a current-week fallback would give
-// the opposite answer: the in-window completion counts and the out-of-window one
-// does not, and the range label reflects the stored sprint window.
-func TestCompletedActiveSprintPresetUsesStoredWindow(t *testing.T) {
+// TestCompletedActiveSprintPresetUsesActivationInstant asserts the "Active
+// sprint" preset resolves to the live-sprint window from the sprint entity: its
+// ACTUAL activation instant → now — never a planned start/end date. A completion
+// before activation is excluded; one between activation and now counts; and the
+// range label runs from the activation day to the day before "now".
+func TestCompletedActiveSprintPresetUsesActivationInstant(t *testing.T) {
 	loc := berlin(t)
-	// "now" is two weeks after the sprint, so a current-week fallback would NOT
-	// include the in-window completion (and WOULD include the out-of-window one).
-	now := time.Date(2026, time.July, 25, 12, 0, 0, 0, loc)
+	// The active sprint was activated 2026-07-13 09:00 Berlin (07:00 UTC).
+	activated := time.Date(2026, time.July, 13, 7, 0, 0, 0, time.UTC)
+	// "now" sits inside the live sprint; the window is [activation, now).
+	now := time.Date(2026, time.July, 18, 12, 0, 0, 0, loc)
 
-	sprintStart := time.Date(2026, time.July, 13, 0, 0, 0, 0, time.UTC)
-	sprintEnd := time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC)
-
-	// This issue both defines the active sprint window (captured in meta) and is a
-	// completion inside it.
+	// A completion inside the window (after activation, before now) counts.
 	inWindow := completedIssue("DCAI-1", "M", time.Date(2026, time.July, 15, 9, 0, 0, 0, loc))
-	inWindow.ActiveSprint = "KW29"
-	inWindow.ActiveSprintStart = sprintStart
-	inWindow.ActiveSprintEnd = sprintEnd
-	// A completion just after the sprint end — outside the window.
-	outWindow := completedIssue("DCAI-2", "L", time.Date(2026, time.July, 21, 9, 0, 0, 0, loc))
+	// A completion BEFORE the activation instant is excluded — the window start is
+	// the activation, not a planned/earlier date.
+	beforeActivation := completedIssue("DCAI-2", "L", time.Date(2026, time.July, 12, 9, 0, 0, 0, loc))
 
-	app := newTestAppAt(t, &jira.FakeClient{Issues: []jira.Issue{inWindow, outWindow}}, now)
+	app := newTestAppAt(t, &jira.FakeClient{
+		Sprints: []jira.Sprint{{ID: 29, Name: "KW29", State: "active", ActivatedAt: activated}},
+		Issues:  []jira.Issue{inWindow, beforeActivation},
+	}, now)
 
 	body := get(t, app.URL+"/completed/results?preset=active-sprint")
 	wants := []string{
 		`data-testid="completed:m">1<`, // in-window completion counts
-		`data-testid="completed:l">0<`, // out-of-window completion excluded
+		`data-testid="completed:l">0<`, // pre-activation completion excluded
 		`data-testid="completed:points">2<`,
-		`data-testid="completed-range">13 Jul – 19 Jul 2026<`, // the stored sprint window
+		`data-testid="completed-range">13 Jul – 17 Jul 2026<`, // activation day → day before now
 	}
 	for _, w := range wants {
 		if !strings.Contains(body, w) {
-			t.Errorf("active-sprint preset did not use the stored window; missing %q\n%s", w, body)
+			t.Errorf("active-sprint preset did not use the activation instant; missing %q\n%s", w, body)
 		}
 	}
 }

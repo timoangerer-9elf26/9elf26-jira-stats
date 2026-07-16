@@ -21,12 +21,23 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/sync"
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/web"
 )
+
+// kw29Activated is the activation instant of the standard active-sprint fixture.
+var kw29Activated = time.Date(2026, time.July, 13, 7, 0, 0, 0, time.UTC)
+
+// activeSprintKW29 is the active-sprint entity the view fixtures pair with issues
+// carrying ActiveSprint="KW29", so ActiveSprintWindow reports it (name +
+// activation instant). Membership stays on the issues; this supplies the entity.
+func activeSprintKW29() []jira.Sprint {
+	return []jira.Sprint{{ID: 29, Name: "KW29", State: "active", ActivatedAt: kw29Activated}}
+}
 
 type testApp struct {
 	*httptest.Server

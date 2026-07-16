@@ -23,6 +23,7 @@ const (
 const (
 	searchPageSize    = 100
 	changelogPageSize = 100
+	sprintPageSize    = 50 // Jira Agile's usual sprint page cap
 )
 
 // Config holds the connection settings for the live Jira client, populated from
@@ -65,6 +66,45 @@ func (c *LiveClient) FetchIssuesUpdatedSince(ctx context.Context, since time.Tim
 	jql := fmt.Sprintf("project = %q AND updated >= %q ORDER BY created ASC",
 		c.cfg.ProjectKey, since.Format("2006-01-02 15:04"))
 	return c.search(ctx, jql)
+}
+
+// FetchSprints walks the board's sprints via the Jira Agile API
+// (GET /rest/agile/1.0/board/{boardID}/sprint), startAt-paginated until isLast.
+// It maps each sprint to the domain entity, taking the trusted ACTUAL lifecycle
+// instants from Jira's activatedDate/completeDate — never the planned
+// startDate/endDate, which are not trusted for windowing.
+func (c *LiveClient) FetchSprints(ctx context.Context) ([]Sprint, error) {
+	var sprints []Sprint
+	startAt := 0
+	for {
+		q := url.Values{}
+		q.Set("startAt", strconv.Itoa(startAt))
+		q.Set("maxResults", strconv.Itoa(sprintPageSize))
+		q.Set("state", "active,closed,future")
+
+		var page sprintsResponse
+		if err := c.get(ctx, "/rest/agile/1.0/board/"+url.PathEscape(c.cfg.BoardID)+"/sprint", q, &page); err != nil {
+			return nil, fmt.Errorf("jira sprints: %w", err)
+		}
+
+		for _, dto := range page.Values {
+			sp := Sprint{ID: dto.ID, Name: dto.Name, State: dto.State}
+			var err error
+			if sp.ActivatedAt, err = optionalJiraTime(dto.ActivatedDate); err != nil {
+				return nil, fmt.Errorf("sprint %d activatedDate: %w", dto.ID, err)
+			}
+			if sp.CompletedAt, err = optionalJiraTime(dto.CompleteDate); err != nil {
+				return nil, fmt.Errorf("sprint %d completeDate: %w", dto.ID, err)
+			}
+			sprints = append(sprints, sp)
+		}
+
+		startAt += len(page.Values)
+		if page.IsLast || len(page.Values) == 0 {
+			break
+		}
+	}
+	return sprints, nil
 }
 
 // search runs a token-paginated JQL search (expand=changelog) and maps every
@@ -132,14 +172,10 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		Changelog:      entries,
 	}
 
+	// Record active-sprint MEMBERSHIP (the name) only; the sprint's window comes
+	// from the Sprint entity (FetchSprints), never the planned dates on the issue.
 	if sp, ok := activeSprint(dto.Fields.Sprint); ok {
 		iss.ActiveSprint = sp.Name
-		if iss.ActiveSprintStart, err = optionalJiraTime(sp.StartDate); err != nil {
-			return Issue{}, fmt.Errorf("active sprint start for %s: %w", dto.Key, err)
-		}
-		if iss.ActiveSprintEnd, err = optionalJiraTime(sp.EndDate); err != nil {
-			return Issue{}, fmt.Errorf("active sprint end for %s: %w", dto.Key, err)
-		}
 	}
 
 	return iss, nil
@@ -239,11 +275,29 @@ type selectDTO struct {
 	Value string `json:"value"`
 }
 
+// sprintDTO is the issue-field sprint entry. Only name + state are parsed: it
+// establishes per-issue active-sprint MEMBERSHIP. The planned startDate/endDate
+// on this entry are deliberately ignored — the trusted window comes from the
+// sprint entity (see FetchSprints / agileSprintDTO).
 type sprintDTO struct {
-	Name      string `json:"name"`
-	State     string `json:"state"` // "active", "closed", or "future"
-	StartDate string `json:"startDate"`
-	EndDate   string `json:"endDate"`
+	Name  string `json:"name"`
+	State string `json:"state"` // "active", "closed", or "future"
+}
+
+// sprintsResponse is the Jira Agile board-sprints page; agileSprintDTO is one
+// sprint entity. Only the fields the entity needs are parsed — the ACTUAL
+// lifecycle instants (activatedDate/completeDate), not the planned start/end.
+type sprintsResponse struct {
+	Values []agileSprintDTO `json:"values"`
+	IsLast bool             `json:"isLast"`
+}
+
+type agileSprintDTO struct {
+	ID            int    `json:"id"`
+	Name          string `json:"name"`
+	State         string `json:"state"`
+	ActivatedDate string `json:"activatedDate"`
+	CompleteDate  string `json:"completeDate"`
 }
 
 // changelogDTO is the search-embedded changelog; changelogResponse is the
@@ -302,8 +356,8 @@ func currentSprint(sprints []sprintDTO) string {
 
 // activeSprint returns the issue's active sprint entry (state == "active"), if
 // any. An issue belongs to the active sprint iff one of its sprint entries is
-// active; all issues on a board share the same active sprint, so this both
-// identifies membership and yields the sprint's name and window.
+// active; this yields the active sprint's NAME for per-issue membership (the
+// window comes from the Sprint entity, not this entry).
 func activeSprint(sprints []sprintDTO) (sprintDTO, bool) {
 	for _, sp := range sprints {
 		if sp.State == "active" {
