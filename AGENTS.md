@@ -13,3 +13,7 @@ Default canonical labels: `needs-triage`, `needs-info`, `ready-for-agent`, `read
 ### Domain docs
 
 Single-context — `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Development workflow
+
+Each bigger feature or bug-fix set goes through its own branch → PR against `main` → squash-merge; the agent driving the work manages its own merges, and `make check` (tests + smoke) is the gate. See `docs/agents/workflow.md`.
