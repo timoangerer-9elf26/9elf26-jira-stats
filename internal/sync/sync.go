@@ -16,6 +16,7 @@ import (
 // reads bookkeeping from.
 type Store interface {
 	SaveIssue(iss jira.Issue, syncedAt string) error
+	SaveSprint(sp jira.Sprint) error
 	IssueCount() (int, error)
 	LastSync() (t time.Time, ok bool, err error)
 	SetLastSync(t time.Time) error
@@ -27,6 +28,9 @@ type Store interface {
 // re-run inserts no duplicates. Returns the number of issues persisted. Each
 // snapshot is stamped with a single shared synced_at timestamp.
 func Backfill(ctx context.Context, client jira.Client, store Store) (int, error) {
+	if err := syncSprints(ctx, client, store); err != nil {
+		return 0, err
+	}
 	issues, err := client.FetchIssues(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("fetch issues: %w", err)
@@ -40,6 +44,23 @@ func Backfill(ctx context.Context, client jira.Client, store Store) (int, error)
 	return len(issues), nil
 }
 
+// syncSprints fetches the board's sprint entities and upserts each into the
+// store, so the active-sprint window and completed-sprint lifecycle instants
+// stay current. Run on every backfill and incremental cycle: sprints are few
+// and the whole set is cheap to re-fetch, and the store upserts idempotently.
+func syncSprints(ctx context.Context, client jira.Client, store Store) error {
+	sprints, err := client.FetchSprints(ctx)
+	if err != nil {
+		return fmt.Errorf("fetch sprints: %w", err)
+	}
+	for _, sp := range sprints {
+		if err := store.SaveSprint(sp); err != nil {
+			return fmt.Errorf("save sprint %d: %w", sp.ID, err)
+		}
+	}
+	return nil
+}
+
 // Once runs a single full-project backfill, discarding the issue count. It is
 // the entry point used by the web integration harness.
 func Once(ctx context.Context, client jira.Client, store Store) error {
@@ -51,6 +72,9 @@ func Once(ctx context.Context, client jira.Client, store Store) error {
 // their snapshots and appends any new changelog transitions (deduped in the
 // store by changelog entry id).
 func incremental(ctx context.Context, client jira.Client, store Store, since time.Time) error {
+	if err := syncSprints(ctx, client, store); err != nil {
+		return err
+	}
 	issues, err := client.FetchIssuesUpdatedSince(ctx, since)
 	if err != nil {
 		return fmt.Errorf("fetch updated issues: %w", err)

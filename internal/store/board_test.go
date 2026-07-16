@@ -12,9 +12,23 @@ package store
 
 import (
 	"testing"
+	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
 )
+
+// seedActiveSprintKW29 stores the active-sprint ENTITY the board's existence gate
+// (ActiveSprintWindow) reads. Membership stays on the issues (ActiveSprint field);
+// this supplies the sprint the board is gated on.
+func seedActiveSprintKW29(t *testing.T, st *Store) {
+	t.Helper()
+	if err := st.SaveSprint(jira.Sprint{
+		ID: 29, Name: "KW29", State: "active",
+		ActivatedAt: time.Date(2026, time.July, 13, 7, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("seed active sprint: %v", err)
+	}
+}
 
 // boardColumns is the fixed, ordered set of workflow columns the sprint board
 // always renders when an active sprint exists (left→right). Triage and Canceled
@@ -48,6 +62,7 @@ func assertColumnOrder(t *testing.T, board Board, want []string) {
 
 func TestActiveSprintBoardGroupsCardsByStatus(t *testing.T) {
 	st := openTempStore(t)
+	seedActiveSprintKW29(t, st)
 
 	// active adds an issue in the active sprint (the board's scope).
 	active := func(key, typ, status, category, size string) {
@@ -150,6 +165,7 @@ func TestActiveSprintBoardEmptyWhenNoActiveSprint(t *testing.T) {
 // 2 — status matching is case-insensitive.
 func TestActiveSprintBoardOrdersReadyToDoByWorkflowCaseInsensitively(t *testing.T) {
 	st := openTempStore(t)
+	seedActiveSprintKW29(t, st)
 
 	active := func(key, typ, status, category string) {
 		t.Helper()
@@ -203,6 +219,7 @@ func TestActiveSprintBoardSeedsAllColumnsWithSubsetOfStatuses(t *testing.T) {
 			t.Fatalf("save %s: %v", key, err)
 		}
 	}
+	seedActiveSprintKW29(t, st)
 	// Cards in only two of the seven statuses.
 	save("DCAI-10", "In Progress")
 	save("DCAI-11", "Refinement")
@@ -241,6 +258,7 @@ func TestActiveSprintBoardExcludesTriageAndCanceled(t *testing.T) {
 			t.Fatalf("save %s: %v", key, err)
 		}
 	}
+	seedActiveSprintKW29(t, st)
 	save("DCAI-10", "In Progress", "In Progress")
 	save("DCAI-90", "Triage", "To Do")
 	save("DCAI-91", "Canceled", "Done")
@@ -275,6 +293,7 @@ func TestActiveSprintBoardAppendsUnknownStatusColumn(t *testing.T) {
 			t.Fatalf("save %s: %v", key, err)
 		}
 	}
+	seedActiveSprintKW29(t, st)
 	save("DCAI-10", "In Progress")
 	save("DCAI-99", "Brand New Status")
 

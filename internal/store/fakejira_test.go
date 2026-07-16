@@ -20,10 +20,28 @@ func fakeJira(w http.ResponseWriter, r *http.Request) {
 		fakeSearch(w, r)
 	case strings.HasPrefix(r.URL.Path, "/rest/api/3/issue/") && strings.HasSuffix(r.URL.Path, "/changelog"):
 		fakeIssueChangelog(w, r)
+	case r.URL.Path == "/rest/agile/1.0/board/8/sprint":
+		writeJSON(w, sprintsPage)
 	default:
 		http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
 	}
 }
+
+// sprintsPage is the board's sprints from the Agile API: a closed sprint (both
+// lifecycle instants set) and the active one (activated, not yet completed).
+// activatedDate/completeDate are the ACTUAL lifecycle instants; the planned
+// startDate/endDate are present but deliberately ignored by the parser.
+var sprintsPage = `{
+      "maxResults": 50, "startAt": 0, "isLast": true,
+      "values": [
+        {"id": 41, "name": "Sprint 41", "state": "closed",
+         "startDate": "2026-07-06T07:00:00.000Z", "endDate": "2026-07-13T07:00:00.000Z",
+         "activatedDate": "2026-07-06T07:05:00.000Z", "completeDate": "2026-07-13T06:30:00.000Z"},
+        {"id": 42, "name": "Sprint 42", "state": "active",
+         "startDate": "2026-07-13T07:00:00.000Z", "endDate": "2026-07-20T07:00:00.000Z",
+         "activatedDate": "2026-07-13T07:05:00.000Z"}
+      ]
+    }`
 
 func fakeSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, searchPages[r.URL.Query().Get("nextPageToken")])

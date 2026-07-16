@@ -39,7 +39,7 @@ func dailyFixture(t *testing.T) (*jira.FakeClient, time.Time) {
 	loc := berlin(t)
 	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, loc)
 	at := func(day, hour int) time.Time { return time.Date(2026, time.July, day, hour, 0, 0, 0, loc) }
-	return &jira.FakeClient{Issues: []jira.Issue{
+	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
 		// Inside both windows.
 		dailyIssue("DCAI-1", "Story", "alice", true, "In Progress", "Review / Testing", at(16, 8)),
 		dailyIssue("DCAI-2", "Task", "bob", true, "Refinement", "Ready to Do", at(15, 11)),
@@ -137,7 +137,7 @@ func TestDailyEmptyState(t *testing.T) {
 	loc := berlin(t)
 	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, loc)
 	// One active-sprint ticket, but its only change is well out of both windows.
-	app := newTestAppAt(t, &jira.FakeClient{Issues: []jira.Issue{
+	app := newTestAppAt(t, &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
 		dailyIssue("DCAI-1", "Story", "alice", true, "Ready to Do", "In Progress",
 			time.Date(2026, time.July, 1, 9, 0, 0, 0, loc)),
 	}}, now)

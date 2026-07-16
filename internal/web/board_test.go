@@ -49,7 +49,7 @@ func boardFixture() *jira.FakeClient {
 		iss.ActiveSprint = "KW29"
 		return iss
 	}
-	return &jira.FakeClient{Issues: []jira.Issue{
+	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
 		active(jira.Issue{Key: "DCAI-10", Type: "Story", Summary: "Refine the widget", Status: "Refinement", StatusCategory: "To Do", Size: "S"}),
 		active(jira.Issue{Key: "DCAI-11", Type: "Task", Summary: "Wire the gadget", Status: "In Progress", StatusCategory: "In Progress", Size: ""}),
 		active(jira.Issue{Key: "DCAI-12", Type: "Bug", Summary: "Fix the sprocket", Status: "Review / Testing", StatusCategory: "In Progress", Size: "M"}),

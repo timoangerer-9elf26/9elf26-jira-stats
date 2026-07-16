@@ -80,14 +80,34 @@ func TestBackfillProjectsFakeJiraIntoStore(t *testing.T) {
 	assertEq(t, "DCAI-3 active sprint (none)", three.activeSprint, "")
 	assertEq(t, "DCAI-3 assignee", three.assignee, "Alan")
 
-	// The active sprint window is captured in meta from the active-sprint issues.
+	// The active-sprint window derives from the sprint ENTITY fetched from the
+	// Agile API: its name and ACTUAL activation instant (activatedDate), not the
+	// planned startDate/endDate carried on the issues.
 	sprint, ok, err := st.ActiveSprintWindow()
 	if err != nil || !ok {
 		t.Fatalf("ActiveSprintWindow ok=%v err=%v", ok, err)
 	}
 	assertEq(t, "active sprint name", sprint.Name, "Sprint 42")
-	assertEq(t, "active sprint start", sprint.Start.UTC().Format(time.RFC3339), "2026-07-13T07:00:00Z")
-	assertEq(t, "active sprint end", sprint.End.UTC().Format(time.RFC3339), "2026-07-20T07:00:00Z")
+	assertEq(t, "active sprint activation", sprint.Activated.UTC().Format(time.RFC3339), "2026-07-13T07:05:00Z")
+
+	// Both sprints persist as entities; the closed one exposes its completion
+	// instant (completeDate), the active one has none yet.
+	sprints, err := st.Sprints()
+	if err != nil {
+		t.Fatalf("Sprints: %v", err)
+	}
+	if len(sprints) != 2 {
+		t.Fatalf("sprint entities = %d, want 2", len(sprints))
+	}
+	byName := map[string]Sprint{}
+	for _, sp := range sprints {
+		byName[sp.Name] = sp
+	}
+	assertEq(t, "Sprint 41 state", byName["Sprint 41"].State, "closed")
+	assertEq(t, "Sprint 41 completion", byName["Sprint 41"].CompletedAt.UTC().Format(time.RFC3339), "2026-07-13T06:30:00Z")
+	if !byName["Sprint 42"].CompletedAt.IsZero() {
+		t.Fatalf("active Sprint 42 must have no completion instant, got %v", byName["Sprint 42"].CompletedAt)
+	}
 
 	// --- Transitions ---
 	if got := countRows(t, st, "SELECT COUNT(*) FROM status_transition"); got != 6 {
