@@ -16,13 +16,35 @@ Group small, unrelated one-offs into a single PR rather than making a PR per tri
 
 ## The gate
 
-A PR must be green before merging:
+A PR must be green before merging — and this is **enforced by GitHub**, not just convention. A repository ruleset on `main` requires the CI status check **`build-and-test`** (the job in `.github/workflows/ci.yml`); GitHub refuses to merge a PR whose CI failed or hasn't reported. So run the same suite locally before pushing to avoid a red PR:
 
 ```sh
 make check      # unit/integration tests + smoke tests
 ```
 
-CI (`.github/workflows/ci.yml`) runs the same steps (gofmt, vet, build, `go test ./...`, smoke) on every push to `main` and every PR. Don't merge red.
+CI runs the same steps (gofmt, vet, build, `go test ./...`, smoke) on every push to `main` and every PR, and cancels superseded runs on a PR (`concurrency` with `cancel-in-progress`).
+
+The ruleset is reproducible via `gh api` (loose mode, no bypass so it applies to everyone including the maintainer):
+
+```sh
+gh api -X POST repos/timoangerer-9elf26/9elf26-jira-stats/rulesets --input - <<'JSON'
+{
+  "name": "require-ci-green",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "rules": [
+    { "type": "required_status_checks",
+      "parameters": {
+        "required_status_checks": [ { "context": "build-and-test" } ],
+        "strict_required_status_checks_policy": false
+      } }
+  ]
+}
+JSON
+```
+
+Full rationale and sharp edges (e.g. never add a `paths:` filter to a required workflow — it would leave the check `Pending` and wedge every merge) are in [`../research/pr-merge-gate-ci.md`](../research/pr-merge-gate-ci.md).
 
 ## Commit messages
 
