@@ -301,21 +301,32 @@ var workflowOrder = []string{
 
 // workflowRank maps each known workflow status to its left-to-right position,
 // derived once from workflowOrder so the ordering lives in exactly one place.
+// Keys are normalized (see normalizeStatus) so Jira casing quirks — e.g.
+// "Ready To Do" vs the constant's "Ready to Do" — still match their position.
 var workflowRank = func() map[string]int {
 	m := make(map[string]int, len(workflowOrder))
 	for i, status := range workflowOrder {
-		m[status] = i
+		m[normalizeStatus(status)] = i
 	}
 	return m
 }()
 
+// normalizeStatus folds a workflow status to a canonical form for rank lookup,
+// so matching against workflowOrder ignores casing differences in the Jira
+// status strings.
+func normalizeStatus(status string) string {
+	return strings.ToLower(status)
+}
+
 // workflowLess reports whether status a precedes status b in the DCAI workflow.
 // Known statuses sort in workflow order ahead of any unknown status (e.g. one
 // newly added in Jira); unknown statuses sort alphabetically among themselves.
-// It is the single ordering rule shared by every per-status projection.
+// Matching against the workflow is case-insensitive so Jira casing quirks map
+// to the intended position. It is the single ordering rule shared by every
+// per-status projection.
 func workflowLess(a, b string) bool {
-	ra, aKnown := workflowRank[a]
-	rb, bKnown := workflowRank[b]
+	ra, aKnown := workflowRank[normalizeStatus(a)]
+	rb, bKnown := workflowRank[normalizeStatus(b)]
 	switch {
 	case aKnown && bKnown:
 		return ra < rb
