@@ -1,0 +1,3 @@
+interface:
+  display_name: "Acceptance Review"
+  short_description: "Drive the running app to verify each acceptance criterion"

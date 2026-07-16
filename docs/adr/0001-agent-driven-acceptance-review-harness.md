@@ -59,3 +59,20 @@ API) to confirm each acceptance criterion holds. This keeps the existing
 - If visual-diff baselines are later added, they must be generated in one fixed
   environment (see `docs/research/agent-review-loop-infra.md`), since OS/font
   rendering differs across worktree hosts.
+
+## MCP driver setup (Playwright)
+
+The `acceptance-review` skill drives the browser via the **Playwright MCP** server (`@playwright/mcp`), chosen over the shelled-out `playwright-cli` for native, accessibility-tree-first browser tools.
+
+**Transport: stdio** (the default). Both Claude Code and Codex launch the server as a subprocess and speak MCP over stdio — no port to manage, no standalone process to babysit. (HTTP transport, `--port`, is available if a shared long-lived server is ever wanted; not needed here.) Run headless + isolated (`--headless --isolated`) so review leaves no visible windows and no persistent browser profile.
+
+- **Claude Code** — project-scoped, checked in: [`.mcp.json`](../../.mcp.json) at the repo root registers the `playwright` server. Claude Code prompts to approve a project MCP server the first time; approve it. (Loaded at startup — restart Claude Code after pulling this.)
+- **Codex** — user-level `~/.codex/config.toml` (not in the repo). Add:
+
+  ```toml
+  [mcp_servers.playwright]
+  command = "npx"
+  args = ["@playwright/mcp@latest", "--headless", "--isolated"]
+  ```
+
+Both need `npx` on the launching shell's PATH (as the existing `uvx`-based servers already assume) and a Playwright Chromium build (`npx playwright install chromium` if missing). Verified: the server answers an MCP `initialize` handshake and `tools/list` exposes the `browser_*` tool set.

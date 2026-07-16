@@ -1,0 +1,3 @@
+interface:
+  display_name: "Requesting Acceptance Review"
+  short_description: "Dispatch a sub-agent to acceptance-review a change against its ACs"
