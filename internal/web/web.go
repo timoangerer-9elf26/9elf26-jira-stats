@@ -43,6 +43,13 @@ type Rollups interface {
 	// ActiveSprintBoard is the whole active sprint as a per-status Kanban board
 	// (Done columns included) for the /board data-quality view.
 	ActiveSprintBoard() (store.Board, error)
+	// DailyStatusChanges returns active-sprint Task/Bug/Story tickets whose status
+	// changed within [from, to), filtered by assignee ("" = all,
+	// store.UnassignedAssignee = unassigned, else an exact name), for the /daily view.
+	DailyStatusChanges(assignee string, from, to time.Time) ([]store.DailyTicket, error)
+	// ActiveSprintAssignees lists the distinct named assignees of active-sprint
+	// work items, to populate the /daily assignee dropdown.
+	ActiveSprintAssignees() ([]string, error)
 }
 
 // Server holds the parsed templates and the rollup source, and implements
@@ -125,6 +132,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.handleIndex)
 	s.mux.HandleFunc("GET /now/board", s.handleNowBoard)
 	s.mux.HandleFunc("GET /board", s.handleBoard)
+	s.mux.HandleFunc("GET /daily", s.handleDaily)
+	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
 	s.mux.HandleFunc("GET /completed", s.handleCompleted)
 	s.mux.HandleFunc("GET /completed/results", s.handleCompletedResults)
 	s.mux.HandleFunc("GET /velocity", s.handleVelocity)

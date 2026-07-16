@@ -138,10 +138,12 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 	}{
 		{"/", "Now"},
 		{"/board", "Board"},
+		{"/daily", "Daily"},
 		{"/completed", "Completed"},
 		{"/velocity", "Velocity"},
 		{"/now/board", ""},
 		{"/completed/results", ""},
+		{"/daily/results", ""},
 		{"/static/output.css", ""},
 		{"/static/htmx.min.js", ""},
 	}

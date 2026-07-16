@@ -109,6 +109,12 @@ func (failingRollups) ActiveSprintWindow() (store.ActiveSprint, bool, error) {
 func (failingRollups) ActiveSprintBoard() (store.Board, error) {
 	return store.Board{}, errBoom
 }
+func (failingRollups) DailyStatusChanges(_ string, _, _ time.Time) ([]store.DailyTicket, error) {
+	return nil, errBoom
+}
+func (failingRollups) ActiveSprintAssignees() ([]string, error) {
+	return nil, errBoom
+}
 
 var errBoom = &boomError{}
 
