@@ -12,14 +12,14 @@
 {{end}}
 
 {{/* nav is the one shared top navigation across all views. The string argument
-     is the active view key ("now" | "board" | "daily" | "completed" |
+     is the active view key ("now" | "board" | "daily" | "weekly" |
      "velocity"); the matching tab is marked current. */}}
 {{define "nav"}}
 <nav data-testid="nav" aria-label="Primary" class="flex gap-1 border-b border-slate-200">
   {{template "nav-link" (dict "Href" "/" "Label" "Now" "Key" "now" "Active" .)}}
   {{template "nav-link" (dict "Href" "/board" "Label" "Board" "Key" "board" "Active" .)}}
   {{template "nav-link" (dict "Href" "/daily" "Label" "Daily" "Key" "daily" "Active" .)}}
-  {{template "nav-link" (dict "Href" "/completed" "Label" "Completed" "Key" "completed" "Active" .)}}
+  {{template "nav-link" (dict "Href" "/weekly" "Label" "Weekly" "Key" "weekly" "Active" .)}}
   {{template "nav-link" (dict "Href" "/velocity" "Label" "Velocity" "Key" "velocity" "Active" .)}}
 </nav>
 {{end}}
@@ -144,44 +144,28 @@
 </div>
 {{end}}
 
-{{/* date-range-picker is the reusable Completed-view range selector: preset
-     buttons plus a custom from/to form. Each control issues an HTMX GET that
-     swaps the #completed-results fragment. Takes a completedView (needs
-     .Presets and .Range). */}}
-{{define "date-range-picker"}}
-<div data-testid="date-range-picker" class="mt-8 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-  <div class="flex flex-wrap gap-2">
-    {{range .Presets}}
-    <button type="button"
-            data-preset="{{.Key}}"
-            hx-get="/completed/results?preset={{.Key}}"
-            hx-target="#completed-panel"
-            hx-swap="innerHTML"
-            class="rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
-                   {{if eq .Key $.Range.Preset}}border-slate-900 bg-slate-900 text-white{{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}"
-            {{if eq .Key $.Range.Preset}}aria-current="true"{{end}}>{{.Label}}</button>
+{{/* weekly-window-selector is the Weekly-view mode selector: the two window
+     modes (Work week / Live sprint) as radio pills. A change fires an HTMX GET
+     that swaps the whole #weekly-panel, so the picked mode stays highlighted
+     after the swap (the #10 whole-panel fix). Takes a weeklyView (needs
+     .Windows). */}}
+{{define "weekly-window-selector"}}
+<form data-testid="weekly-window-selector"
+      hx-get="/weekly/results"
+      hx-target="#weekly-panel"
+      hx-swap="innerHTML"
+      hx-trigger="change"
+      class="mt-8 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+  <fieldset class="flex flex-wrap gap-2">
+    {{range .Windows}}
+    <label class="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
+                  {{if .Selected}}border-slate-900 bg-slate-900 text-white{{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
+      <input type="radio" name="window" value="{{.Key}}" data-testid="weekly-window:{{.Key}}"{{if .Selected}} checked{{end}} class="sr-only">
+      {{.Label}}
+    </label>
     {{end}}
-  </div>
-
-  <form class="mt-3 flex flex-wrap items-end gap-3"
-        hx-get="/completed/results"
-        hx-target="#completed-panel"
-        hx-swap="innerHTML">
-    <input type="hidden" name="preset" value="custom">
-    <label class="text-xs font-medium text-slate-500">
-      From
-      <input type="date" name="from" value="{{.Range.FromDate}}"
-             class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
-    </label>
-    <label class="text-xs font-medium text-slate-500">
-      To
-      <input type="date" name="to" value="{{.Range.ToDate}}"
-             class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
-    </label>
-    <button type="submit"
-            class="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50">Apply</button>
-  </form>
-</div>
+  </fieldset>
+</form>
 {{end}}
 
 {{/* velocity-bar renders one ISO week of the Velocity view as an accessible
@@ -202,36 +186,45 @@
 </div>
 {{end}}
 
-{{/* completed-results is the Completed-view results fragment: the S/M/L/
-     no-estimate counts and points for the selected range, plus the resolved
-     range label. It is both embedded in the page and returned as the HTMX swap.
-     Takes a completedView (needs .Tally and .Range). */}}
-{{/* completed-panel is the swappable unit: the picker (so the active preset
-     highlight and the From/To inputs re-render to match the selection) plus the
-     results. HTMX swaps the whole panel, keeping the UI in sync with the data. */}}
-{{define "completed-panel"}}
-  {{template "date-range-picker" .}}
-  <div id="completed-results" class="mt-6">
-    {{template "completed-results" .}}
+{{/* weekly-panel is the swappable Weekly unit: the window-mode selector (so the
+     picked mode re-renders highlighted) plus the results — or, when no active
+     sprint is recorded, the friendly no-sprint state alone (same treatment as
+     the Board view, not a row of zeros). HTMX swaps the whole panel, keeping the
+     selector in sync with the data. Takes a weeklyView. */}}
+{{define "weekly-panel"}}
+  {{if .HasSprint}}
+  {{template "weekly-window-selector" .}}
+  <div id="weekly-results" class="mt-6">
+    {{template "weekly-results" .}}
   </div>
+  {{else}}
+  <div data-testid="weekly-no-sprint" class="mt-8 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+    <p>No active sprint to show. Once a sprint is active in Jira and synced, this week's numbers appear here.</p>
+  </div>
+  {{end}}
 {{end}}
 
-{{define "completed-results"}}
-<div data-testid="completed-results">
+{{/* weekly-results is the Weekly-view results fragment: the finished-this-week
+     size tally (S/M/L/no-estimate counts + points, current size) for the active
+     sprint over the selected window, plus the resolved window label. #35 grows
+     this into the three-category table (Started with / Added / Finished). Takes a
+     weeklyView (needs .Finished, .WindowLabel and .SprintName). */}}
+{{define "weekly-results"}}
+<div data-testid="weekly-results">
   <div class="flex items-baseline justify-between">
-    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Completed work</h2>
-    <span class="text-xs text-slate-400" data-testid="completed-range">{{.Range.Label}}</span>
+    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Finished this week{{if .SprintName}} in {{.SprintName}}{{end}}</h2>
+    <span class="text-xs text-slate-400" data-testid="weekly-window-label">{{.WindowLabel}}</span>
   </div>
   {{if .Empty}}
-  <p data-testid="completed-empty" class="mt-4 text-sm text-slate-500">No completed work in this range yet.</p>
+  <p data-testid="weekly-empty" class="mt-4 text-sm text-slate-500">No work finished in this window yet.</p>
   {{else}}
   <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5">
-    {{with .Tally}}
-    {{template "stat-card" (dict "Label" "S" "Value" .S "Testid" "completed:s")}}
-    {{template "stat-card" (dict "Label" "M" "Value" .M "Testid" "completed:m")}}
-    {{template "stat-card" (dict "Label" "L" "Value" .L "Testid" "completed:l")}}
-    {{template "stat-card" (dict "Label" "No estimate" "Value" .NoEstimate "Testid" "completed:none")}}
-    {{template "stat-card" (dict "Label" "Points" "Value" .Points "Testid" "completed:points")}}
+    {{with .Finished}}
+    {{template "stat-card" (dict "Label" "S" "Value" .S "Testid" "finished:s")}}
+    {{template "stat-card" (dict "Label" "M" "Value" .M "Testid" "finished:m")}}
+    {{template "stat-card" (dict "Label" "L" "Value" .L "Testid" "finished:l")}}
+    {{template "stat-card" (dict "Label" "No estimate" "Value" .NoEstimate "Testid" "finished:none")}}
+    {{template "stat-card" (dict "Label" "Points" "Value" .Points "Testid" "finished:points")}}
     {{end}}
   </div>
   {{end}}

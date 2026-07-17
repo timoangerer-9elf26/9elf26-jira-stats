@@ -15,7 +15,7 @@ Assemble a **self-contained** brief — the sub-agent starts fresh and sees only
 
 - **Issue + acceptance criteria** — the issue number and its ACs quoted verbatim (`gh issue view <n> --json title,body`).
 - **base/head SHAs** — the merge base and the branch tip, plus a `git diff --stat <base>..<head>` so the sub-agent knows the touched surface.
-- **Touched routes/behaviors** — the concrete list (e.g. `/completed` preset swap, `/board` columns).
+- **Touched routes/behaviors** — the concrete list (e.g. `/weekly` window swap, `/board` columns).
 - **How to run** — boot with `make review-up`, read `tmp/review/url`, drive via the Playwright MCP driver + direct HTTP, tear down with `make review-down`.
 
 ## Dispatch

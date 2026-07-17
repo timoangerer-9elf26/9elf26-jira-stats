@@ -45,7 +45,7 @@ func TestSharedNavRendersWithActiveItem(t *testing.T) {
 	cases := []struct{ path, activeKey string }{
 		{"/", "now"},
 		{"/board", "board"},
-		{"/completed", "completed"},
+		{"/weekly", "weekly"},
 		{"/velocity", "velocity"},
 	}
 	for _, c := range cases {
@@ -54,7 +54,7 @@ func TestSharedNavRendersWithActiveItem(t *testing.T) {
 		if !strings.Contains(body, `data-testid="nav"`) {
 			t.Errorf("%s: missing shared nav\n%s", c.path, body)
 		}
-		for _, link := range []string{`href="/"`, `href="/board"`, `href="/completed"`, `href="/velocity"`} {
+		for _, link := range []string{`href="/"`, `href="/board"`, `href="/weekly"`, `href="/velocity"`} {
 			if !strings.Contains(body, link) {
 				t.Errorf("%s: nav missing link %q", c.path, link)
 			}
@@ -79,7 +79,9 @@ func TestViewsRenderFriendlyEmptyStateBeforeFirstSync(t *testing.T) {
 	cases := []struct{ path, want string }{
 		{"/", "No open work"},
 		{"/now/board", "No open work"},
-		{"/completed", "No completed work"},
+		// A never-synced store has no active sprint, so Weekly shows the no-sprint
+		// empty state (same treatment as the Board), not a finished-work note.
+		{"/weekly", "No active sprint"},
 		{"/velocity", "No completed work"},
 	}
 	for _, c := range cases {
@@ -98,6 +100,9 @@ func (failingRollups) OpenByStatus() (store.OpenBoard, error) {
 	return store.OpenBoard{}, errBoom
 }
 func (failingRollups) CompletedInRange(_, _ time.Time) (store.SizeTally, error) {
+	return store.SizeTally{}, errBoom
+}
+func (failingRollups) FinishedInWindow(_, _ time.Time) (store.SizeTally, error) {
 	return store.SizeTally{}, errBoom
 }
 func (failingRollups) LastSyncedAt() (time.Time, bool, error) {
@@ -132,7 +137,7 @@ func TestRollupErrorRendersFriendlyMessage(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	for _, path := range []string{"/", "/board", "/completed", "/velocity"} {
+	for _, path := range []string{"/", "/board", "/weekly", "/velocity"} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)

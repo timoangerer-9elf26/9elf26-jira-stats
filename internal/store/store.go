@@ -639,7 +639,34 @@ func (s *Store) LastSyncedAt() (t time.Time, ok bool, err error) {
 // this method — one call per ISO week — rather than reimplementing crossing
 // detection.
 func (s *Store) CompletedInRange(from, to time.Time) (SizeTally, error) {
+	return s.completedTally(from, to, false)
+}
+
+// FinishedInWindow tallies the ACTIVE-SPRINT work items whose completion falls
+// in [from, to). It is CompletedInRange scoped to the active-sprint membership
+// snapshot (active_sprint IS NOT NULL): the Weekly view's "Finished this week"
+// figure. Crossing detection, the Done set (incl. Ready for Release),
+// current-size counting and the half-open [from, to) window are all identical to
+// CompletedInRange; only the active-sprint scope is added.
+//
+// The snapshot scope is deliberate for the skeleton (issue #34): membership is
+// "currently in the active sprint", not reconstructed at the window instant. The
+// started-with/added split (#35) refines membership using the recorded
+// sprint-membership history (IssuesInSprintAt / SprintEntry).
+func (s *Store) FinishedInWindow(from, to time.Time) (SizeTally, error) {
+	return s.completedTally(from, to, true)
+}
+
+// completedTally is the shared Done-crossing rollup behind CompletedInRange and
+// FinishedInWindow. activeSprintOnly adds the active-sprint membership scope; the
+// crossing detection, Done set and points arithmetic live here once so the two
+// callers can never drift.
+func (s *Store) completedTally(from, to time.Time, activeSprintOnly bool) (SizeTally, error) {
 	doneIn, doneArgs := statusInClause(doneStatuses)
+	scope := ""
+	if activeSprintOnly {
+		scope = "\n\t\t  AND issue.active_sprint IS NOT NULL"
+	}
 	query := `
 		SELECT ` + sizeTallyColumns + `
 		FROM issue
@@ -651,7 +678,7 @@ func (s *Store) CompletedInRange(from, to time.Time) (SizeTally, error) {
 			  AND (from_status IS NULL OR LOWER(from_status) NOT IN (` + doneIn + `))
 			GROUP BY issue_key
 		) crossing ON crossing.issue_key = issue.key
-		WHERE issue.type IN (` + rollupTypes + `)
+		WHERE issue.type IN (` + rollupTypes + `)` + scope + `
 		  AND crossing.completed_at >= ? AND crossing.completed_at < ?`
 
 	args := make([]any, 0, 2*len(doneStatuses)+2)
@@ -661,7 +688,7 @@ func (s *Store) CompletedInRange(from, to time.Time) (SizeTally, error) {
 
 	tally, err := scanTally(s.db.QueryRow(query, args...))
 	if err != nil {
-		return SizeTally{}, fmt.Errorf("completed in range: %w", err)
+		return SizeTally{}, fmt.Errorf("completed tally: %w", err)
 	}
 	return tally, nil
 }
