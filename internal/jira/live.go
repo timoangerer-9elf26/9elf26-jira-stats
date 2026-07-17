@@ -114,7 +114,7 @@ func (c *LiveClient) search(ctx context.Context, jql string) ([]Issue, error) {
 		q := url.Values{}
 		q.Set("jql", jql)
 		q.Set("maxResults", strconv.Itoa(searchPageSize))
-		q.Set("fields", "summary,issuetype,status,assignee,"+sizeFieldID+","+sprintFieldID)
+		q.Set("fields", "summary,issuetype,status,assignee,created,creator,"+sizeFieldID+","+sprintFieldID)
 		q.Set("expand", "changelog")
 		if pageToken != "" {
 			q.Set("nextPageToken", pageToken)
@@ -163,6 +163,11 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		return Issue{}, fmt.Errorf("sprint changelog for %s: %w", dto.Key, err)
 	}
 
+	createdAt, err := optionalJiraTime(dto.Fields.Created)
+	if err != nil {
+		return Issue{}, fmt.Errorf("created for %s: %w", dto.Key, err)
+	}
+
 	iss := Issue{
 		Key:            dto.Key,
 		Type:           dto.Fields.IssueType.Name,
@@ -172,6 +177,8 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		Size:           mapSize(dto.Fields.Size),
 		Sprint:         currentSprint(dto.Fields.Sprint),
 		Assignee:       assigneeName(dto.Fields.Assignee),
+		CreatedAt:      createdAt,
+		Creator:        assigneeName(dto.Fields.Creator),
 		Changelog:      entries,
 		SprintChanges:  sprintChanges,
 	}
@@ -256,6 +263,8 @@ type fieldsDTO struct {
 	IssueType issueTypeDTO `json:"issuetype"`
 	Status    statusDTO    `json:"status"`
 	Assignee  *userDTO     `json:"assignee"`
+	Created   string       `json:"created"` // Jira's immutable creation timestamp
+	Creator   *userDTO     `json:"creator"` // immutable author (NOT the mutable reporter)
 	Size      *selectDTO   `json:"customfield_10040"`
 	Sprint    []sprintDTO  `json:"customfield_10020"`
 }

@@ -167,6 +167,76 @@ func latestChange(t DailyTicket) time.Time {
 	return t.Changes[len(t.Changes)-1].TransitionedAt
 }
 
+// CreatedTicket is a ticket authored (by its immutable Jira Creator) within the
+// Daily window: its display fields plus the creation instant. Unlike the
+// movement digest, this is NOT scoped to the active sprint — a ticket you
+// authored is something you did regardless of whether it landed in the sprint
+// (see docs/adr/0003).
+type CreatedTicket struct {
+	Key       string
+	Summary   string
+	Type      string // Task, Bug, Story, Epic, Sub-task
+	Size      string // 'S'/'M'/'L', or "" for no estimate
+	Creator   string // Jira Creator display name
+	CreatedAt time.Time
+}
+
+// IssuesCreatedInRange returns the tickets whose immutable Jira Creator matches
+// the given creator and whose creation instant falls in [from, to), most-recent
+// first. It is deliberately NOT sprint-scoped (see CreatedTicket): every ticket
+// you authored counts, in the sprint or not.
+//
+// The creator argument mirrors DailyStatusChanges' assignee filter: "" means any
+// creator; UnassignedAssignee means only tickets with no recorded creator; any
+// other value is an exact display-name match. from/to are absolute instants; a
+// ticket is included when its stored UTC created_at is >= from and < to.
+func (s *Store) IssuesCreatedInRange(creator string, from, to time.Time) ([]CreatedTicket, error) {
+	query := `
+		SELECT key, summary, type, size, creator, created_at
+		FROM issue
+		WHERE created_at IS NOT NULL
+		  AND created_at >= ? AND created_at < ?`
+	args := []any{from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339)}
+
+	switch creator {
+	case "":
+		// Any creator — no additional predicate.
+	case UnassignedAssignee:
+		query += ` AND (creator IS NULL OR creator = '')`
+	default:
+		query += ` AND creator = ?`
+		args = append(args, creator)
+	}
+	query += ` ORDER BY created_at DESC, key`
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("issues created in range: %w", err)
+	}
+	defer rows.Close()
+
+	var tickets []CreatedTicket
+	for rows.Next() {
+		var key, summary, typ, createdStr string
+		var size, creatorCol sql.NullString
+		if err := rows.Scan(&key, &summary, &typ, &size, &creatorCol, &createdStr); err != nil {
+			return nil, fmt.Errorf("scan created row: %w", err)
+		}
+		createdAt, err := time.Parse(time.RFC3339, createdStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse created_at %q: %w", createdStr, err)
+		}
+		tickets = append(tickets, CreatedTicket{
+			Key: key, Summary: summary, Type: typ, Size: size.String,
+			Creator: creatorCol.String, CreatedAt: createdAt,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate created rows: %w", err)
+	}
+	return tickets, nil
+}
+
 // ActiveSprintAssignees returns the distinct, non-empty assignees of active-
 // sprint work items (Task/Bug/Story), sorted alphabetically — the named options
 // for the Daily view's assignee dropdown. Unassigned tickets are represented by

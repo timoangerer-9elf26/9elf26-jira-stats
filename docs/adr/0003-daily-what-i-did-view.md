@@ -41,10 +41,13 @@ internal dashboard until the sync is touched, at which point a stabler key
 
 ## Consequences
 
-- **"Tickets I created" is phased out to a follow-up (#44).** It needs the issue
-  fetch to pull `created` + `creator` and a schema migration for two columns —
-  the one part of this feature that isn't reusable existing data. The movement
-  digest ships first without it.
+- **"Tickets I created" shipped in #44.** It added `created` + `creator` to the
+  issue fetch and a schema migration for the two columns (the one part of this
+  feature that wasn't reusable existing data), plus a store query for tickets a
+  display name authored in the window; its count feeds the digest headline
+  ("moved 5 — …, created 2"). The section is NOT sprint-scoped (see above).
+  Identity still keys on display name — the stabler `accountId`/email key noted
+  above remains deferred even though the sync was touched.
 - **The "Since yesterday" window spans the last working day (#48).** Originally it
   ran to 00:00 of the previous calendar day, so a Monday morning meant "since
   Sunday 00:00" and missed Friday's work. The window now walks back over weekends

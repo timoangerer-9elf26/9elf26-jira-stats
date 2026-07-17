@@ -79,15 +79,24 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 	if iss.ActiveSprint != "" {
 		activeSprint = iss.ActiveSprint
 	}
+	var createdAt any
+	if !iss.CreatedAt.IsZero() {
+		createdAt = iss.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	var creator any
+	if iss.Creator != "" {
+		creator = iss.Creator
+	}
 	if _, err := tx.Exec(
-		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, synced_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, created_at, creator, synced_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
 		     type=excluded.type, summary=excluded.summary, status=excluded.status,
 		     status_category=excluded.status_category, size=excluded.size,
 		     sprint=excluded.sprint, active_sprint=excluded.active_sprint,
-		     assignee=excluded.assignee, synced_at=excluded.synced_at`,
-		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, syncedAt,
+		     assignee=excluded.assignee, created_at=excluded.created_at,
+		     creator=excluded.creator, synced_at=excluded.synced_at`,
+		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, createdAt, creator, syncedAt,
 	); err != nil {
 		return fmt.Errorf("upsert issue %s: %w", iss.Key, err)
 	}

@@ -54,6 +54,11 @@ type Rollups interface {
 	// ActiveSprintAssignees lists the distinct named assignees of active-sprint
 	// work items, to populate the /daily assignee dropdown.
 	ActiveSprintAssignees() ([]string, error)
+	// IssuesCreatedInRange returns the tickets authored (by their immutable Jira
+	// Creator) within [from, to), filtered by creator ("" = any,
+	// store.UnassignedAssignee = none, else an exact name), for the Daily view's
+	// "tickets I created" section. Deliberately NOT sprint-scoped.
+	IssuesCreatedInRange(creator string, from, to time.Time) ([]store.CreatedTicket, error)
 }
 
 // Server holds the parsed templates and the rollup source, and implements

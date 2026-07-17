@@ -67,11 +67,16 @@ func TestBackfillProjectsFakeJiraIntoStore(t *testing.T) {
 	// entry it also carries is ignored.
 	assertEq(t, "DCAI-1 active sprint", one.activeSprint, "Sprint 42")
 	assertEq(t, "DCAI-1 assignee", one.assignee, "Ada")
+	// The immutable Creator and creation instant sync through and are stored UTC.
+	assertEq(t, "DCAI-1 creator", one.creator, "Ada")
+	assertEq(t, "DCAI-1 created_at", one.createdAt, "2026-07-08T07:00:00Z")
 
 	two := readIssue(t, st, "DCAI-2")
 	assertEq(t, "DCAI-2 size", two.size, "M")
 	assertEq(t, "DCAI-2 active sprint", two.activeSprint, "Sprint 42")
 	assertEq(t, "DCAI-2 assignee (unassigned)", two.assignee, "")
+	// Creator is the immutable author even though the ticket is unassigned.
+	assertEq(t, "DCAI-2 creator", two.creator, "Grace")
 
 	three := readIssue(t, st, "DCAI-3")
 	assertEq(t, "DCAI-3 size (no estimate)", three.size, "")
@@ -79,6 +84,7 @@ func TestBackfillProjectsFakeJiraIntoStore(t *testing.T) {
 	// DCAI-3 is in no active sprint (empty sprint array) -> NULL active_sprint.
 	assertEq(t, "DCAI-3 active sprint (none)", three.activeSprint, "")
 	assertEq(t, "DCAI-3 assignee", three.assignee, "Alan")
+	assertEq(t, "DCAI-3 creator", three.creator, "Alan")
 
 	// The active-sprint window derives from the sprint ENTITY fetched from the
 	// Agile API: its name and window-start instant, taken from startDate (Jira Cloud
@@ -196,16 +202,16 @@ func countRows(t *testing.T, st *Store, query string) int {
 }
 
 type issueRow struct {
-	typ, summary, status, statusCategory, size, sprint, activeSprint, assignee string
+	typ, summary, status, statusCategory, size, sprint, activeSprint, assignee, createdAt, creator string
 }
 
 func readIssue(t *testing.T, st *Store, key string) issueRow {
 	t.Helper()
 	var r issueRow
-	var size, sprint, activeSprint, assignee any
+	var size, sprint, activeSprint, assignee, createdAt, creator any
 	err := st.db.QueryRow(
-		`SELECT type, summary, status, status_category, size, sprint, active_sprint, assignee FROM issue WHERE key=?`, key,
-	).Scan(&r.typ, &r.summary, &r.status, &r.statusCategory, &size, &sprint, &activeSprint, &assignee)
+		`SELECT type, summary, status, status_category, size, sprint, active_sprint, assignee, created_at, creator FROM issue WHERE key=?`, key,
+	).Scan(&r.typ, &r.summary, &r.status, &r.statusCategory, &size, &sprint, &activeSprint, &assignee, &createdAt, &creator)
 	if err != nil {
 		t.Fatalf("read issue %s: %v", key, err)
 	}
@@ -213,6 +219,8 @@ func readIssue(t *testing.T, st *Store, key string) issueRow {
 	r.sprint = nullStr(sprint)
 	r.activeSprint = nullStr(activeSprint)
 	r.assignee = nullStr(assignee)
+	r.createdAt = nullStr(createdAt)
+	r.creator = nullStr(creator)
 	return r
 }
 

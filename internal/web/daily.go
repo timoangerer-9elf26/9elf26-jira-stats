@@ -96,13 +96,35 @@ type dailyDigestBucketView struct {
 }
 
 // dailyDigestView is the summary layer above the granular log: a one-line
-// Headline (e.g. "moved 5 — 2 finished, 2 advanced, 1 pulled back") plus the
-// non-empty buckets in Finished → Advanced → Pulled back order. Present is false
-// when the selection moved nothing, so the template omits the whole section.
+// Headline (e.g. "moved 5 — 2 finished, 2 advanced, 1 pulled back, created 2")
+// plus the non-empty movement buckets in Finished → Advanced → Pulled back
+// order. Present is false only when the selection moved nothing AND created
+// nothing, so the template omits the whole section.
 type dailyDigestView struct {
 	Present  bool
 	Headline string
 	Buckets  []dailyDigestBucketView
+}
+
+// dailyCreatedTicketView is one ticket in the "tickets I created" section: its
+// display fields, resolved Jira link (empty when unconfigured), and the creation
+// instant rendered in the display timezone.
+type dailyCreatedTicketView struct {
+	Key     string
+	Summary string
+	Type    string
+	Size    string // "S"/"M"/"L" or "no estimate"
+	Href    string
+	At      string
+}
+
+// dailyCreatedView is the "tickets I created" section: the tickets the selection
+// authored within the window (NOT sprint-scoped, unlike the movement digest) and
+// their count. Empty is true when the selection created nothing in the window.
+type dailyCreatedView struct {
+	Count   int
+	Tickets []dailyCreatedTicketView
+	Empty   bool
 }
 
 // dailyView is the model for the Daily page and its panel fragment. HasSprint is
@@ -114,6 +136,7 @@ type dailyView struct {
 	Assignees  []dailyAssigneeOption
 	Windows    []dailyWindowView
 	Digest     dailyDigestView
+	Created    dailyCreatedView
 	Cards      []dailyCardView
 	Empty      bool
 }
@@ -205,6 +228,21 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 	if err != nil {
 		return dailyView{}, err
 	}
+	// "Tickets I created" is pinned to the configured "me", NOT the selected
+	// assignee: it is a personal "what I authored" panel (see the issue AC and
+	// docs/adr/0003), so it stays on me even while the dropdown re-scopes the
+	// movement digest to a teammate. Same window as the rest of Daily, but NOT
+	// sprint-scoped: a ticket you authored counts whether or not it landed in the
+	// sprint. With no me configured the section is simply empty (no crash,
+	// consistent with #46's fallback) rather than listing everyone's tickets.
+	var created []store.CreatedTicket
+	if s.me != "" {
+		created, err = s.rollups.IssuesCreatedInRange(s.me, from, to)
+		if err != nil {
+			return dailyView{}, err
+		}
+	}
+	view.Created = s.dailyCreated(created)
 	for _, tk := range tickets {
 		card := dailyCardView{
 			Key:      tk.Key,
@@ -223,19 +261,40 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 		}
 		view.Cards = append(view.Cards, card)
 	}
-	view.Digest = s.dailyDigest(tickets)
+	view.Digest = s.dailyDigest(tickets, view.Created.Count)
 	view.Empty = len(view.Cards) == 0
 	return view, nil
 }
 
-// dailyDigest summarises the moved tickets into the digest's net-movement
-// buckets. It buckets each ticket by its Movement, keeps the granular log's
-// recency order within each bucket, drops empty buckets, and builds the headline
-// (e.g. "moved 5 — 2 finished, 2 advanced, 1 pulled back") from the same counts.
-// Returns a zero (Present=false) digest when nothing moved, so the template
-// omits the whole section.
-func (s *Server) dailyDigest(tickets []store.DailyTicket) dailyDigestView {
-	if len(tickets) == 0 {
+// dailyCreated builds the "tickets I created" section from the created tickets,
+// keeping the store's most-recent-first order. Empty is set when nothing was
+// created so the template can show a friendly empty state.
+func (s *Server) dailyCreated(created []store.CreatedTicket) dailyCreatedView {
+	view := dailyCreatedView{Count: len(created), Empty: len(created) == 0}
+	for _, tk := range created {
+		view.Tickets = append(view.Tickets, dailyCreatedTicketView{
+			Key:     tk.Key,
+			Summary: tk.Summary,
+			Type:    tk.Type,
+			Size:    sizeDisplay(tk.Size),
+			Href:    s.jiraIssueURL(tk.Key),
+			At:      tk.CreatedAt.In(s.loc).Format(dailyTimeFormat),
+		})
+	}
+	return view
+}
+
+// dailyDigest summarises the window into the digest: the moved tickets bucketed
+// by net-movement (Finished / Advanced / Pulled back) plus the count of tickets
+// the selection created. It keeps the granular log's recency order within each
+// bucket, drops empty buckets, and builds the headline from the same counts
+// (e.g. "moved 5 — 2 finished, 2 advanced, 1 pulled back, created 2"). The
+// created count feeds the headline alongside the movement count but the bucket
+// grid stays movement-only (the created tickets get their own section). Returns a
+// zero (Present=false) digest only when nothing moved AND nothing was created, so
+// the template omits the whole section.
+func (s *Server) dailyDigest(tickets []store.DailyTicket, createdCount int) dailyDigestView {
+	if len(tickets) == 0 && createdCount == 0 {
 		return dailyDigestView{}
 	}
 	// Display order: Finished, Advanced, Pulled back.
@@ -260,17 +319,24 @@ func (s *Server) dailyDigest(tickets []store.DailyTicket) dailyDigestView {
 	}
 	var buckets []dailyDigestBucketView
 	var parts []string
-	for _, b := range []dailyDigestBucketView{finished, advanced, pulledBack} {
-		b.Count = len(b.Tickets)
-		if b.Count == 0 {
-			continue
+	if len(tickets) > 0 {
+		var movementParts []string
+		for _, b := range []dailyDigestBucketView{finished, advanced, pulledBack} {
+			b.Count = len(b.Tickets)
+			if b.Count == 0 {
+				continue
+			}
+			buckets = append(buckets, b)
+			movementParts = append(movementParts, fmt.Sprintf("%d %s", b.Count, strings.ToLower(b.Label)))
 		}
-		buckets = append(buckets, b)
-		parts = append(parts, fmt.Sprintf("%d %s", b.Count, strings.ToLower(b.Label)))
+		parts = append(parts, fmt.Sprintf("moved %d — %s", len(tickets), strings.Join(movementParts, ", ")))
+	}
+	if createdCount > 0 {
+		parts = append(parts, fmt.Sprintf("created %d", createdCount))
 	}
 	return dailyDigestView{
 		Present:  true,
-		Headline: fmt.Sprintf("moved %d — %s", len(tickets), strings.Join(parts, ", ")),
+		Headline: strings.Join(parts, ", "),
 		Buckets:  buckets,
 	}
 }
