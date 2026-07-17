@@ -1,5 +1,12 @@
 [
   {
+    "ID": 27,
+    "Name": "KW27",
+    "State": "closed",
+    "ActivatedAt": "2026-06-29T07:00:00Z",
+    "CompletedAt": "2026-07-06T06:30:00Z"
+  },
+  {
     "ID": 28,
     "Name": "KW28",
     "State": "closed",
