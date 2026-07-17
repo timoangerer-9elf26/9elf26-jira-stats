@@ -45,9 +45,10 @@ internal dashboard until the sync is touched, at which point a stabler key
   fetch to pull `created` + `creator` and a schema migration for two columns —
   the one part of this feature that isn't reusable existing data. The movement
   digest ships first without it.
-- **The "Since yesterday" window still has a Monday gap.** On a Monday morning it
-  means "since Sunday 00:00" and misses Friday's work. Left unfixed; a
-  "since last working day" window is future scope.
+- **The "Since yesterday" window spans the last working day (#48).** Originally it
+  ran to 00:00 of the previous calendar day, so a Monday morning meant "since
+  Sunday 00:00" and missed Friday's work. The window now walks back over weekends
+  to the last working day, so a Monday (and Sat/Sun) reaches Friday.
 - **Net-zero churn folds into Advanced.** A ticket moved out of and back to the
   same status within the window has no net movement but did see activity; it is
   bucketed as Advanced rather than given its own category.
