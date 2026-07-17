@@ -35,6 +35,35 @@ The time span the Weekly view measures over. Selectable between two modes:
 In both modes, *membership* is the set of tickets in the active sprint; the mode
 changes only the time window.
 
+## Daily view
+
+The morning standup overview. For a chosen **assignee** — defaulting to **me** —
+over a recent window, it answers "what did this person do since yesterday". Two
+stacked sections: a **daily digest** summarising the net outcome, and beneath it
+the granular per-transition log. Scoped to active-sprint work items.
+
+## Me
+
+The single configured identity the Daily view revolves around, set in config as
+a Jira **display name**. Daily defaults to *me*; every other assignee stays
+selectable from the dropdown. Attribution is by a ticket's *current* assignee —
+so a status move made while a ticket was mine but later reassigned away is
+credited to the new assignee, not me (a known limitation, accepted until the
+sync captures the actor of each transition).
+
+## Daily digest
+
+The Daily view's summary of what *me* (or the selected assignee) did in the
+window, bucketing each moved ticket by its **net movement** — the workflow
+distance from where it sat at the window start to where it sits at the window
+end — into exactly one of:
+
+- **Finished** — crossed into the Done set within the window (the same crossing
+  the [Weekly view](#weekly-view-metrics) counts as Finished).
+- **Advanced** — net forward in the workflow but not into Done. Net-zero churn
+  (moved out and back to the same status) folds in here.
+- **Pulled back** — net backward in the workflow, including a move to Canceled.
+
 ## Ticket status buckets
 
 The DCAI workflow statuses group into buckets for the sprint rollups. Workflow
