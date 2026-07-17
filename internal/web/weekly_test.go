@@ -153,99 +153,160 @@ func TestWeeklyResultsFragmentReflectsSelectedMode(t *testing.T) {
 	}
 }
 
-// TestWeeklyWorkWeekWindowIsMondayToSaturdayBerlin asserts the Work week window
-// is Mon 00:00 → Sat 00:00 Europe/Berlin for the week containing now: a Friday
-// completion counts, a Saturday one does not (the weekend is excluded).
-func TestWeeklyWorkWeekWindowIsMondayToSaturdayBerlin(t *testing.T) {
+// weeklyEntered / weeklyStatus build one membership / status changelog change for
+// the Weekly HTTP fixtures.
+func weeklyEntered(entryID string, at time.Time) jira.SprintMembershipChange {
+	return jira.SprintMembershipChange{EntryID: entryID, SprintID: 29, SprintName: "KW29", Entered: true, Timestamp: at}
+}
+
+func weeklyStatus(id, from, to string, at time.Time) jira.ChangelogEntry {
+	return jira.ChangelogEntry{ID: id, Field: "status", From: from, To: to, Timestamp: at}
+}
+
+// weeklyIssue builds a KW29 active-sprint Story with a status changelog and
+// sprint-membership changes, so the Weekly categories reconstruct its status and
+// membership at the window bounds. current is the CURRENT status (drives the
+// status_category); size is the CURRENT size.
+func weeklyIssue(key, size, current string, changelog []jira.ChangelogEntry, sprintChanges []jira.SprintMembershipChange) jira.Issue {
+	cat := "In Progress"
+	switch current {
+	case "DONE (This Sprint)", "Ready for Release", "Released / Deployed":
+		cat = "Done"
+	}
+	return jira.Issue{
+		Key: key, Type: "Story", Summary: key, Status: current, StatusCategory: cat,
+		Size: size, ActiveSprint: "KW29",
+		Changelog:     changelog,
+		SprintChanges: sprintChanges,
+	}
+}
+
+// TestWeeklyWorkWeekTableCoversAllCategories drives the Work week window (Mon
+// 00:00 → Sat 00:00 Europe/Berlin) end-to-end over the four required cases:
+//   - DCAI-1: open + in the sprint at the window start, finishes Friday (in
+//     window) → Started with + finished-from-started.
+//   - DCAI-2: open + in the sprint at the window start, finishes Saturday (the
+//     weekend is excluded) → Started with, NOT finished.
+//   - DCAI-3: entered the sprint mid-window, never finished → Added.
+//   - DCAI-4: entered the sprint mid-window and finished mid-window → Added +
+//     finished-from-added.
+//
+// It also asserts the Total row = Started-with + Added, and the finished total.
+func TestWeeklyWorkWeekTableCoversAllCategories(t *testing.T) {
 	loc := berlin(t)
-	// now is Wed 2026-07-15; this ISO week is Mon 07-13 .. Sat 07-18.
-	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
+	// This ISO week is Mon 07-13 .. Sat 07-18 (Berlin). now is Friday afternoon.
+	now := time.Date(2026, time.July, 17, 18, 0, 0, 0, loc)
+	beforeStart := time.Date(2026, time.July, 12, 0, 0, 0, 0, loc) // before Mon 00:00
+	tue := time.Date(2026, time.July, 14, 10, 0, 0, 0, loc)        // mid-window
+	wed := time.Date(2026, time.July, 15, 9, 0, 0, 0, loc)         // mid-window
+	fri := time.Date(2026, time.July, 17, 9, 0, 0, 0, loc)         // in window
+	sat := time.Date(2026, time.July, 18, 9, 0, 0, 0, loc)         // Saturday, excluded
+
 	app := newTestAppAt(t, &jira.FakeClient{
 		Sprints: activeSprintKW29(),
 		Issues: []jira.Issue{
-			finishedIssue("DCAI-1", "M", "DONE (This Sprint)", time.Date(2026, time.July, 17, 9, 0, 0, 0, loc)), // Friday, in window
-			finishedIssue("DCAI-2", "L", "DONE (This Sprint)", time.Date(2026, time.July, 18, 9, 0, 0, 0, loc)), // Saturday, excluded
-			finishedIssue("DCAI-3", "S", "DONE (This Sprint)", time.Date(2026, time.July, 19, 9, 0, 0, 0, loc)), // Sunday, excluded
+			weeklyIssue("DCAI-1", "M", "DONE (This Sprint)",
+				[]jira.ChangelogEntry{
+					weeklyStatus("s1a", "Ready To Do", "In Progress", beforeStart),
+					weeklyStatus("s1b", "In Progress", "DONE (This Sprint)", fri),
+				},
+				[]jira.SprintMembershipChange{weeklyEntered("m1", beforeStart)}),
+			weeklyIssue("DCAI-2", "L", "DONE (This Sprint)",
+				[]jira.ChangelogEntry{
+					weeklyStatus("s2a", "Ready To Do", "In Progress", beforeStart),
+					weeklyStatus("s2b", "In Progress", "DONE (This Sprint)", sat),
+				},
+				[]jira.SprintMembershipChange{weeklyEntered("m2", beforeStart)}),
+			weeklyIssue("DCAI-3", "S", "Ready To Do",
+				nil,
+				[]jira.SprintMembershipChange{weeklyEntered("m3", tue)}),
+			weeklyIssue("DCAI-4", "M", "DONE (This Sprint)",
+				[]jira.ChangelogEntry{
+					weeklyStatus("s4a", "Ready To Do", "In Progress", tue),
+					weeklyStatus("s4b", "In Progress", "DONE (This Sprint)", wed),
+				},
+				[]jira.SprintMembershipChange{weeklyEntered("m4", tue)}),
 		},
 	}, now)
 
 	body := get(t, app.URL+"/weekly/results?window=work-week")
 	wants := []string{
-		`data-testid="finished:m">1<`, // Friday counts
-		`data-testid="finished:l">0<`, // Saturday excluded
-		`data-testid="finished:s">0<`, // Sunday excluded
-		`data-testid="finished:points">2<`,
 		`data-testid="weekly-window-label">13 Jul – 17 Jul 2026<`, // Mon → Fri (Sat exclusive)
+		// Started with = DCAI-1 (M) + DCAI-2 (L): 2 tickets, 5 pts.
+		`data-testid="weekly-started:tickets">2<`,
+		`data-testid="weekly-started:points">5<`,
+		// Added = DCAI-3 (S) + DCAI-4 (M): 2 tickets, 3 pts.
+		`data-testid="weekly-added:tickets">2<`,
+		`data-testid="weekly-added:points">3<`,
+		// Total row = Started-with + Added: 4 tickets, 8 pts.
+		`data-testid="weekly-total:tickets">4<`,
+		`data-testid="weekly-total:points">8<`,
+		// Finished-from-started = DCAI-1 (Friday); DCAI-2 (Saturday) excluded.
+		`data-testid="weekly-started:finished-tickets">1<`,
+		`data-testid="weekly-started:finished-points">2<`,
+		// Finished-from-added = DCAI-4.
+		`data-testid="weekly-added:finished-tickets">1<`,
+		`data-testid="weekly-added:finished-points">2<`,
+		// Finished total = 2 tickets, 4 pts.
+		`data-testid="weekly-total:finished-tickets">2<`,
+		`data-testid="weekly-total:finished-points">4<`,
 	}
 	for _, w := range wants {
 		if !strings.Contains(body, w) {
-			t.Errorf("work-week window wrong; missing %q\n%s", w, body)
+			t.Errorf("work-week table wrong; missing %q\n%s", w, body)
 		}
 	}
 }
 
-// TestWeeklyLiveSprintWindowIsActivationToNow asserts the Live sprint window runs
-// from the active sprint's ACTUAL activation instant to now: a completion before
-// activation is excluded; one after counts.
-func TestWeeklyLiveSprintWindowIsActivationToNow(t *testing.T) {
+// TestWeeklyLiveSprintWindowStartsAtActivation asserts the Live sprint window
+// starts at the sprint's ACTUAL activation instant (not Monday 00:00): a ticket
+// whose Done crossing falls between Monday and activation is excluded from
+// Finished, and a ticket already Done at activation is not "started with". Under a
+// (wrong) Monday-start window both would count — so the numbers distinguish the
+// modes.
+func TestWeeklyLiveSprintWindowStartsAtActivation(t *testing.T) {
 	loc := berlin(t)
 	// KW29 activated 2026-07-13 09:00 Berlin (07:00 UTC, per activeSprintKW29).
 	now := time.Date(2026, time.July, 18, 12, 0, 0, 0, loc)
+	beforeMonday := time.Date(2026, time.July, 11, 0, 0, 0, 0, loc)
+	beforeActivation := time.Date(2026, time.July, 13, 8, 0, 0, 0, loc) // Mon 08:00, before activation 09:00
+	afterActivation := time.Date(2026, time.July, 15, 9, 0, 0, 0, loc)
+
 	app := newTestAppAt(t, &jira.FakeClient{
 		Sprints: activeSprintKW29(),
 		Issues: []jira.Issue{
-			finishedIssue("DCAI-1", "M", "DONE (This Sprint)", time.Date(2026, time.July, 15, 9, 0, 0, 0, loc)), // after activation, counts
-			finishedIssue("DCAI-2", "L", "DONE (This Sprint)", time.Date(2026, time.July, 12, 9, 0, 0, 0, loc)), // before activation, excluded
+			// Started with (open + member at activation), finishes after activation.
+			weeklyIssue("DCAI-1", "M", "DONE (This Sprint)",
+				[]jira.ChangelogEntry{
+					weeklyStatus("s1a", "Ready To Do", "In Progress", beforeMonday),
+					weeklyStatus("s1b", "In Progress", "DONE (This Sprint)", afterActivation),
+				},
+				[]jira.SprintMembershipChange{weeklyEntered("m1", beforeMonday)}),
+			// Crossed into Done BEFORE activation: at activation it is already Done
+			// (not open → not started-with) and its crossing precedes the window
+			// start → not finished. Under a Monday-start window it would be both.
+			weeklyIssue("DCAI-2", "L", "DONE (This Sprint)",
+				[]jira.ChangelogEntry{
+					weeklyStatus("s2a", "Ready To Do", "In Progress", beforeMonday),
+					weeklyStatus("s2b", "In Progress", "DONE (This Sprint)", beforeActivation),
+				},
+				[]jira.SprintMembershipChange{weeklyEntered("m2", beforeMonday)}),
 		},
 	}, now)
 
 	body := get(t, app.URL+"/weekly/results?window=live-sprint")
 	wants := []string{
-		`data-testid="finished:m">1<`,
-		`data-testid="finished:l">0<`,
-		`data-testid="finished:points">2<`,
 		`data-testid="weekly-window-label">13 Jul – 17 Jul 2026<`, // activation day → day before now
+		`data-testid="weekly-started:tickets">1<`,                 // only DCAI-1 (DCAI-2 already Done at activation)
+		`data-testid="weekly-started:points">2<`,
+		`data-testid="weekly-total:tickets">1<`,
+		`data-testid="weekly-started:finished-tickets">1<`, // DCAI-1 only
+		`data-testid="weekly-total:finished-points">2<`,    // DCAI-2 crossing before activation excluded
 	}
 	for _, w := range wants {
 		if !strings.Contains(body, w) {
-			t.Errorf("live-sprint window did not use the activation instant; missing %q\n%s", w, body)
+			t.Errorf("live-sprint window did not start at the activation instant; missing %q\n%s", w, body)
 		}
-	}
-}
-
-// TestWeeklyFinishedTallyScopedToActiveSprintInclReadyForRelease asserts the
-// finished tally counts active-sprint crossings only (a non-active-sprint
-// completion in the same window is excluded) and that a crossing into Ready for
-// Release counts as finished (the corrected Done set).
-func TestWeeklyFinishedTallyScopedToActiveSprintInclReadyForRelease(t *testing.T) {
-	loc := berlin(t)
-	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
-	fri := time.Date(2026, time.July, 17, 9, 0, 0, 0, loc)
-	inWeek := time.Date(2026, time.July, 14, 9, 0, 0, 0, loc)
-	app := newTestAppAt(t, &jira.FakeClient{
-		Sprints: activeSprintKW29(),
-		Issues: []jira.Issue{
-			finishedIssue("DCAI-1", "S", "DONE (This Sprint)", inWeek),
-			finishedIssue("DCAI-2", "M", "Ready for Release", fri), // Ready for Release is a Done state
-			// Completed in-window but NOT in the active sprint → excluded from the tally.
-			completedIssue("DCAI-9", "L", inWeek),
-		},
-	}, now)
-
-	body := get(t, app.URL+"/weekly/results?window=work-week")
-	wants := []string{
-		`data-testid="finished:s">1<`,      // DCAI-1
-		`data-testid="finished:m">1<`,      // DCAI-2 (Ready for Release counts)
-		`data-testid="finished:l">0<`,      // DCAI-9 excluded (not active sprint)
-		`data-testid="finished:points">3<`, // S(1) + M(2)
-	}
-	for _, w := range wants {
-		if !strings.Contains(body, w) {
-			t.Errorf("finished tally wrong; missing %q\n%s", w, body)
-		}
-	}
-	if strings.Contains(body, "DCAI-9") {
-		t.Errorf("non-active-sprint completion leaked into the weekly tally\n%s", body)
 	}
 }
 

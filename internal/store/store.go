@@ -244,16 +244,13 @@ func (s *Store) ActiveSprintWindow() (ActiveSprint, bool, error) {
 	return sprint, true, nil
 }
 
-// IssuesInSprintAt reconstructs which issues were members of the sprint with the
-// given id at instant `at`, by replaying the membership-transition log: for each
-// issue, the latest entering/leaving transition at or before `at` decides
-// membership (entered => in, left => out). It mirrors how status history
-// reconstructs status at an instant. Returns the member issue keys sorted for a
-// stable result. This is the started-with/added primitive for the Weekly view:
-// members at the sprint's activation instant are "started with"; members later
-// that were not members at activation are "added during the window".
-func (s *Store) IssuesInSprintAt(sprintID int, at time.Time) ([]string, error) {
-	const query = `
+// membersAtSubquery reconstructs sprint membership at an instant by replaying the
+// membership log: for each issue the latest entering/leaving transition at or
+// before the instant decides membership (entered => in). Binds two args in order:
+// the sprint id and the RFC3339 instant. The single source of the membership-
+// reconstruction SQL — IssuesInSprintAt and the Weekly categories both build on
+// it so the "members at instant" logic never drifts.
+const membersAtSubquery = `
 		SELECT issue_key FROM (
 			SELECT issue_key, entered,
 			       ROW_NUMBER() OVER (
@@ -263,7 +260,35 @@ func (s *Store) IssuesInSprintAt(sprintID int, at time.Time) ([]string, error) {
 			FROM sprint_membership_transition
 			WHERE sprint_id = ? AND transitioned_at <= ?
 		)
-		WHERE rn = 1 AND entered = 1
+		WHERE rn = 1 AND entered = 1`
+
+// statusAtSubquery reconstructs each issue's status at an instant: the to_status
+// of its latest `status` transition at or before the instant (issue_key,
+// to_status columns). Binds one arg: the RFC3339 instant. Mirrors
+// membersAtSubquery for status, so "open at the window start" is derived the same
+// way membership is.
+const statusAtSubquery = `
+		SELECT issue_key, to_status FROM (
+			SELECT issue_key, to_status,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY issue_key
+			           ORDER BY transitioned_at DESC, changelog_entry_id DESC
+			       ) AS rn
+			FROM status_transition
+			WHERE field = 'status' AND transitioned_at <= ?
+		)
+		WHERE rn = 1`
+
+// IssuesInSprintAt reconstructs which issues were members of the sprint with the
+// given id at instant `at`, by replaying the membership-transition log: for each
+// issue, the latest entering/leaving transition at or before `at` decides
+// membership (entered => in, left => out). It mirrors how status history
+// reconstructs status at an instant. Returns the member issue keys sorted for a
+// stable result. This is the started-with/added primitive for the Weekly view:
+// members at the sprint's activation instant are "started with"; members later
+// that were not members at activation are "added during the window".
+func (s *Store) IssuesInSprintAt(sprintID int, at time.Time) ([]string, error) {
+	query := membersAtSubquery + `
 		ORDER BY issue_key`
 
 	rows, err := s.db.Query(query, sprintID, at.UTC().Format(time.RFC3339))
@@ -662,7 +687,7 @@ func (s *Store) FinishedInWindow(from, to time.Time) (SizeTally, error) {
 // crossing detection, Done set and points arithmetic live here once so the two
 // callers can never drift.
 func (s *Store) completedTally(from, to time.Time, activeSprintOnly bool) (SizeTally, error) {
-	doneIn, doneArgs := statusInClause(doneStatuses)
+	crossSQL, crossArgs := doneCrossingClause()
 	scope := ""
 	if activeSprintOnly {
 		scope = "\n\t\t  AND issue.active_sprint IS NOT NULL"
@@ -670,27 +695,164 @@ func (s *Store) completedTally(from, to time.Time, activeSprintOnly bool) (SizeT
 	query := `
 		SELECT ` + sizeTallyColumns + `
 		FROM issue
-		JOIN (
-			SELECT issue_key, MAX(transitioned_at) AS completed_at
-			FROM status_transition
-			WHERE field = 'status'
-			  AND LOWER(to_status) IN (` + doneIn + `)
-			  AND (from_status IS NULL OR LOWER(from_status) NOT IN (` + doneIn + `))
-			GROUP BY issue_key
-		) crossing ON crossing.issue_key = issue.key
+		JOIN (` + crossSQL + `) crossing ON crossing.issue_key = issue.key
 		WHERE issue.type IN (` + rollupTypes + `)` + scope + `
 		  AND crossing.completed_at >= ? AND crossing.completed_at < ?`
 
-	args := make([]any, 0, 2*len(doneStatuses)+2)
-	args = append(args, doneArgs...)
-	args = append(args, doneArgs...)
-	args = append(args, from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
+	args := append(crossArgs, from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
 
 	tally, err := scanTally(s.db.QueryRow(query, args...))
 	if err != nil {
 		return SizeTally{}, fmt.Errorf("completed tally: %w", err)
 	}
 	return tally, nil
+}
+
+// doneCrossingClause builds the subquery that finds each issue's latest Done
+// crossing — a `status` transition from a non-Done status INTO the Done set (see
+// doneStatuses) — projecting (issue_key, completed_at), plus the ordered args to
+// bind. A move BETWEEN two Done statuses is within-set and not a crossing; on
+// reopen the latest crossing wins (MAX). It is the single source of Done-crossing
+// detection and of the Done set, shared by completedTally and the Weekly
+// finished-split so the two can never drift.
+func doneCrossingClause() (query string, args []any) {
+	doneIn, doneArgs := statusInClause(doneStatuses)
+	query = `
+			SELECT issue_key, MAX(transitioned_at) AS completed_at
+			FROM status_transition
+			WHERE field = 'status'
+			  AND LOWER(to_status) IN (` + doneIn + `)
+			  AND (from_status IS NULL OR LOWER(from_status) NOT IN (` + doneIn + `))
+			GROUP BY issue_key`
+	args = make([]any, 0, 2*len(doneStatuses))
+	args = append(args, doneArgs...)
+	args = append(args, doneArgs...)
+	return query, args
+}
+
+// WeeklyCategories is the Weekly view's three-category breakdown for a sprint
+// over a window [from, to): the Started-with and Added tallies, the Finished
+// tally split by which category the finished ticket belongs to (Added takes
+// precedence, since the two sets are disjoint), and the two derived totals. Each
+// tally is at the ticket's CURRENT size.
+type WeeklyCategories struct {
+	// StartedWith is tickets open AND in the sprint at the window start — a
+	// snapshot (later removal/status change does not rewrite it).
+	StartedWith SizeTally
+	// Added is tickets that entered the sprint during the window (scope creep),
+	// regardless of status.
+	Added SizeTally
+	// FinishedFromStarted / FinishedFromAdded are the started-with / added tickets
+	// that also crossed into the Done set within the window.
+	FinishedFromStarted SizeTally
+	FinishedFromAdded   SizeTally
+	// FinishedTotal is FinishedFromStarted + FinishedFromAdded.
+	FinishedTotal SizeTally
+	// Total is StartedWith + Added (the Total row).
+	Total SizeTally
+}
+
+// weeklyCategory selects which category-membership predicate categoryTally builds.
+type weeklyCategory int
+
+const (
+	catStartedWith weeklyCategory = iota
+	catAdded
+)
+
+// WeeklyCategoriesInWindow computes the Weekly view's Started-with / Added /
+// Finished breakdown for the sprint with the given id over [from, to).
+//
+// Started-with = open (status ∈ openStatuses) AND in the sprint at the window
+// start, both reconstructed from history (statusAtSubquery / membersAtSubquery).
+// Added = in the sprint at the window end but NOT at the window start (entered
+// during the window; re-entry of a ticket already present at the start stays out
+// of Added). The two sets are disjoint by construction, so a ticket both added
+// and finished lands only under Added. Finished reuses the shared Done-crossing
+// detection (doneCrossingClause); the per-category and combined totals follow.
+func (s *Store) WeeklyCategoriesInWindow(sprintID int, from, to time.Time) (WeeklyCategories, error) {
+	var wc WeeklyCategories
+	var err error
+	if wc.StartedWith, err = s.categoryTally(catStartedWith, sprintID, from, to, false); err != nil {
+		return WeeklyCategories{}, err
+	}
+	if wc.Added, err = s.categoryTally(catAdded, sprintID, from, to, false); err != nil {
+		return WeeklyCategories{}, err
+	}
+	if wc.FinishedFromStarted, err = s.categoryTally(catStartedWith, sprintID, from, to, true); err != nil {
+		return WeeklyCategories{}, err
+	}
+	if wc.FinishedFromAdded, err = s.categoryTally(catAdded, sprintID, from, to, true); err != nil {
+		return WeeklyCategories{}, err
+	}
+	wc.FinishedTotal = addTally(wc.FinishedFromStarted, wc.FinishedFromAdded)
+	wc.Total = addTally(wc.StartedWith, wc.Added)
+	return wc, nil
+}
+
+// categoryTally tallies the rollup issues in one Weekly category (at current
+// size), optionally restricted to those that also crossed into the Done set
+// within the window (finishedOnly). It assembles the category-membership joins
+// and the optional finished-crossing join from the shared SQL fragments so the
+// membership reconstruction, open bucket and Done-crossing logic live in one
+// place each. Join-side and where-side args are collected separately and then
+// concatenated, matching the order the placeholders appear in the assembled
+// query.
+func (s *Store) categoryTally(cat weeklyCategory, sprintID int, from, to time.Time, finishedOnly bool) (SizeTally, error) {
+	fromStr := from.UTC().Format(time.RFC3339)
+	toStr := to.UTC().Format(time.RFC3339)
+
+	var joinSQL, whereSQL strings.Builder
+	var joinArgs, whereArgs []any
+
+	switch cat {
+	case catStartedWith:
+		// Open AND a member at the window start.
+		openIn, openArgs := statusInClause(openStatuses)
+		joinSQL.WriteString(` JOIN (` + membersAtSubquery + `) started_m ON started_m.issue_key = issue.key`)
+		joinArgs = append(joinArgs, sprintID, fromStr)
+		joinSQL.WriteString(` JOIN (` + statusAtSubquery + `) started_s ON started_s.issue_key = issue.key`)
+		joinArgs = append(joinArgs, fromStr)
+		whereSQL.WriteString(` AND LOWER(started_s.to_status) IN (` + openIn + `)`)
+		whereArgs = append(whereArgs, openArgs...)
+	case catAdded:
+		// A member at the window end that was NOT a member at the window start.
+		joinSQL.WriteString(` JOIN (` + membersAtSubquery + `) added_m ON added_m.issue_key = issue.key`)
+		joinArgs = append(joinArgs, sprintID, toStr)
+		whereSQL.WriteString(` AND issue.key NOT IN (` + membersAtSubquery + `)`)
+		whereArgs = append(whereArgs, sprintID, fromStr)
+	}
+
+	if finishedOnly {
+		crossSQL, crossArgs := doneCrossingClause()
+		joinSQL.WriteString(` JOIN (` + crossSQL + `) crossing ON crossing.issue_key = issue.key`)
+		joinArgs = append(joinArgs, crossArgs...)
+		whereSQL.WriteString(` AND crossing.completed_at >= ? AND crossing.completed_at < ?`)
+		whereArgs = append(whereArgs, fromStr, toStr)
+	}
+
+	query := `SELECT ` + sizeTallyColumns + `
+		FROM issue` + joinSQL.String() + `
+		WHERE issue.type IN (` + rollupTypes + `)` + whereSQL.String()
+
+	args := append(joinArgs, whereArgs...)
+	tally, err := scanTally(s.db.QueryRow(query, args...))
+	if err != nil {
+		return SizeTally{}, fmt.Errorf("weekly category tally: %w", err)
+	}
+	return tally, nil
+}
+
+// addTally sums two size tallies field-by-field — the Weekly Total and
+// finished-total rows.
+func addTally(a, b SizeTally) SizeTally {
+	return SizeTally{
+		S:          a.S + b.S,
+		M:          a.M + b.M,
+		L:          a.L + b.L,
+		NoEstimate: a.NoEstimate + b.NoEstimate,
+		Points:     a.Points + b.Points,
+	}
 }
 
 // BoardCard is one issue on the sprint board — the fields a card renders.

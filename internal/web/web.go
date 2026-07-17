@@ -36,9 +36,10 @@ var assetsFS embed.FS
 type Rollups interface {
 	OpenByStatus() (store.OpenBoard, error)
 	CompletedInRange(from, to time.Time) (store.SizeTally, error)
-	// FinishedInWindow tallies active-sprint work crossing into the Done set
-	// within [from, to) — the Weekly view's "Finished this week" figure.
-	FinishedInWindow(from, to time.Time) (store.SizeTally, error)
+	// WeeklyCategoriesInWindow is the Weekly view's Started-with / Added / Finished
+	// breakdown for a sprint over [from, to), reconstructed from status and
+	// membership history.
+	WeeklyCategoriesInWindow(sprintID int, from, to time.Time) (store.WeeklyCategories, error)
 	LastSyncedAt() (t time.Time, ok bool, err error)
 	// ActiveSprintWindow reports the active sprint entity (name and activation
 	// instant). ok is false when no sprint is active.
