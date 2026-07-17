@@ -54,6 +54,7 @@ values — is tracked.
 | `TZ`             | `Europe/Berlin`      | Timezone for date maths and ISO-week (`KW##`) labels.              |
 | `SYNC_INTERVAL`  | `60s`                | Background sync interval (Go duration, e.g. `30s`, `5m`).          |
 | `VELOCITY_WEEKS` | `10`                 | Trailing ISO weeks shown on the Velocity view (positive integer).  |
+| `DAILY_ME`       | _(none)_             | Your Jira **display name**; the Daily view defaults to it. Blank → "All".|
 | `LISTEN_ADDR`    | `:8080`              | Address the HTTP server listens on.                                |
 | `DB_PATH`        | `jira-stats.db`      | Path to the SQLite database file.                                  |
 
