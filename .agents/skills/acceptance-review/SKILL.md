@@ -20,7 +20,7 @@ Confirm each **acceptance criterion** of a change holds in the *running* app, by
 ## Process
 
 1. **Collect the ACs.** Read the issue's acceptance-criteria checklist verbatim. List them as the checklist you will verify — one finding per AC.
-2. **Scope the surface.** From the diff, list the routes/views/endpoints the change touches (e.g. `/board`, `/completed`, `/daily`, a fragment endpoint, a store rollup surfaced in HTML). Each AC maps to something observable there.
+2. **Scope the surface.** From the diff, list the routes/views/endpoints the change touches (e.g. `/board`, `/weekly`, `/daily`, a fragment endpoint, a store rollup surfaced in HTML). Each AC maps to something observable there.
 3. **Boot a clean instance.** `make review-up`, then read `tmp/review/url`. It runs the fake backend with a pinned `REVIEW_NOW`, so date-bearing views are deterministic. (Never point acceptance review at live Jira.)
 4. **Drive, per AC.** Use the right channel for each:
    - **UI** via Playwright MCP: navigate to `<url><route>`, then use **two verification channels** — they assert different things and both are required for any AC touching UI:
