@@ -3,53 +3,71 @@
     "Key": "DCAI-1",
     "Type": "Story",
     "Summary": "Wire up the dashboard shell",
-    "Status": "In Progress",
-    "StatusCategory": "In Progress",
+    "Status": "DONE (This Sprint)",
+    "StatusCategory": "Done",
     "Size": "L",
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Ada",
     "Changelog": [
-      {"ID": "1001", "Field": "status", "From": "Ready to Do", "To": "In Progress", "Timestamp": "2026-07-13T09:00:00Z"}
+      {"ID": "1001", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-10T09:00:00Z"},
+      {"ID": "1002", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-14T09:00:00Z"}
+    ],
+    "SprintChanges": [
+      {"EntryID": "sm-1", "SprintID": 29, "SprintName": "KW29", "Entered": true, "Timestamp": "2026-07-10T08:00:00Z"}
     ]
   },
   {
     "Key": "DCAI-2",
     "Type": "Task",
     "Summary": "Define the issue snapshot schema",
-    "Status": "Ready to Do",
-    "StatusCategory": "To Do",
+    "Status": "In Progress",
+    "StatusCategory": "In Progress",
     "Size": "M",
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Grace",
-    "Changelog": []
+    "Changelog": [
+      {"ID": "1003", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-10T10:30:00Z"}
+    ],
+    "SprintChanges": [
+      {"EntryID": "sm-2", "SprintID": 29, "SprintName": "KW29", "Entered": true, "Timestamp": "2026-07-10T08:00:00Z"}
+    ]
   },
   {
     "Key": "DCAI-3",
     "Type": "Bug",
     "Summary": "Rollup ignores no-estimate tickets",
-    "Status": "In Progress",
-    "StatusCategory": "In Progress",
+    "Status": "DONE (This Sprint)",
+    "StatusCategory": "Done",
     "Size": "S",
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Alan",
     "Changelog": [
-      {"ID": "1002", "Field": "status", "From": "Ready to Do", "To": "In Progress", "Timestamp": "2026-07-14T11:30:00Z"}
+      {"ID": "1004", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-10T11:00:00Z"},
+      {"ID": "1005", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-16T09:00:00Z"}
+    ],
+    "SprintChanges": [
+      {"EntryID": "sm-3", "SprintID": 29, "SprintName": "KW29", "Entered": true, "Timestamp": "2026-07-10T08:00:00Z"}
     ]
   },
   {
     "Key": "DCAI-4",
     "Type": "Task",
-    "Summary": "Unestimated chore",
-    "Status": "In Progress",
-    "StatusCategory": "In Progress",
+    "Summary": "Unestimated mid-sprint chore",
+    "Status": "Ready To Do",
+    "StatusCategory": "To Do",
     "Size": "",
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "",
-    "Changelog": []
+    "Changelog": [
+      {"ID": "1006", "Field": "status", "From": "Triage", "To": "Ready To Do", "Timestamp": "2026-07-14T07:15:00Z"}
+    ],
+    "SprintChanges": [
+      {"EntryID": "sm-4", "SprintID": 29, "SprintName": "KW29", "Entered": true, "Timestamp": "2026-07-14T07:00:00Z"}
+    ]
   },
   {
     "Key": "DCAI-5",
@@ -62,8 +80,11 @@
     "ActiveSprint": "KW29",
     "Assignee": "Ada",
     "Changelog": [
-      {"ID": "1003", "Field": "status", "From": "In Progress", "To": "Review / Testing", "Timestamp": "2026-07-12T15:00:00Z"},
-      {"ID": "1004", "Field": "status", "From": "Review / Testing", "To": "DONE (This Sprint)", "Timestamp": "2026-07-13T08:00:00Z"}
+      {"ID": "1007", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-14T07:30:00Z"},
+      {"ID": "1008", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-14T13:00:00Z"}
+    ],
+    "SprintChanges": [
+      {"EntryID": "sm-5", "SprintID": 29, "SprintName": "KW29", "Entered": true, "Timestamp": "2026-07-14T07:00:00Z"}
     ]
   },
   {
@@ -79,14 +100,81 @@
     "Changelog": []
   },
   {
-    "Key": "DCAI-7",
+    "Key": "DCAI-8",
     "Type": "Story",
-    "Summary": "Legacy cleanup from a closed sprint",
-    "Status": "In Progress",
+    "Summary": "Refine the velocity chart spec",
+    "Status": "Refinement",
+    "StatusCategory": "To Do",
+    "Size": "S",
+    "Sprint": "KW29",
+    "ActiveSprint": "KW29",
+    "Assignee": "Grace",
+    "Changelog": [
+      {"ID": "1009", "Field": "status", "From": "Triage", "To": "Refinement", "Timestamp": "2026-07-10T12:00:00Z"}
+    ],
+    "SprintChanges": [
+      {"EntryID": "sm-8", "SprintID": 29, "SprintName": "KW29", "Entered": true, "Timestamp": "2026-07-10T08:00:00Z"}
+    ]
+  },
+  {
+    "Key": "DCAI-9",
+    "Type": "Bug",
+    "Summary": "Board card overflows on long summaries",
+    "Status": "Review / Testing",
     "StatusCategory": "In Progress",
     "Size": "M",
-    "Sprint": "KW28",
+    "Sprint": "KW29",
+    "ActiveSprint": "KW29",
     "Assignee": "Alan",
-    "Changelog": []
+    "Changelog": [
+      {"ID": "1010", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-10T13:00:00Z"},
+      {"ID": "1011", "Field": "status", "From": "In Progress", "To": "Review / Testing", "Timestamp": "2026-07-13T14:00:00Z"}
+    ],
+    "SprintChanges": [
+      {"EntryID": "sm-9", "SprintID": 29, "SprintName": "KW29", "Entered": true, "Timestamp": "2026-07-10T08:00:00Z"}
+    ]
+  },
+  {
+    "Key": "DCAI-20",
+    "Type": "Story",
+    "Summary": "Persist sprint entities",
+    "Status": "Released / Deployed",
+    "StatusCategory": "Done",
+    "Size": "M",
+    "Sprint": "KW28",
+    "ActiveSprint": "",
+    "Assignee": "Ada",
+    "Changelog": [
+      {"ID": "1020", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-09T10:00:00Z"},
+      {"ID": "1021", "Field": "status", "From": "DONE (This Sprint)", "To": "Released / Deployed", "Timestamp": "2026-07-10T08:00:00Z"}
+    ]
+  },
+  {
+    "Key": "DCAI-21",
+    "Type": "Task",
+    "Summary": "Capture sprint-membership history",
+    "Status": "DONE (This Sprint)",
+    "StatusCategory": "Done",
+    "Size": "S",
+    "Sprint": "KW28",
+    "ActiveSprint": "",
+    "Assignee": "Grace",
+    "Changelog": [
+      {"ID": "1022", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-08T10:00:00Z"}
+    ]
+  },
+  {
+    "Key": "DCAI-22",
+    "Type": "Bug",
+    "Summary": "Velocity double-counted reopened tickets",
+    "Status": "DONE (This Sprint)",
+    "StatusCategory": "Done",
+    "Size": "L",
+    "Sprint": "KW27",
+    "ActiveSprint": "",
+    "Assignee": "Alan",
+    "Changelog": [
+      {"ID": "1023", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-02T10:00:00Z"}
+    ]
   }
 ]

@@ -389,6 +389,89 @@ func TestWeeklyNoActiveSprintRendersEmptyState(t *testing.T) {
 	}
 }
 
+// TestWeeklyCannedDatasetPopulatesBothWindows is the fixture-regression guard for
+// #50: booting the built-in canned fake under the pinned review clock
+// (REVIEW_NOW=2026-07-15T12:00:00Z, sprint KW29 activated 2026-07-13), the Weekly
+// view must render the populated three-category table — NOT the empty state — in
+// BOTH window modes, with non-zero Started-with, Added and both finished-split
+// rows. It fails if canned_issues.json ever regresses to carrying no
+// sprint-membership history (which silently empties the Weekly table).
+//
+// The canned KW29 story:
+//   - DCAI-1 (L): started-with, finishes Tue → finished-from-started (both windows)
+//   - DCAI-2 (M), DCAI-8 (S), DCAI-9 (M): started-with, still open
+//   - DCAI-3 (S): started-with, finishes THURSDAY → counted finished in Work week
+//     but crosses AFTER the Live-sprint window (now = Wed), so it is present as
+//     started-with there yet excluded from the Live finished tally
+//   - DCAI-4 (no estimate): added mid-week, still open
+//   - DCAI-5 (M): added mid-week, finishes Tue → finished-from-added (both windows)
+//   - DCAI-6 (Epic): in KW29 but excluded from every rollup (rollup types are
+//     Task/Bug/Story), so it never appears in the tallies below.
+func TestWeeklyCannedDatasetPopulatesBothWindows(t *testing.T) {
+	// Pin the clock to the review instant (matches REVIEW_NOW=2026-07-15T12:00:00Z,
+	// Wed of KW29) so both window modes resolve deterministic bounds.
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	app := newTestAppAt(t, jira.NewFakeClient(), now)
+
+	// Both modes must render the populated table, never the empty state.
+	common := []string{
+		`data-testid="weekly-table"`,
+		// Started with = DCAI-1(L)+DCAI-2(M)+DCAI-3(S)+DCAI-8(S)+DCAI-9(M): 5 / 9pts.
+		`data-testid="weekly-started:tickets">5<`,
+		`data-testid="weekly-started:points">9<`,
+		// Added = DCAI-4(none)+DCAI-5(M): 2 tickets, 2 pts.
+		`data-testid="weekly-added:tickets">2<`,
+		`data-testid="weekly-added:points">2<`,
+		`data-testid="weekly-total:tickets">7<`,
+		`data-testid="weekly-total:points">11<`,
+		// Finished-from-added = DCAI-5 in both windows.
+		`data-testid="weekly-added:finished-tickets">1<`,
+		`data-testid="weekly-added:finished-points">2<`,
+	}
+
+	cases := []struct {
+		window string
+		label  string
+		wants  []string
+	}{
+		{
+			window: "work-week",
+			label:  `data-testid="weekly-window-label">13 Jul – 17 Jul 2026<`,
+			wants: []string{
+				// Finished-from-started = DCAI-1(Tue) + DCAI-3(Thu, inside work week).
+				`data-testid="weekly-started:finished-tickets">2<`,
+				`data-testid="weekly-started:finished-points">4<`,
+				`data-testid="weekly-total:finished-tickets">3<`,
+				`data-testid="weekly-total:finished-points">6<`,
+			},
+		},
+		{
+			window: "live-sprint",
+			label:  `data-testid="weekly-window-label">13 Jul – 14 Jul 2026<`,
+			wants: []string{
+				// Finished-from-started = DCAI-1 only; DCAI-3 crosses Thu, AFTER now.
+				`data-testid="weekly-started:finished-tickets">1<`,
+				`data-testid="weekly-started:finished-points">3<`,
+				`data-testid="weekly-total:finished-tickets">2<`,
+				`data-testid="weekly-total:finished-points">5<`,
+			},
+		},
+	}
+	for _, c := range cases {
+		body := get(t, app.URL+"/weekly/results?window="+c.window)
+		if strings.Contains(body, `data-testid="weekly-empty"`) {
+			t.Fatalf("%s: canned dataset renders the EMPTY Weekly state; fixture regressed\n%s", c.window, body)
+		}
+		wants := append([]string{c.label}, common...)
+		wants = append(wants, c.wants...)
+		for _, w := range wants {
+			if !strings.Contains(body, w) {
+				t.Errorf("%s: canned Weekly table missing %q\n%s", c.window, w, body)
+			}
+		}
+	}
+}
+
 // modeIsActive reports whether the window-mode radio for the given key is checked
 // (i.e. the highlighted selection).
 func modeIsActive(html, mode string) bool {
