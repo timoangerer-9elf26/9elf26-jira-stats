@@ -111,6 +111,52 @@ func TestDailyStatusChangesUnassigned(t *testing.T) {
 	}
 }
 
+// TestDailyTicketMovement pins the net-movement bucketing (the Daily digest
+// seam): each moved ticket lands in exactly one of Finished / Advanced / Pulled
+// back, computed from its in-window changes alone.
+func TestDailyTicketMovement(t *testing.T) {
+	at := time.Date(2026, time.July, 16, 9, 0, 0, 0, time.UTC)
+	// mk builds a moved ticket from a sequence of (from, to) status pairs.
+	mk := func(pairs ...[2]string) DailyTicket {
+		var ch []DailyStatusChange
+		for _, p := range pairs {
+			ch = append(ch, DailyStatusChange{From: p[0], To: p[1], TransitionedAt: at})
+		}
+		return DailyTicket{Changes: ch}
+	}
+	tests := []struct {
+		name string
+		t    DailyTicket
+		want DailyMovement
+	}{
+		{"net forward is advanced", mk([2]string{"Ready To Do", "In Progress"}), MovementAdvanced},
+		{"crossing into done is finished", mk([2]string{"Review / Testing", "DONE (This Sprint)"}), MovementFinished},
+		{"finished regardless of intermediate hops", mk(
+			[2]string{"Ready To Do", "In Progress"},
+			[2]string{"In Progress", "DONE (This Sprint)"},
+			[2]string{"DONE (This Sprint)", "Review / Testing"},
+		), MovementFinished},
+		{"a move between two done statuses is not a crossing", mk(
+			[2]string{"DONE (This Sprint)", "Released / Deployed"},
+		), MovementAdvanced},
+		{"net backward is pulled back", mk([2]string{"Review / Testing", "In Progress"}), MovementPulledBack},
+		{"a move to canceled is pulled back", mk([2]string{"In Progress", "Canceled"}), MovementPulledBack},
+		{"net-zero churn is advanced", mk(
+			[2]string{"Ready To Do", "In Progress"},
+			[2]string{"In Progress", "Ready To Do"},
+		), MovementAdvanced},
+		// Jira casing quirk ("Ready to Do") must not change the bucket.
+		{"casing quirks still classify", mk([2]string{"Refinement", "Ready to Do"}), MovementAdvanced},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.t.Movement(); got != tc.want {
+				t.Errorf("Movement() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestActiveSprintAssigneesDistinctAndScoped(t *testing.T) {
 	loc := berlin(t)
 	st := openTempStore(t)

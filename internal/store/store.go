@@ -470,6 +470,23 @@ var doneStatuses = []string{
 	"Released / Deployed",
 }
 
+// doneStatusSet is doneStatuses as a normalized membership set, for in-memory
+// Done-crossing tests (the Daily digest) that mirror the SQL crossing rollup
+// without a round trip. Keyed by normalizeStatus for case-insensitive matching.
+var doneStatusSet = func() map[string]bool {
+	m := make(map[string]bool, len(doneStatuses))
+	for _, st := range doneStatuses {
+		m[normalizeStatus(st)] = true
+	}
+	return m
+}()
+
+// isDoneStatus reports whether a status is in the authoritative finished bucket
+// (see doneStatuses), matched case-insensitively.
+func isDoneStatus(status string) bool {
+	return doneStatusSet[normalizeStatus(status)]
+}
+
 // statusInClause builds a case-insensitive `LOWER(col) IN (...)` match against a
 // status bucket: the "?,?,..." placeholder list plus the normalized status
 // values to bind. Both are derived from the one bucket definition so open/done

@@ -271,9 +271,41 @@
      dailyView. */}}
 {{define "daily-panel"}}
   {{template "daily-controls" .}}
+  {{template "daily-digest" .Digest}}
   <div id="daily-results" class="mt-6">
     {{template "daily-results" .}}
   </div>
+{{end}}
+
+{{/* daily-digest is the summary layer above the granular log: a headline plus
+     the moved tickets grouped by net-movement bucket (Finished / Advanced /
+     Pulled back), each ticket showing its net From ⟶ To movement. The long
+     arrow ⟶ deliberately marks NET movement across the window (window-start to
+     window-end status), distinct from the per-transition → in the granular log.
+     Renders nothing when the selection moved no tickets. Takes a
+     dailyDigestView. */}}
+{{define "daily-digest"}}
+{{if .Present}}
+<section data-testid="daily-digest" class="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+  <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Digest</h2>
+  <p data-testid="daily-digest-headline" class="mt-1 text-base font-semibold text-slate-900">{{.Headline}}</p>
+  <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    {{range .Buckets}}
+    <div data-testid="digest-bucket:{{.Key}}">
+      <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400">{{.Label}} ({{.Count}})</h3>
+      <ul class="mt-2 flex flex-col gap-1.5">
+        {{range .Tickets}}
+        <li class="text-xs" data-testid="digest-ticket:{{.Key}}">
+          {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener" class="font-mono font-semibold text-slate-500 hover:text-slate-800">{{.Key}}</a>{{else}}<span class="font-mono font-semibold text-slate-500">{{.Key}}</span>{{end}}
+          <span class="ml-1 text-slate-700">{{.From}} ⟶ {{.To}}</span>
+        </li>
+        {{end}}
+      </ul>
+    </div>
+    {{end}}
+  </div>
+</section>
+{{end}}
 {{end}}
 
 {{/* daily-controls is the Daily selector: an assignee dropdown plus the two
