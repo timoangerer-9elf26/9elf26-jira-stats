@@ -32,6 +32,54 @@ type DailyTicket struct {
 	Changes  []DailyStatusChange
 }
 
+// DailyMovement is the net-movement bucket a moved ticket falls into over the
+// Daily window — the summary layer of the Daily digest. Every moved ticket maps
+// to exactly one value.
+type DailyMovement int
+
+const (
+	// MovementAdvanced is net forward in the workflow but not into Done, including
+	// net-zero churn (moved out and back to the same status).
+	MovementAdvanced DailyMovement = iota
+	// MovementFinished crossed into the Done set within the window (the same
+	// crossing the Weekly view counts as Finished).
+	MovementFinished
+	// MovementPulledBack is net backward in the workflow, including a move to
+	// Canceled.
+	MovementPulledBack
+)
+
+// StartStatus is the ticket's status at the window start: the first in-window
+// change's source. Panics on a ticket with no changes — DailyStatusChanges only
+// returns moved tickets, so callers always have at least one change.
+func (t DailyTicket) StartStatus() string { return t.Changes[0].From }
+
+// EndStatus is the ticket's status at the window end: the last in-window
+// change's destination.
+func (t DailyTicket) EndStatus() string { return t.Changes[len(t.Changes)-1].To }
+
+// Movement classifies the ticket's net movement over the window into exactly one
+// bucket. Finished takes priority: any in-window crossing INTO the Done set
+// (mirroring the Weekly view's completion crossing) buckets Finished regardless
+// of intermediate hops. Otherwise the net position from the window start
+// (StartStatus) to the window end (EndStatus) decides — a move ending in
+// Canceled, or one net backward in the DCAI workflow, is Pulled back; net
+// forward and net-zero churn are Advanced. Canceled is special-cased because it
+// sorts last in the workflow order yet a move into it is an abandonment, not a
+// step forward.
+func (t DailyTicket) Movement() DailyMovement {
+	for _, c := range t.Changes {
+		if !isDoneStatus(c.From) && isDoneStatus(c.To) {
+			return MovementFinished
+		}
+	}
+	start, end := t.StartStatus(), t.EndStatus()
+	if normalizeStatus(end) == normalizeStatus("Canceled") || workflowLess(end, start) {
+		return MovementPulledBack
+	}
+	return MovementAdvanced
+}
+
 // DailyStatusChanges returns the active-sprint work items (Task/Bug/Story; Epics
 // and Sub-tasks excluded, consistent with the rollups) that had one or more
 // `status` transitions in [from, to), each carrying its in-window changes.

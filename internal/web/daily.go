@@ -1,8 +1,10 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
@@ -73,6 +75,36 @@ type dailyWindowView struct {
 	Selected bool
 }
 
+// dailyDigestTicketView is one ticket in a digest bucket: its key, resolved Jira
+// link (empty when unconfigured), and its net movement across the window
+// rendered as From ⟶ To.
+type dailyDigestTicketView struct {
+	Key  string
+	Href string
+	From string
+	To   string
+}
+
+// dailyDigestBucketView is one net-movement bucket of the digest: a stable Key
+// for testids/styling, a display Label, its ticket count, and the tickets that
+// landed in it (in the granular log's recency order).
+type dailyDigestBucketView struct {
+	Key     string
+	Label   string
+	Count   int
+	Tickets []dailyDigestTicketView
+}
+
+// dailyDigestView is the summary layer above the granular log: a one-line
+// Headline (e.g. "moved 5 — 2 finished, 2 advanced, 1 pulled back") plus the
+// non-empty buckets in Finished → Advanced → Pulled back order. Present is false
+// when the selection moved nothing, so the template omits the whole section.
+type dailyDigestView struct {
+	Present  bool
+	Headline string
+	Buckets  []dailyDigestBucketView
+}
+
 // dailyView is the model for the Daily page and its panel fragment. HasSprint is
 // false when no active sprint is known (drives the no-sprint empty state); Empty
 // is true when the selection has no in-window status changes.
@@ -81,6 +113,7 @@ type dailyView struct {
 	HasSprint  bool
 	Assignees  []dailyAssigneeOption
 	Windows    []dailyWindowView
+	Digest     dailyDigestView
 	Cards      []dailyCardView
 	Empty      bool
 }
@@ -190,8 +223,56 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 		}
 		view.Cards = append(view.Cards, card)
 	}
+	view.Digest = s.dailyDigest(tickets)
 	view.Empty = len(view.Cards) == 0
 	return view, nil
+}
+
+// dailyDigest summarises the moved tickets into the digest's net-movement
+// buckets. It buckets each ticket by its Movement, keeps the granular log's
+// recency order within each bucket, drops empty buckets, and builds the headline
+// (e.g. "moved 5 — 2 finished, 2 advanced, 1 pulled back") from the same counts.
+// Returns a zero (Present=false) digest when nothing moved, so the template
+// omits the whole section.
+func (s *Server) dailyDigest(tickets []store.DailyTicket) dailyDigestView {
+	if len(tickets) == 0 {
+		return dailyDigestView{}
+	}
+	// Display order: Finished, Advanced, Pulled back.
+	finished := dailyDigestBucketView{Key: "finished", Label: "Finished"}
+	advanced := dailyDigestBucketView{Key: "advanced", Label: "Advanced"}
+	pulledBack := dailyDigestBucketView{Key: "pulled-back", Label: "Pulled back"}
+	for _, tk := range tickets {
+		entry := dailyDigestTicketView{
+			Key:  tk.Key,
+			Href: s.jiraIssueURL(tk.Key),
+			From: statusDisplay(tk.StartStatus()),
+			To:   tk.EndStatus(),
+		}
+		switch tk.Movement() {
+		case store.MovementFinished:
+			finished.Tickets = append(finished.Tickets, entry)
+		case store.MovementPulledBack:
+			pulledBack.Tickets = append(pulledBack.Tickets, entry)
+		default:
+			advanced.Tickets = append(advanced.Tickets, entry)
+		}
+	}
+	var buckets []dailyDigestBucketView
+	var parts []string
+	for _, b := range []dailyDigestBucketView{finished, advanced, pulledBack} {
+		b.Count = len(b.Tickets)
+		if b.Count == 0 {
+			continue
+		}
+		buckets = append(buckets, b)
+		parts = append(parts, fmt.Sprintf("%d %s", b.Count, strings.ToLower(b.Label)))
+	}
+	return dailyDigestView{
+		Present:  true,
+		Headline: fmt.Sprintf("moved %d — %s", len(tickets), strings.Join(parts, ", ")),
+		Buckets:  buckets,
+	}
 }
 
 // defaultAssignee is the Daily assignee filter when the request carries no

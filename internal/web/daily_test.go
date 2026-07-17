@@ -301,6 +301,82 @@ func TestDailyMeNotOnActiveSprintStillSelected(t *testing.T) {
 	}
 }
 
+// dailyDigestFixture pins one ticket per net-movement bucket for alice, all
+// inside "Last 24h" (now = Thu 2026-07-16 10:00 Berlin).
+func dailyDigestFixture(t *testing.T) (*jira.FakeClient, time.Time) {
+	loc := berlin(t)
+	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, loc)
+	at := func(hour int) time.Time { return time.Date(2026, time.July, 16, hour, 0, 0, 0, loc) }
+	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
+		dailyIssue("DCAI-10", "Story", "alice", true, "In Progress", "DONE (This Sprint)", at(9)), // finished
+		dailyIssue("DCAI-11", "Task", "alice", true, "Ready to Do", "In Progress", at(8)),         // advanced
+		dailyIssue("DCAI-12", "Bug", "alice", true, "Review / Testing", "In Progress", at(7)),     // pulled back
+	}}, now
+}
+
+// TestDailyDigest: the digest section renders above the granular log, groups
+// each moved ticket under its net-movement bucket, and its headline counts match
+// the groupings.
+func TestDailyDigest(t *testing.T) {
+	client, now := dailyDigestFixture(t)
+	app := newTestAppAt(t, client, now, web.WithMe("alice"))
+
+	body := get(t, app.URL+"/daily") // defaults to alice + Last 24h
+
+	// Headline: total plus a per-bucket breakdown that matches the groupings.
+	if !strings.Contains(body, "moved 3 — 1 finished, 1 advanced, 1 pulled back") {
+		t.Errorf("digest headline missing/incorrect:\n%s", body)
+	}
+	// Each ticket lands under its bucket with its net From ⟶ To movement.
+	for _, want := range []string{
+		`data-testid="digest-bucket:finished"`,
+		`data-testid="digest-bucket:advanced"`,
+		`data-testid="digest-bucket:pulled-back"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("digest bucket missing %q:\n%s", want, body)
+		}
+	}
+	if !strings.Contains(body, "In Progress ⟶ DONE (This Sprint)") {
+		t.Errorf("digest net movement for the finished ticket not rendered:\n%s", body)
+	}
+	if !strings.Contains(body, "Review / Testing ⟶ In Progress") {
+		t.Errorf("digest net movement for the pulled-back ticket not rendered:\n%s", body)
+	}
+	// The digest renders above the granular per-transition log.
+	assertOrder(t, body, `data-testid="daily-digest"`, `data-testid="daily-results"`)
+}
+
+// TestDailyDigestOmitsEmptyBuckets: a selection whose tickets are all one bucket
+// shows only that bucket, and the headline lists only the non-empty bucket.
+func TestDailyDigestOmitsEmptyBuckets(t *testing.T) {
+	client, now := dailyFixture(t)
+	app := newTestAppAt(t, client, now)
+
+	// All-assignees Last 24h in the base fixture are all Advanced (DCAI-1/2/4).
+	body := get(t, app.URL+"/daily/results?assignee=all&window=last-24h")
+
+	if !strings.Contains(body, "moved 3 — 3 advanced") {
+		t.Errorf("headline should list only the non-empty bucket:\n%s", body)
+	}
+	if strings.Contains(body, `data-testid="digest-bucket:finished"`) ||
+		strings.Contains(body, `data-testid="digest-bucket:pulled-back"`) {
+		t.Errorf("empty buckets must not render:\n%s", body)
+	}
+}
+
+// TestDailyDigestAbsentWhenEmpty: with no in-window changes there is no digest.
+func TestDailyDigestAbsentWhenEmpty(t *testing.T) {
+	client, now := dailyFixture(t)
+	app := newTestAppAt(t, client, now)
+
+	// carol has no active-sprint work in the window.
+	body := get(t, app.URL+"/daily/results?assignee=carol&window=last-24h")
+	if strings.Contains(body, `data-testid="daily-digest"`) {
+		t.Errorf("digest must not render for an empty selection:\n%s", body)
+	}
+}
+
 func TestDailyNavActive(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
