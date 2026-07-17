@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
+	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/web"
 )
 
 // dailyIssue builds an active-sprint (unless active=false) Task/Bug/Story with a
@@ -206,6 +207,98 @@ func windowChecked(html, key string) bool {
 		return false
 	}
 	return strings.Contains(html[start:start+end], " checked")
+}
+
+// TestDailyDefaultsToMe: opening Daily with no assignee param selects the
+// configured "me" (a Jira display name) — the dropdown marks me selected and
+// the results are scoped to me, not "All".
+func TestDailyDefaultsToMe(t *testing.T) {
+	client, now := dailyFixture(t)
+	app := newTestAppAt(t, client, now, web.WithMe("alice"))
+
+	body := get(t, app.URL+"/daily") // no assignee param
+
+	if !strings.Contains(body, `value="alice" selected`) {
+		t.Errorf("me (alice) should be selected by default:\n%s", body)
+	}
+	if strings.Contains(body, `value="all" selected`) {
+		t.Errorf("All must not be selected when me is the default")
+	}
+	// Scoped to alice: her DCAI-1 shows; bob's DCAI-2 and the unassigned DCAI-4 do not.
+	if !strings.Contains(body, `data-key="DCAI-1"`) {
+		t.Errorf("default me scope should include alice's DCAI-1:\n%s", body)
+	}
+	for _, key := range []string{"DCAI-2", "DCAI-4"} {
+		if strings.Contains(body, `data-key="`+key+`"`) {
+			t.Errorf("default me scope should exclude %s (not alice)", key)
+		}
+	}
+}
+
+// TestDailyMeDefaultOverridable: explicitly choosing another assignee or "All"
+// overrides the me default.
+func TestDailyMeDefaultOverridable(t *testing.T) {
+	client, now := dailyFixture(t)
+	app := newTestAppAt(t, client, now, web.WithMe("alice"))
+
+	all := get(t, app.URL+"/daily/results?assignee=all&window=last-24h")
+	if !strings.Contains(all, `value="all" selected`) {
+		t.Errorf("explicit All should be selected, overriding me:\n%s", all)
+	}
+	for _, key := range []string{"DCAI-1", "DCAI-2", "DCAI-4"} {
+		if !strings.Contains(all, `data-key="`+key+`"`) {
+			t.Errorf("explicit All should include %s\n%s", key, all)
+		}
+	}
+
+	bob := get(t, app.URL+"/daily/results?assignee=bob&window=last-24h")
+	if !strings.Contains(bob, `value="bob" selected`) {
+		t.Errorf("explicit bob should be selected, overriding me:\n%s", bob)
+	}
+	if strings.Contains(bob, `data-key="DCAI-1"`) {
+		t.Errorf("explicit bob scope should exclude alice's DCAI-1")
+	}
+}
+
+// TestDailyNoMeConfiguredFallsBackToAll: with no me configured, opening Daily
+// with no assignee param keeps the current "All" default (no crash).
+func TestDailyNoMeConfiguredFallsBackToAll(t *testing.T) {
+	client, now := dailyFixture(t)
+	app := newTestAppAt(t, client, now) // no WithMe
+
+	body := get(t, app.URL+"/daily")
+	if !strings.Contains(body, `value="all" selected`) {
+		t.Errorf("with no me configured, All should be the default selection:\n%s", body)
+	}
+	for _, key := range []string{"DCAI-1", "DCAI-2", "DCAI-4"} {
+		if !strings.Contains(body, `data-key="`+key+`"`) {
+			t.Errorf("All default should include %s\n%s", key, body)
+		}
+	}
+}
+
+// TestDailyMeNotOnActiveSprintStillSelected: a configured me who has no active-
+// sprint work isn't among the sprint assignees, but the default must still show
+// me selected in the dropdown (reflecting the actual scope) rather than silently
+// falling back to All. Covers the not-on-sprint branch of dailyView.
+func TestDailyMeNotOnActiveSprintStillSelected(t *testing.T) {
+	client, now := dailyFixture(t)
+	// carol only has DCAI-6, which is not in the active sprint, so carol is not
+	// among the active-sprint assignees.
+	app := newTestAppAt(t, client, now, web.WithMe("carol"))
+
+	body := get(t, app.URL+"/daily") // no assignee param
+
+	if !strings.Contains(body, `value="carol" selected`) {
+		t.Errorf("me (carol) should be selected even though not on the active sprint:\n%s", body)
+	}
+	if strings.Contains(body, `value="all" selected`) {
+		t.Errorf("All must not be selected when me is the default")
+	}
+	// carol's only ticket is out of the active-sprint scope, so no cards show.
+	if strings.Contains(body, `data-key="DCAI-6"`) {
+		t.Errorf("carol's non-sprint DCAI-6 must not appear in the sprint-scoped Daily")
+	}
 }
 
 func TestDailyNavActive(t *testing.T) {

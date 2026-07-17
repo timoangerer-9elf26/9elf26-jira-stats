@@ -115,7 +115,9 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 	windowKey := dailyWindowKey(q.Get("window"))
 	assigneeParam := q.Get("assignee")
 	if assigneeParam == "" {
-		assigneeParam = dailyAssigneeAll
+		// No explicit choice: default to the configured "me" (a display name), or
+		// "All" when me is unconfigured. An explicit choice (incl. "all") overrides.
+		assigneeParam = s.defaultAssignee()
 	}
 
 	sprint, hasSprint, err := s.rollups.ActiveSprintWindow()
@@ -140,9 +142,22 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 		dailyAssigneeOption{Value: dailyAssigneeAll, Label: "All", Selected: assigneeParam == dailyAssigneeAll},
 		dailyAssigneeOption{Value: dailyAssigneeUnassigned, Label: "Unassigned", Selected: assigneeParam == dailyAssigneeUnassigned},
 	)
+	// Tracks whether the resolved assignee already appears as one of the options
+	// emitted above (distinct from each option's own Selected flag).
+	represented := assigneeParam == dailyAssigneeAll || assigneeParam == dailyAssigneeUnassigned
 	for _, name := range names {
+		match := assigneeParam == name
+		represented = represented || match
 		view.Assignees = append(view.Assignees, dailyAssigneeOption{
-			Value: name, Label: name, Selected: assigneeParam == name,
+			Value: name, Label: name, Selected: match,
+		})
+	}
+	// The filter resolved to a named assignee not on the active sprint (e.g. a
+	// configured "me" who has no sprint work). Surface them as a selected option
+	// so the dropdown reflects the actual scope rather than silently showing All.
+	if !represented {
+		view.Assignees = append(view.Assignees, dailyAssigneeOption{
+			Value: assigneeParam, Label: assigneeParam, Selected: true,
 		})
 	}
 
@@ -177,6 +192,15 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 	}
 	view.Empty = len(view.Cards) == 0
 	return view, nil
+}
+
+// defaultAssignee is the Daily assignee filter when the request carries no
+// explicit choice: the configured "me" display name, or "all" when me is unset.
+func (s *Server) defaultAssignee() string {
+	if s.me != "" {
+		return s.me
+	}
+	return dailyAssigneeAll
 }
 
 // dailyRange resolves a window key to its absolute [from, to) bounds, computed

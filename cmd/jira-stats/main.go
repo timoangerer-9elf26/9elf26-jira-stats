@@ -91,6 +91,7 @@ func run() error {
 		web.WithLocation(loc),
 		web.WithVelocityWeeks(velocityWeeks),
 		web.WithJiraBaseURL(os.Getenv("JIRA_BASE_URL")),
+		web.WithMe(os.Getenv("DAILY_ME")),
 	}
 	// Only override the web clock when REVIEW_NOW is set; leaving it out keeps the
 	// server's default time.Now for every production deployment.

@@ -66,6 +66,7 @@ type Server struct {
 	loc           *time.Location
 	velocityWeeks int
 	jiraBaseURL   string
+	me            string
 }
 
 // Option configures a Server at construction.
@@ -95,6 +96,14 @@ func WithLocation(loc *time.Location) Option {
 // without a link rather than a broken href.
 func WithJiraBaseURL(base string) Option {
 	return func(s *Server) { s.jiraBaseURL = strings.TrimRight(base, "/") }
+}
+
+// WithMe sets the configured identity — "me" — a Jira display name the Daily
+// view revolves around: with no explicit assignee chosen, Daily defaults its
+// filter to me instead of "All". Left empty (unset in config), Daily keeps the
+// "All" default. See CONTEXT.md → Me and docs/adr/0003-daily-what-i-did-view.md.
+func WithMe(name string) Option {
+	return func(s *Server) { s.me = strings.TrimSpace(name) }
 }
 
 // WithVelocityWeeks overrides how many trailing ISO weeks the Velocity view

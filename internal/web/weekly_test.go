@@ -25,7 +25,7 @@ import (
 // newTestAppAt is like newTestApp but pins the server clock, so window bounds
 // (which are relative to "now") are deterministic. Shared by the Weekly, Daily
 // and Velocity suites.
-func newTestAppAt(t *testing.T, client jira.Client, now time.Time) *testApp {
+func newTestAppAt(t *testing.T, client jira.Client, now time.Time, opts ...web.Option) *testApp {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	st, err := store.Open(dbPath)
@@ -36,7 +36,8 @@ func newTestAppAt(t *testing.T, client jira.Client, now time.Time) *testApp {
 	if err := sync.Once(context.Background(), client, st); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	srv, err := web.NewServer(st, web.WithClock(func() time.Time { return now }))
+	opts = append([]web.Option{web.WithClock(func() time.Time { return now })}, opts...)
+	srv, err := web.NewServer(st, opts...)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}
