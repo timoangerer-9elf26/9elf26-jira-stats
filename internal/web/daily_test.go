@@ -310,7 +310,7 @@ func dailyDigestFixture(t *testing.T) (*jira.FakeClient, time.Time) {
 	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
 		dailyIssue("DCAI-10", "Story", "alice", true, "In Progress", "DONE (This Sprint)", at(9)), // finished
 		dailyIssue("DCAI-11", "Task", "alice", true, "Ready to Do", "In Progress", at(8)),         // advanced
-		dailyIssue("DCAI-12", "Bug", "alice", true, "Review / Testing", "In Progress", at(7)),      // pulled back
+		dailyIssue("DCAI-12", "Bug", "alice", true, "Review / Testing", "In Progress", at(7)),     // pulled back
 	}}, now
 }
 
