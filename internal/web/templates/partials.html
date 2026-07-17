@@ -272,9 +272,40 @@
 {{define "daily-panel"}}
   {{template "daily-controls" .}}
   {{template "daily-digest" .Digest}}
+  {{template "daily-created" .Created}}
   <div id="daily-results" class="mt-6">
     {{template "daily-results" .}}
   </div>
+{{end}}
+
+{{/* daily-created is the "tickets I created" section: the tickets the configured
+     "me" authored within the window, NOT limited to the active sprint (unlike the
+     movement digest above). Each row shows its key, title, type badge, size chip
+     and creation instant; when Href is set the key links to Jira. Renders a
+     friendly empty state when nothing was created. Takes a dailyCreatedView. */}}
+{{define "daily-created"}}
+<section data-testid="daily-created" class="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+  <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Tickets I created ({{.Count}})</h2>
+  {{if .Empty}}
+  <p data-testid="daily-created-empty" class="mt-4 text-sm text-slate-500">No tickets created in the chosen window.</p>
+  {{else}}
+  <ul class="mt-4 flex flex-col gap-2">
+    {{range .Tickets}}
+    <li class="flex items-baseline justify-between gap-3 text-sm" data-testid="created-ticket:{{.Key}}" data-key="{{.Key}}">
+      <span class="flex min-w-0 items-baseline gap-2">
+        {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener" class="font-mono text-xs font-semibold text-slate-500 hover:text-slate-800">{{.Key}}</a>{{else}}<span class="font-mono text-xs font-semibold text-slate-500">{{.Key}}</span>{{end}}
+        {{template "type-badge" (dict "Type" .Type "Testid" (printf "created:%s:type" .Key))}}
+        <span class="truncate text-slate-800">{{.Summary}}</span>
+      </span>
+      <span class="flex shrink-0 items-baseline gap-2">
+        {{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "created:%s:size" .Key))}}
+        <span class="tabular-nums text-xs text-slate-400">{{.At}}</span>
+      </span>
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+</section>
 {{end}}
 
 {{/* daily-digest is the summary layer above the granular log: a headline plus

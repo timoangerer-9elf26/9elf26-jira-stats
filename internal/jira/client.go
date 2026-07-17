@@ -19,6 +19,13 @@ type Issue struct {
 	StatusCategory string // Jira status category: "To Do", "In Progress", "Done"
 	Size           string // T-shirt size label: "S", "M", "L", or "" (no estimate)
 	Sprint         string // current (last) sprint name on the issue, "" if none
+	// CreatedAt is the instant the issue was authored in Jira (its immutable
+	// `created` field), zero when Jira reported none. It is a static per-issue
+	// field carried on every fetch, so a normal re-sync populates it.
+	CreatedAt time.Time
+	// Creator is the display name of the issue's Jira Creator — the immutable
+	// author, NOT the (mutable) Reporter. "" when Jira reported no creator.
+	Creator string
 	// ActiveSprint is the name of the ACTIVE sprint (state=="active") the issue
 	// belongs to, or "" when the issue is in no active sprint (closed/future/none).
 	// This is per-issue MEMBERSHIP only; the sprint's window (activation instant)

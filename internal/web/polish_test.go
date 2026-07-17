@@ -120,6 +120,9 @@ func (failingRollups) DailyStatusChanges(_ string, _, _ time.Time) ([]store.Dail
 func (failingRollups) ActiveSprintAssignees() ([]string, error) {
 	return nil, errBoom
 }
+func (failingRollups) IssuesCreatedInRange(_ string, _, _ time.Time) ([]store.CreatedTicket, error) {
+	return nil, errBoom
+}
 
 var errBoom = &boomError{}
 

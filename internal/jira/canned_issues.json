@@ -9,6 +9,8 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Ada",
+    "Creator": "Ada",
+    "CreatedAt": "2026-07-09T09:00:00Z",
     "Changelog": [
       {"ID": "1001", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-10T09:00:00Z"},
       {"ID": "1002", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-14T09:00:00Z"}
@@ -27,6 +29,8 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Grace",
+    "Creator": "Grace",
+    "CreatedAt": "2026-07-09T09:00:00Z",
     "Changelog": [
       {"ID": "1003", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-10T10:30:00Z"}
     ],
@@ -44,6 +48,8 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Alan",
+    "Creator": "Alan",
+    "CreatedAt": "2026-07-09T09:00:00Z",
     "Changelog": [
       {"ID": "1004", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-10T11:00:00Z"},
       {"ID": "1005", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-16T09:00:00Z"}
@@ -62,6 +68,8 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "",
+    "Creator": "Grace",
+    "CreatedAt": "2026-07-14T06:00:00Z",
     "Changelog": [
       {"ID": "1006", "Field": "status", "From": "Triage", "To": "Ready To Do", "Timestamp": "2026-07-14T07:15:00Z"}
     ],
@@ -79,6 +87,8 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Ada",
+    "Creator": "Ada",
+    "CreatedAt": "2026-07-14T06:30:00Z",
     "Changelog": [
       {"ID": "1007", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-14T07:30:00Z"},
       {"ID": "1008", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-14T13:00:00Z"}
@@ -97,6 +107,8 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Grace",
+    "Creator": "Grace",
+    "CreatedAt": "2026-07-08T09:00:00Z",
     "Changelog": []
   },
   {
@@ -109,6 +121,8 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Grace",
+    "Creator": "Grace",
+    "CreatedAt": "2026-07-09T09:00:00Z",
     "Changelog": [
       {"ID": "1009", "Field": "status", "From": "Triage", "To": "Refinement", "Timestamp": "2026-07-10T12:00:00Z"}
     ],
@@ -126,6 +140,8 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Alan",
+    "Creator": "Alan",
+    "CreatedAt": "2026-07-09T09:00:00Z",
     "Changelog": [
       {"ID": "1010", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-10T13:00:00Z"},
       {"ID": "1011", "Field": "status", "From": "In Progress", "To": "Review / Testing", "Timestamp": "2026-07-13T14:00:00Z"}
@@ -133,6 +149,20 @@
     "SprintChanges": [
       {"EntryID": "sm-9", "SprintID": 29, "SprintName": "KW29", "Entered": true, "Timestamp": "2026-07-10T08:00:00Z"}
     ]
+  },
+  {
+    "Key": "DCAI-14",
+    "Type": "Task",
+    "Summary": "Draft the sprint retro agenda",
+    "Status": "Triage",
+    "StatusCategory": "To Do",
+    "Size": "S",
+    "Sprint": "",
+    "ActiveSprint": "",
+    "Assignee": "Ada",
+    "Creator": "Ada",
+    "CreatedAt": "2026-07-15T08:00:00Z",
+    "Changelog": []
   },
   {
     "Key": "DCAI-20",
@@ -144,6 +174,8 @@
     "Sprint": "KW28",
     "ActiveSprint": "",
     "Assignee": "Ada",
+    "Creator": "Ada",
+    "CreatedAt": "2026-07-06T09:00:00Z",
     "Changelog": [
       {"ID": "1020", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-09T10:00:00Z"},
       {"ID": "1021", "Field": "status", "From": "DONE (This Sprint)", "To": "Released / Deployed", "Timestamp": "2026-07-10T08:00:00Z"}
@@ -159,6 +191,8 @@
     "Sprint": "KW28",
     "ActiveSprint": "",
     "Assignee": "Grace",
+    "Creator": "Grace",
+    "CreatedAt": "2026-07-06T09:00:00Z",
     "Changelog": [
       {"ID": "1022", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-08T10:00:00Z"}
     ]
@@ -173,6 +207,8 @@
     "Sprint": "KW27",
     "ActiveSprint": "",
     "Assignee": "Alan",
+    "Creator": "Alan",
+    "CreatedAt": "2026-06-29T09:00:00Z",
     "Changelog": [
       {"ID": "1023", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-02T10:00:00Z"}
     ]
