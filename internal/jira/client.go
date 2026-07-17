@@ -47,18 +47,19 @@ type SprintMembershipChange struct {
 	Timestamp  time.Time // instant of the change
 }
 
-// Sprint is a board sprint as a first-class entity with its ACTUAL lifecycle
-// instants — the trusted timestamps for windowing. ActivatedAt is Jira's
-// activatedDate (the instant "Start sprint" was clicked); CompletedAt is Jira's
-// completeDate (the instant it was completed). Both are the zero time when the
-// event has not happened (a future sprint has no activation; an active sprint no
-// completion). The PLANNED start/end dates are deliberately NOT carried here:
-// they are not trusted for windowing (see docs/adr/0002 and CONTEXT.md "Sprint").
+// Sprint is a board sprint as a first-class entity with its lifecycle instants —
+// the trusted timestamps for windowing. Jira Cloud's Agile API exposes no
+// actual-activation field (there is no activatedDate), so ActivatedAt is taken
+// from Jira's startDate (the value set in the "Start sprint" dialog), the only
+// available window-start anchor, falling back to createdDate for a sprint never
+// started (see toSprint); CompletedAt is Jira's completeDate (the instant it was
+// completed), the zero time until the sprint is completed. The planned endDate is
+// deliberately NOT carried here (see docs/adr/0002 and CONTEXT.md "Sprint").
 type Sprint struct {
 	ID          int
 	Name        string
 	State       string    // "active", "closed", or "future"
-	ActivatedAt time.Time // activation instant (zero until the sprint is started)
+	ActivatedAt time.Time // window-start instant, from startDate (createdDate fallback)
 	CompletedAt time.Time // completion instant (zero until the sprint is completed)
 }
 

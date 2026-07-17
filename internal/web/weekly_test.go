@@ -311,6 +311,64 @@ func TestWeeklyLiveSprintWindowStartsAtActivation(t *testing.T) {
 	}
 }
 
+// TestWeeklyLiveSprintWindowReachesBeforeThisWeeksMonday asserts the live-sprint
+// window is driven by the sprint's startDate even when that start precedes the
+// current work-week's Monday: the two windows then resolve to different bounds,
+// and a completion falling between the sprint start and Monday counts under Live
+// sprint but NOT under Work week. This is the crux of bug #49 — with startDate
+// populating the activation instant the modes no longer collapse onto the same
+// numbers.
+func TestWeeklyLiveSprintWindowReachesBeforeThisWeeksMonday(t *testing.T) {
+	loc := berlin(t)
+	// now is Wednesday of ISO week 29 (Mon 07-13 .. Sat 07-18 Berlin).
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
+	// The sprint started the previous Thursday — BEFORE this week's Monday.
+	activation := time.Date(2026, time.July, 9, 9, 0, 0, 0, loc)
+	beforeStart := time.Date(2026, time.July, 8, 9, 0, 0, 0, loc) // open + in sprint before start
+	betweenStartAndMonday := time.Date(2026, time.July, 11, 10, 0, 0, 0, loc)
+
+	fake := &jira.FakeClient{
+		Sprints: []jira.Sprint{{ID: 29, Name: "KW29", State: "active", ActivatedAt: activation.UTC()}},
+		Issues: []jira.Issue{
+			// Open + member at the sprint start, crosses Done on Saturday 07-11 —
+			// inside the live-sprint window but before this week's Monday.
+			weeklyIssue("DCAI-1", "M", "DONE (This Sprint)",
+				[]jira.ChangelogEntry{
+					weeklyStatus("s1a", "Ready To Do", "In Progress", beforeStart),
+					weeklyStatus("s1b", "In Progress", "DONE (This Sprint)", betweenStartAndMonday),
+				},
+				[]jira.SprintMembershipChange{weeklyEntered("m1", beforeStart)}),
+		},
+	}
+	app := newTestAppAt(t, fake, now)
+
+	// Live sprint: window is [09 Jul, 15 Jul); DCAI-1 is started-with and finished.
+	live := get(t, app.URL+"/weekly/results?window=live-sprint")
+	for _, w := range []string{
+		`data-testid="weekly-window-label">9 Jul – 14 Jul 2026<`,
+		`data-testid="weekly-started:tickets">1<`,
+		`data-testid="weekly-started:finished-tickets">1<`,
+		`data-testid="weekly-total:finished-points">2<`,
+	} {
+		if !strings.Contains(live, w) {
+			t.Errorf("live-sprint window wrong; missing %q\n%s", w, live)
+		}
+	}
+
+	// Work week: window is [13 Jul, 18 Jul); DCAI-1 was already Done by Monday, so
+	// nothing was started or added this window — the empty state, a different result
+	// from the live-sprint window over the same data.
+	work := get(t, app.URL+"/weekly/results?window=work-week")
+	for _, w := range []string{
+		`data-testid="weekly-window-label">13 Jul – 17 Jul 2026<`,
+		`data-testid="weekly-empty"`,
+	} {
+		if !strings.Contains(work, w) {
+			t.Errorf("work-week window wrong; missing %q\n%s", w, work)
+		}
+	}
+}
+
 // TestWeeklyNoActiveSprintRendersEmptyState asserts that with no active sprint
 // recorded, the Weekly view shows the Board-style no-sprint empty state rather
 // than a row of zeros.

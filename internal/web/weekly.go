@@ -165,9 +165,10 @@ func (s *Server) weeklyView(q url.Values) (weeklyView, error) {
 // computed in the display timezone. Work week is a fixed clock window —
 // Monday 00:00 → Saturday 00:00 (Friday end-of-day), Europe/Berlin — for the
 // week containing now, so the weekend is excluded. Live sprint runs from the
-// active sprint's ACTUAL activation instant to now (never the planned dates; see
-// docs/adr/0002). A live-sprint request with no recorded activation falls back
-// to the work-week window so the view still renders a sensible span.
+// active sprint's activation instant (its startDate; Jira Cloud exposes no
+// dedicated activation field, see jira.Sprint / docs/adr/0002) to now. A
+// live-sprint request with no recorded activation falls back to the work-week
+// window so the view still renders a sensible span.
 func (s *Server) weeklyWindow(windowKey string, sprint store.ActiveSprint) (from, to time.Time) {
 	now := s.now().In(s.loc)
 	if windowKey == weeklyWindowLiveSprint && !sprint.Activated.IsZero() {

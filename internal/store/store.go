@@ -139,10 +139,11 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 // recent successful sync cycle.
 const lastSyncKey = "last_sync"
 
-// Sprint is a stored board sprint entity: its identity, state, and the ACTUAL
-// lifecycle instants (activation and completion). ActivatedAt is zero until the
-// sprint is started; CompletedAt is zero until it is completed. Planned
-// start/end dates are deliberately not stored (not trusted for windowing).
+// Sprint is a stored board sprint entity: its identity, state, and lifecycle
+// instants. ActivatedAt is the window-start instant (Jira has no activatedDate,
+// so it is taken from startDate; see jira.Sprint); CompletedAt is zero until it is
+// completed. The planned end date is deliberately not stored (not trusted for
+// windowing).
 type Sprint struct {
 	ID          int
 	Name        string
@@ -217,9 +218,10 @@ type ActiveSprint struct {
 // ActiveSprintWindow returns the currently active sprint (state = "active") as a
 // window: its name and activation instant. ok is false when no sprint is active
 // (a fresh DB, or between sprints). This supersedes the old meta planned-date
-// window: the window start is the ACTUAL activation instant, never a planned
-// start date. It is the single source for the Now heading, the sprint board's
-// existence gate, the Daily heading, and the Completed "active sprint" preset.
+// window: the window start is the sprint's startDate-derived activation instant
+// (Jira Cloud exposes no dedicated activation field; see jira.Sprint). It is the
+// single source for the Now heading, the sprint board's existence gate, the Daily
+// heading, and the Completed "active sprint" preset.
 func (s *Store) ActiveSprintWindow() (ActiveSprint, bool, error) {
 	var id int
 	var name string

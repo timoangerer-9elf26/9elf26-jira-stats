@@ -72,9 +72,9 @@ func (c *LiveClient) FetchIssuesUpdatedSince(ctx context.Context, since time.Tim
 
 // FetchSprints walks the board's sprints via the Jira Agile API
 // (GET /rest/agile/1.0/board/{boardID}/sprint), startAt-paginated until isLast.
-// It maps each sprint to the domain entity, taking the trusted ACTUAL lifecycle
-// instants from Jira's activatedDate/completeDate — never the planned
-// startDate/endDate, which are not trusted for windowing.
+// It maps each sprint to the domain entity (see toSprint): Jira Cloud exposes no
+// activatedDate, so the window-start instant comes from startDate; completeDate
+// remains the completion instant. The planned endDate is not carried.
 func (c *LiveClient) FetchSprints(ctx context.Context) ([]Sprint, error) {
 	var sprints []Sprint
 	startAt := 0
@@ -90,13 +90,9 @@ func (c *LiveClient) FetchSprints(ctx context.Context) ([]Sprint, error) {
 		}
 
 		for _, dto := range page.Values {
-			sp := Sprint{ID: dto.ID, Name: dto.Name, State: dto.State}
-			var err error
-			if sp.ActivatedAt, err = optionalJiraTime(dto.ActivatedDate); err != nil {
-				return nil, fmt.Errorf("sprint %d activatedDate: %w", dto.ID, err)
-			}
-			if sp.CompletedAt, err = optionalJiraTime(dto.CompleteDate); err != nil {
-				return nil, fmt.Errorf("sprint %d completeDate: %w", dto.ID, err)
+			sp, err := toSprint(dto)
+			if err != nil {
+				return nil, err
 			}
 			sprints = append(sprints, sp)
 		}
@@ -293,19 +289,42 @@ type sprintDTO struct {
 }
 
 // sprintsResponse is the Jira Agile board-sprints page; agileSprintDTO is one
-// sprint entity. Only the fields the entity needs are parsed — the ACTUAL
-// lifecycle instants (activatedDate/completeDate), not the planned start/end.
+// sprint entity. Jira Cloud's Agile REST API exposes NO actual-activation field
+// (there is no activatedDate); startDate — the value set in the "Start sprint"
+// dialog — is the only anchor for the sprint window's start, with createdDate as
+// a fallback. completeDate remains the trusted completion instant.
 type sprintsResponse struct {
 	Values []agileSprintDTO `json:"values"`
 	IsLast bool             `json:"isLast"`
 }
 
 type agileSprintDTO struct {
-	ID            int    `json:"id"`
-	Name          string `json:"name"`
-	State         string `json:"state"`
-	ActivatedDate string `json:"activatedDate"`
-	CompleteDate  string `json:"completeDate"`
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	State        string `json:"state"`
+	StartDate    string `json:"startDate"`
+	CreatedDate  string `json:"createdDate"`
+	CompleteDate string `json:"completeDate"`
+}
+
+// toSprint maps a Jira Agile sprint DTO into the domain Sprint entity. Because
+// Jira Cloud has no activatedDate, the entity's activation/window-start instant
+// (ActivatedAt) is taken from startDate, falling back to createdDate when a
+// (future) sprint has never been started. completeDate drives CompletedAt.
+func toSprint(dto agileSprintDTO) (Sprint, error) {
+	sp := Sprint{ID: dto.ID, Name: dto.Name, State: dto.State}
+	start := dto.StartDate
+	if start == "" {
+		start = dto.CreatedDate
+	}
+	var err error
+	if sp.ActivatedAt, err = optionalJiraTime(start); err != nil {
+		return Sprint{}, fmt.Errorf("sprint %d startDate: %w", dto.ID, err)
+	}
+	if sp.CompletedAt, err = optionalJiraTime(dto.CompleteDate); err != nil {
+		return Sprint{}, fmt.Errorf("sprint %d completeDate: %w", dto.ID, err)
+	}
+	return sp, nil
 }
 
 // changelogDTO is the search-embedded changelog; changelogResponse is the

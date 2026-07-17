@@ -27,19 +27,19 @@ func fakeJira(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// sprintsPage is the board's sprints from the Agile API: a closed sprint (both
-// lifecycle instants set) and the active one (activated, not yet completed).
-// activatedDate/completeDate are the ACTUAL lifecycle instants; the planned
-// startDate/endDate are present but deliberately ignored by the parser.
+// sprintsPage is the board's sprints from the Agile API, in the exact shape Jira
+// Cloud returns: a closed sprint and the active one. There is NO activatedDate —
+// Jira Cloud does not expose one (see bug #49); the sprint's window-start anchor
+// is startDate, and completeDate is the completion instant. The planned endDate is
+// present but deliberately ignored by the parser.
 var sprintsPage = `{
       "maxResults": 50, "startAt": 0, "isLast": true,
       "values": [
         {"id": 41, "name": "Sprint 41", "state": "closed",
          "startDate": "2026-07-06T07:00:00.000Z", "endDate": "2026-07-13T07:00:00.000Z",
-         "activatedDate": "2026-07-06T07:05:00.000Z", "completeDate": "2026-07-13T06:30:00.000Z"},
+         "completeDate": "2026-07-13T06:30:00.000Z"},
         {"id": 42, "name": "Sprint 42", "state": "active",
-         "startDate": "2026-07-13T07:00:00.000Z", "endDate": "2026-07-20T07:00:00.000Z",
-         "activatedDate": "2026-07-13T07:05:00.000Z"}
+         "startDate": "2026-07-13T07:00:00.000Z", "endDate": "2026-07-20T07:00:00.000Z"}
       ]
     }`
 
