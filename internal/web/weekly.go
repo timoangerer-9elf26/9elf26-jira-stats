@@ -41,19 +41,58 @@ type weeklyWindowOption struct {
 
 // weeklyView is the model for the Weekly page and its panel fragment. HasSprint
 // is false when no active sprint is recorded (drives the no-sprint empty state,
-// same treatment as the Board view); Empty is true when nothing finished in the
-// window, so the results show a friendly note instead of a row of zeros.
+// same treatment as the Board view); Empty is true when neither Started-with nor
+// Added has any ticket, so the results show a friendly note instead of a table of
+// zeros.
 //
-// The shape is kept deliberately extensible for #35: that ticket adds the
-// Started-with and Added categories (each a store.SizeTally, like Finished) plus
-// a total, alongside the single Finished tally this skeleton carries.
+// Rows carries the three category rows in display order (Started with, Added,
+// Total). Each row is a tickets+points headline with the S/M/L split and its
+// finished figure (finished-from-started, finished-from-added and the finished
+// total respectively).
 type weeklyView struct {
 	Windows     []weeklyWindowOption
 	WindowLabel string // human-readable resolved window, e.g. "13 Jul – 17 Jul 2026"
 	SprintName  string
 	HasSprint   bool
-	Finished    store.SizeTally
+	Rows        []weeklyCategoryRow
 	Empty       bool
+}
+
+// weeklyCategoryRow is one row of the Weekly table: a category's size tally as a
+// tickets+points headline with the S/M/L/no-estimate split, plus the finished
+// figure attributed to that category. Key is the testid/render prefix
+// ("started", "added", "total").
+type weeklyCategoryRow struct {
+	Label           string
+	Key             string
+	Tickets         int
+	Points          int
+	S               int
+	M               int
+	L               int
+	NoEstimate      int
+	FinishedTickets int
+	FinishedPoints  int
+}
+
+// tickets is the ticket count of a size tally (S + M + L + no-estimate).
+func tickets(t store.SizeTally) int { return t.S + t.M + t.L + t.NoEstimate }
+
+// weeklyRow builds one category row from its tally and the finished tally
+// attributed to it.
+func weeklyRow(label, key string, tally, finished store.SizeTally) weeklyCategoryRow {
+	return weeklyCategoryRow{
+		Label:           label,
+		Key:             key,
+		Tickets:         tickets(tally),
+		Points:          tally.Points,
+		S:               tally.S,
+		M:               tally.M,
+		L:               tally.L,
+		NoEstimate:      tally.NoEstimate,
+		FinishedTickets: tickets(finished),
+		FinishedPoints:  finished.Points,
+	}
 }
 
 // handleWeekly renders the full standalone Weekly page.
@@ -107,12 +146,18 @@ func (s *Server) weeklyView(q url.Values) (weeklyView, error) {
 
 	from, to := s.weeklyWindow(windowKey, sprint)
 	view.WindowLabel = rangeLabel(from, to)
-	tally, err := s.rollups.FinishedInWindow(from, to)
+	cats, err := s.rollups.WeeklyCategoriesInWindow(sprint.ID, from, to)
 	if err != nil {
 		return weeklyView{}, err
 	}
-	view.Finished = tally
-	view.Empty = tally == store.SizeTally{}
+	view.Rows = []weeklyCategoryRow{
+		weeklyRow("Started with", "started", cats.StartedWith, cats.FinishedFromStarted),
+		weeklyRow("Added during the week", "added", cats.Added, cats.FinishedFromAdded),
+		weeklyRow("Total", "total", cats.Total, cats.FinishedTotal),
+	}
+	// Empty when nothing was started with and nothing was added — a table of zeros
+	// is not worth showing (same friendly-note philosophy as the skeleton).
+	view.Empty = cats.Total == store.SizeTally{}
 	return view, nil
 }
 

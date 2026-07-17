@@ -102,8 +102,8 @@ func (failingRollups) OpenByStatus() (store.OpenBoard, error) {
 func (failingRollups) CompletedInRange(_, _ time.Time) (store.SizeTally, error) {
 	return store.SizeTally{}, errBoom
 }
-func (failingRollups) FinishedInWindow(_, _ time.Time) (store.SizeTally, error) {
-	return store.SizeTally{}, errBoom
+func (failingRollups) WeeklyCategoriesInWindow(_ int, _, _ time.Time) (store.WeeklyCategories, error) {
+	return store.WeeklyCategories{}, errBoom
 }
 func (failingRollups) LastSyncedAt() (time.Time, bool, error) {
 	return time.Time{}, false, errBoom

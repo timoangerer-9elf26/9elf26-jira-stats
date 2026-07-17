@@ -204,31 +204,65 @@
   {{end}}
 {{end}}
 
-{{/* weekly-results is the Weekly-view results fragment: the finished-this-week
-     size tally (S/M/L/no-estimate counts + points, current size) for the active
-     sprint over the selected window, plus the resolved window label. #35 grows
-     this into the three-category table (Started with / Added / Finished). Takes a
-     weeklyView (needs .Finished, .WindowLabel and .SprintName). */}}
+{{/* weekly-results is the Weekly-view results fragment: the three-category table
+     (Started with / Added / Total) for the active sprint over the selected
+     window, plus the resolved window label. Each row is a tickets+points headline
+     with the S/M/L split as detail and the finished figure attributed to that
+     category. Takes a weeklyView (needs .Rows, .Empty, .WindowLabel, .SprintName). */}}
 {{define "weekly-results"}}
 <div data-testid="weekly-results">
   <div class="flex items-baseline justify-between">
-    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Finished this week{{if .SprintName}} in {{.SprintName}}{{end}}</h2>
+    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">This week{{if .SprintName}} in {{.SprintName}}{{end}}</h2>
     <span class="text-xs text-slate-400" data-testid="weekly-window-label">{{.WindowLabel}}</span>
   </div>
   {{if .Empty}}
-  <p data-testid="weekly-empty" class="mt-4 text-sm text-slate-500">No work finished in this window yet.</p>
+  <p data-testid="weekly-empty" class="mt-4 text-sm text-slate-500">No work started or added in this window yet.</p>
   {{else}}
-  <div class="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-5">
-    {{with .Finished}}
-    {{template "stat-card" (dict "Label" "S" "Value" .S "Testid" "finished:s")}}
-    {{template "stat-card" (dict "Label" "M" "Value" .M "Testid" "finished:m")}}
-    {{template "stat-card" (dict "Label" "L" "Value" .L "Testid" "finished:l")}}
-    {{template "stat-card" (dict "Label" "No estimate" "Value" .NoEstimate "Testid" "finished:none")}}
-    {{template "stat-card" (dict "Label" "Points" "Value" .Points "Testid" "finished:points")}}
-    {{end}}
+  <div class="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <table class="w-full text-left text-sm" data-testid="weekly-table">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400">
+          <th class="px-4 py-3 font-medium">Category</th>
+          <th class="px-4 py-3 font-medium">Tickets · Points</th>
+          <th class="px-4 py-3 font-medium">Finished</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Rows}}
+        {{template "weekly-category-row" .}}
+        {{end}}
+      </tbody>
+    </table>
   </div>
   {{end}}
 </div>
+{{end}}
+
+{{/* weekly-category-row is one row of the Weekly table: the category label, a
+     tickets+points headline with the S/M/L/no-estimate split as detail, and the
+     finished figure attributed to that category. The Total row (Key "total") is
+     emphasized. Takes a weeklyCategoryRow. */}}
+{{define "weekly-category-row"}}
+<tr data-testid="weekly-row:{{.Key}}"
+    class="border-b border-slate-100 last:border-0 {{if eq .Key "total"}}bg-slate-50 font-semibold text-slate-900{{else}}text-slate-700{{end}}">
+  <td class="px-4 py-3">{{.Label}}</td>
+  <td class="px-4 py-3">
+    <div class="tabular-nums">
+      <span data-testid="weekly-{{.Key}}:tickets">{{.Tickets}}</span> tickets ·
+      <span data-testid="weekly-{{.Key}}:points">{{.Points}}</span> pts
+    </div>
+    <div class="mt-0.5 text-xs font-normal text-slate-400 tabular-nums">
+      S <span data-testid="weekly-{{.Key}}:s">{{.S}}</span> ·
+      M <span data-testid="weekly-{{.Key}}:m">{{.M}}</span> ·
+      L <span data-testid="weekly-{{.Key}}:l">{{.L}}</span> ·
+      none <span data-testid="weekly-{{.Key}}:none">{{.NoEstimate}}</span>
+    </div>
+  </td>
+  <td class="px-4 py-3 tabular-nums">
+    <span data-testid="weekly-{{.Key}}:finished-tickets">{{.FinishedTickets}}</span> tickets ·
+    <span data-testid="weekly-{{.Key}}:finished-points">{{.FinishedPoints}}</span> pts
+  </td>
+</tr>
 {{end}}
 
 {{/* daily-panel is the swappable Daily unit: the controls (so the selected
