@@ -31,13 +31,22 @@ is.
   be missed. A planning number that looks precise but misleads is worse than
   none.
 
-### Window bounds ignore the sprint's *planned* dates; use actual lifecycle events
+### Window bounds: work-week is a clock window; live-sprint anchors on `startDate`
 
-The planned start/end dates set on a sprint are not trusted (frequently wrong).
 The **work-week** mode uses a fixed clock window (Mon 00:00 → Sat 00:00,
-Europe/Berlin, from `now`); the **live-sprint** mode uses *sprint activation →
-now*. Neither reads the planned dates. A future reader will wonder why we don't
-just use Jira's sprint dates — this is why.
+Europe/Berlin, from `now`); the **live-sprint** mode runs *sprint start → now*.
+
+We originally intended the live-sprint start to be the sprint's *actual*
+activation instant (`activatedDate`), distinct from the planned start. But Jira
+Cloud's Agile REST API exposes **no** activation field — a sprint response carries
+only `startDate`, `endDate`, `createdDate`, `completeDate` (+ id/name/state/goal).
+`activatedDate` was always empty, so `activated_at` was never populated and
+live-sprint silently fell back to the work-week window (bug #49). Resolution:
+anchor the live-sprint start on **`startDate`** — the value set in the "Start
+sprint" dialog, the only available start instant — falling back to `createdDate`
+for a sprint never started. The planned `endDate` is still ignored; the sprint's
+end comes from `completeDate`. A future reader will wonder why we don't read a
+dedicated activation timestamp — because Jira Cloud does not provide one.
 
 ### The global "Done" set is corrected to include Ready for Release
 

@@ -9,13 +9,14 @@ A one-week unit of planned work in the DCAI Jira project, named `KW##` (ISO
 week). Treated as a first-class entity with its own **lifecycle events**, not
 just a label on a ticket.
 
-- **Sprint activation** — the instant the sprint was actually *started* in Jira
-  (someone clicked "Start sprint"). The trusted "sprint started" timestamp.
-- **Sprint completion** — the instant the sprint was actually *completed* in Jira
-  (`completeDate`). The trusted "sprint ended" timestamp.
-- **Planned dates** — the start/end dates *set* on a sprint during planning.
-  Deliberately **not trusted** for windowing: they are frequently wrong. Use the
-  activation and completion events instead.
+- **Sprint activation** — the instant the sprint *started*, used as the
+  live-sprint window start. Jira Cloud exposes no dedicated activation field, so
+  this is anchored on the sprint's `startDate` (see `docs/adr/0002`).
+- **Sprint completion** — the instant the sprint was actually *completed* in Jira.
+  The trusted "sprint ended" timestamp.
+- **Planned end date** — the end date *set* on a sprint during planning.
+  Deliberately **not trusted**: it is frequently wrong. Use the completion event
+  for the sprint's end instead.
 
 ## Weekly view
 

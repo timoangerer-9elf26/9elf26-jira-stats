@@ -81,14 +81,14 @@ func TestBackfillProjectsFakeJiraIntoStore(t *testing.T) {
 	assertEq(t, "DCAI-3 assignee", three.assignee, "Alan")
 
 	// The active-sprint window derives from the sprint ENTITY fetched from the
-	// Agile API: its name and ACTUAL activation instant (activatedDate), not the
-	// planned startDate/endDate carried on the issues.
+	// Agile API: its name and window-start instant, taken from startDate (Jira Cloud
+	// has no activatedDate; see #49), not the planned dates carried on the issues.
 	sprint, ok, err := st.ActiveSprintWindow()
 	if err != nil || !ok {
 		t.Fatalf("ActiveSprintWindow ok=%v err=%v", ok, err)
 	}
 	assertEq(t, "active sprint name", sprint.Name, "Sprint 42")
-	assertEq(t, "active sprint activation", sprint.Activated.UTC().Format(time.RFC3339), "2026-07-13T07:05:00Z")
+	assertEq(t, "active sprint activation", sprint.Activated.UTC().Format(time.RFC3339), "2026-07-13T07:00:00Z")
 
 	// Both sprints persist as entities; the closed one exposes its completion
 	// instant (completeDate), the active one has none yet.
@@ -149,8 +149,8 @@ func TestBackfillProjectsFakeJiraIntoStore(t *testing.T) {
 	}
 	assertEq(t, "DCAI-1 sprint 42 entry instant", entry.UTC().Format(time.RFC3339), "2026-07-13T06:00:00Z")
 
-	// DCAI-1 entered sprint 42 (06:00Z) before its activation (07:05Z), so it is a
-	// member at activation — "present from the start".
+	// DCAI-1 entered sprint 42 (06:00Z) before its activation (07:00Z, from
+	// startDate), so it is a member at activation — "present from the start".
 	members, err := st.IssuesInSprintAt(42, sprint.Activated)
 	if err != nil {
 		t.Fatalf("IssuesInSprintAt: %v", err)
