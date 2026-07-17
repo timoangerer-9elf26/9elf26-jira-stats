@@ -286,17 +286,28 @@ func (s *Server) defaultAssignee() string {
 
 // dailyRange resolves a window key to its absolute [from, to) bounds, computed
 // in the display timezone. "Last 24h" rolls back 24h from now; "Since yesterday"
-// runs from 00:00 of the previous calendar day to now.
+// runs from 00:00 of the last *working* day to now — walking back over weekends
+// so a Monday morning (and Sat/Sun) reaches Friday, not the prior calendar day.
 func (s *Server) dailyRange(windowKey string, now time.Time) (from, to time.Time) {
 	now = now.In(s.loc)
 	switch windowKey {
 	case dailyWindowSinceYesterday:
 		y, m, d := now.Date()
 		startToday := time.Date(y, m, d, 0, 0, 0, 0, s.loc)
-		return startToday.AddDate(0, 0, -1), now
+		from = startToday.AddDate(0, 0, -1)
+		for isWeekend(from.Weekday()) {
+			from = from.AddDate(0, 0, -1)
+		}
+		return from, now
 	default: // last-24h
 		return now.Add(-24 * time.Hour), now
 	}
+}
+
+// isWeekend reports whether a weekday falls on the weekend (Sat/Sun), which the
+// "Since yesterday" window skips when reaching back to the last working day.
+func isWeekend(d time.Weekday) bool {
+	return d == time.Saturday || d == time.Sunday
 }
 
 // dailyWindowKey normalizes a requested window, defaulting to Last 24h.
