@@ -1,7 +1,7 @@
 package store
 
-// Projection-level tests for the Weekly view's three-category breakdown
-// (WeeklyCategoriesInWindow): Started with / Added / Finished, reconstructed from
+// Projection-level tests for the Sprint view's three-category breakdown
+// (SprintCategoriesInWindow): Started with / Added / Finished, reconstructed from
 // the status-transition AND sprint-membership history over a fixed window.
 //
 // Covers the ticket's required cases:
@@ -21,7 +21,7 @@ import (
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
 )
 
-// wcSprintID is the sprint the Weekly-category fixtures belong to.
+// wcSprintID is the sprint the Sprint-category fixtures belong to.
 const wcSprintID = 29
 
 // enteredSprint / leftSprint build one sprint-membership changelog change.
@@ -30,7 +30,7 @@ func enteredSprint(entryID string, at time.Time) jira.SprintMembershipChange {
 }
 
 // saveCategoryIssue saves a Task/Bug/Story with its status changelog and sprint-
-// membership changes, so WeeklyCategoriesInWindow can reconstruct status and
+// membership changes, so SprintCategoriesInWindow can reconstruct status and
 // membership at any instant. current is the CURRENT status; size the CURRENT
 // size (drives the tally).
 func saveCategoryIssue(t *testing.T, st *Store, key, size, current string, changelog []jira.ChangelogEntry, sprintChanges []jira.SprintMembershipChange) {
@@ -54,9 +54,9 @@ func status(id, from, to string, at time.Time) jira.ChangelogEntry {
 	return jira.ChangelogEntry{ID: id, Field: "status", From: from, To: to, Timestamp: at}
 }
 
-// TestWeeklyCategoriesInWindowSplitsStartedAddedFinished exercises all four
+// TestSprintCategoriesInWindowSplitsStartedAddedFinished exercises all four
 // required cases in one window over the active sprint.
-func TestWeeklyCategoriesInWindowSplitsStartedAddedFinished(t *testing.T) {
+func TestSprintCategoriesInWindowSplitsStartedAddedFinished(t *testing.T) {
 	st := openTempStore(t)
 
 	// A fixed window [from, to). Instants around it.
@@ -108,9 +108,9 @@ func TestWeeklyCategoriesInWindowSplitsStartedAddedFinished(t *testing.T) {
 		},
 		[]jira.SprintMembershipChange{enteredSprint("m500", beforeStart)})
 
-	wc, err := st.WeeklyCategoriesInWindow(wcSprintID, from, to)
+	wc, err := st.SprintCategoriesInWindow(wcSprintID, from, to)
 	if err != nil {
-		t.Fatalf("WeeklyCategoriesInWindow: %v", err)
+		t.Fatalf("SprintCategoriesInWindow: %v", err)
 	}
 
 	assertTally(t, "started-with", wc.StartedWith, SizeTally{S: 2, M: 1, Points: 1 + 1 + 2})

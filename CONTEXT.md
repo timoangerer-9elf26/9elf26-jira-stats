@@ -10,7 +10,7 @@ week). Treated as a first-class entity with its own **lifecycle events**, not
 just a label on a ticket.
 
 - **Sprint activation** — the instant the sprint *started*, used as the
-  live-sprint window start. Jira Cloud exposes no dedicated activation field, so
+  sprint window start. Jira Cloud exposes no dedicated activation field, so
   this is anchored on the sprint's `startDate` (see `docs/adr/0002`).
 - **Sprint completion** — the instant the sprint was actually *completed* in Jira.
   The trusted "sprint ended" timestamp.
@@ -18,23 +18,21 @@ just a label on a ticket.
   Deliberately **not trusted**: it is frequently wrong. Use the completion event
   for the sprint's end instead.
 
-## Weekly view
+## Sprint view
 
-The sprint-planning overview (formerly "Completed"). Answers, for the active
-sprint over a chosen **week window**, what happened this week. Replaces the old
-date-range "how much got completed" framing.
+The sprint-planning overview (formerly "Weekly"; earlier "Completed"). Answers,
+for the current active sprint over its own window `[sprint start, now)`, what has
+happened this sprint. There is no week-window selector: the view always anchors
+on the active sprint's start (see `docs/adr/0002`).
 
-## Week window
+## Sprint window
 
-The time span the Weekly view measures over. Selectable between two modes:
-
-- **Work week** — a fixed clock window: Monday 00:00 → Saturday 00:00
-  (i.e. Friday end-of-day) in Europe/Berlin, derived from the current time. The
-  weekend is excluded.
-- **Live sprint** — sprint activation → now, for the currently active sprint.
-
-In both modes, *membership* is the set of tickets in the active sprint; the mode
-changes only the time window.
+The time span the Sprint view measures over: **`[sprint start, now)`** for the
+current active sprint. The start is the sprint's activation instant (its
+`startDate`; see [Sprint](#sprint)); the end is now. This is the single window —
+anchoring Started-with / Added on the sprint's own start (not a calendar Monday)
+is what keeps a carry-over at a sprint boundary in Started-with. *Membership* is
+reconstructed from the sprint-membership history at the window bounds.
 
 ## Daily view
 
@@ -60,7 +58,7 @@ distance from where it sat at the window start to where it sits at the window
 end — into exactly one of:
 
 - **Finished** — crossed into the Done set within the window (the same crossing
-  the [Weekly view](#weekly-view-metrics) counts as Finished).
+  the [Sprint view](#sprint-view-metrics) counts as Finished).
 - **Advanced** — net forward in the workflow but not into Done. Net-zero churn
   (moved out and back to the same status) folds in here.
 - **Pulled back** — net backward in the workflow, including a move to Canceled.
@@ -91,18 +89,19 @@ Refinement/Ready To Do → `To Do`, In Progress/Review / Testing → `In Progres
 DONE (This Sprint)/Released / Deployed → `Done`. This mismatch is why open and
 finished must come from the explicit buckets above.
 
-## Weekly view metrics
+## Sprint view metrics
 
-For the chosen week window over the active sprint, reported as three categories.
-Each is a size tally (S/M/L/no-estimate counts + a points sum, S=1/M=2/L=3, at
-the ticket's *current* size):
+For the active sprint over its window `[sprint start, now)`, reported as three
+categories. Each is a size tally (S/M/L/no-estimate counts + a points sum,
+S=1/M=2/L=3, at the ticket's *current* size):
 
-- **Started with** — tickets that were *open* and in the active sprint at the
-  window start (Monday 00:00 for work week; sprint activation for live sprint).
-  The capacity baseline. A snapshot: later removal from the sprint does not
-  rewrite it.
-- **Added during the week** — tickets that *entered* the active sprint during the
-  window (scope creep), regardless of status.
+- **Started with** — tickets that were *open* and in the active sprint at its
+  **start instant**. The capacity baseline, including carry-overs (tickets pulled
+  from the previous sprint at rollover, present at the start). A snapshot: later
+  removal from the sprint does not rewrite it.
+- **Added** — tickets that *entered* the active sprint **after** its start (scope
+  creep), regardless of status.
+- **Total** — Started with + Added.
 - **Finished** — tickets that *crossed into* the finished bucket within the
   window, attributed to whichever category (Started with / Added) the ticket
   belongs to, plus a total across both. A ticket both added and finished in the

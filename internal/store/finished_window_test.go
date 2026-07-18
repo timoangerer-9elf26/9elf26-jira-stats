@@ -1,6 +1,6 @@
 package store
 
-// Projection-level tests for the Weekly view's "Finished this week" rollup
+// Projection-level tests for the Sprint view's "Finished" rollup
 // (FinishedInWindow): the same Done-crossing semantics as CompletedInRange, but
 // scoped to the active-sprint membership snapshot (active_sprint IS NOT NULL).
 

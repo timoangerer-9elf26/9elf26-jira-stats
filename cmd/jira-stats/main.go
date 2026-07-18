@@ -171,7 +171,7 @@ func parseVelocityWeeks(v string) (int, error) {
 
 // parseReviewNow reads the optional REVIEW_NOW override: an RFC3339 timestamp
 // that pins the web clock used to resolve relative date ranges, so the
-// date-bearing views (Weekly window, Velocity weeks, Daily window) render
+// date-bearing views (Sprint window, Velocity weeks, Daily window) render
 // reproducibly against the canned fake backend during live/visual review (see
 // docs/adr/0001-agent-driven-acceptance-review-harness.md). An empty value means
 // unset — the server keeps its default time.Now — so it returns a nil clock and
