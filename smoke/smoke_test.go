@@ -153,6 +153,7 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 		{"/now/board", ""},
 		{"/weekly/results", ""},
 		{"/daily/results", ""},
+		{"/resync/status", ""},
 		{"/static/output.css", ""},
 		{"/static/htmx.min.js", ""},
 	}

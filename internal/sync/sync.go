@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
@@ -20,6 +22,10 @@ type Store interface {
 	IssueCount() (int, error)
 	LastSync() (t time.Time, ok bool, err error)
 	SetLastSync(t time.Time) error
+	// Reset empties the rebuildable projection (all snapshots, transition logs,
+	// sprints and last_sync). It is the first half of a full resync: clear, then
+	// re-backfill.
+	Reset() error
 }
 
 // Backfill walks the whole project through the client and persists every
@@ -96,6 +102,15 @@ type Syncer struct {
 	client  jira.Client
 	store   Store
 	overlap time.Duration
+
+	// mu serializes the periodic Cycle and a full Resync so a resync (clear +
+	// re-backfill) never interleaves with an incremental cycle — only one sync
+	// operation touches the store at a time.
+	mu sync.Mutex
+	// resyncing reports (and guards) an in-flight full resync: TriggerResync flips
+	// it true and only one resync may hold it, so an overlapping trigger is a
+	// safe no-op. It is read by the web layer to show the in-progress state.
+	resyncing atomic.Bool
 }
 
 // NewSyncer builds a Syncer. overlap is the window subtracted from the last
@@ -104,12 +119,61 @@ func NewSyncer(client jira.Client, store Store, overlap time.Duration) *Syncer {
 	return &Syncer{client: client, store: store, overlap: overlap}
 }
 
+// TriggerResync starts a full resync in the background and returns true, unless
+// one is already running — in which case it does nothing and returns false (the
+// "already running" no-op the button relies on). The resync runs under ctx (the
+// app's lifetime context, NOT a request context, so it survives the HTTP handler
+// returning promptly). Failures are logged; the projection is only ever left
+// cleared-and-rebuilt or, on error mid-flight, recoverable by the next cycle.
+func (s *Syncer) TriggerResync(ctx context.Context) bool {
+	if !s.resyncing.CompareAndSwap(false, true) {
+		return false
+	}
+	go func() {
+		defer s.resyncing.Store(false)
+		if err := s.resync(ctx); err != nil {
+			log.Printf("sync: resync failed: %v", err)
+		}
+	}()
+	return true
+}
+
+// Resyncing reports whether a full resync is currently running.
+func (s *Syncer) Resyncing() bool { return s.resyncing.Load() }
+
+// resync clears the projection and re-backfills the whole project. It holds the
+// sync mutex for the duration so no incremental cycle interleaves with the wipe
+// or the rebuild, and records the start instant as the new last_sync on success.
+func (s *Syncer) resync(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	startedAt := time.Now().UTC()
+	if err := s.store.Reset(); err != nil {
+		return fmt.Errorf("reset projection: %w", err)
+	}
+	n, err := Backfill(ctx, s.client, s.store)
+	if err != nil {
+		return err
+	}
+	log.Printf("sync: resync backfilled %d issues", n)
+	if err := s.store.SetLastSync(startedAt); err != nil {
+		return fmt.Errorf("record last_sync: %w", err)
+	}
+	return nil
+}
+
 // Cycle runs one sync cycle: a full backfill if the store is empty, otherwise
 // an incremental sync of issues changed since the last sync (minus the overlap
 // window). On success it records the cycle's start time as the new last_sync,
 // so the next incremental picks up from here. Cycles are idempotent — the store
 // dedups transitions — so a retried cycle inserts no duplicates.
 func (s *Syncer) Cycle(ctx context.Context) error {
+	// Serialize with a full resync (which also holds mu): the periodic incremental
+	// must never interleave with a resync's clear-and-rebuild.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	startedAt := time.Now().UTC()
 
 	count, err := s.store.IssueCount()

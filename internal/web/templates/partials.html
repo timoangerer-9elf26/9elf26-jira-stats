@@ -13,15 +13,51 @@
 
 {{/* nav is the one shared top navigation across all views. The string argument
      is the active view key ("now" | "board" | "daily" | "weekly" |
-     "velocity"); the matching tab is marked current. */}}
+     "velocity"); the matching tab is marked current. The right side carries the
+     shared full-resync control (present on every view). */}}
 {{define "nav"}}
-<nav data-testid="nav" aria-label="Primary" class="flex gap-1 border-b border-slate-200">
+<nav data-testid="nav" aria-label="Primary" class="flex items-center gap-1 border-b border-slate-200">
   {{template "nav-link" (dict "Href" "/" "Label" "Now" "Key" "now" "Active" .)}}
   {{template "nav-link" (dict "Href" "/board" "Label" "Board" "Key" "board" "Active" .)}}
   {{template "nav-link" (dict "Href" "/daily" "Label" "Daily" "Key" "daily" "Active" .)}}
   {{template "nav-link" (dict "Href" "/weekly" "Label" "Weekly" "Key" "weekly" "Active" .)}}
   {{template "nav-link" (dict "Href" "/velocity" "Label" "Velocity" "Key" "velocity" "Active" .)}}
+  <span class="grow"></span>
+  {{template "resync-control" .}}
 </nav>
+{{end}}
+
+{{/* resync-control is the shared full-resync widget in the nav: a status label
+     that lazy-loads its state (and self-polls while a resync runs) plus the
+     button that POSTs /resync to trigger a background rebuild of the projection.
+     A resync already running is a safe no-op. The button posts via HTMX and
+     swaps the status label with the returned "resync running…" fragment, which
+     then polls itself to completion. */}}
+{{define "resync-control"}}
+<div class="flex items-center gap-3">
+  <span id="resync-status" data-testid="resync-status"
+        hx-get="/resync/status" hx-trigger="load" hx-swap="innerHTML"
+        class="text-xs text-slate-400"></span>
+  <form hx-post="/resync" hx-target="#resync-status" hx-swap="innerHTML" hx-disabled-elt="find button">
+    <button type="submit" data-testid="resync-button"
+            class="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50">Resync</button>
+  </form>
+</div>
+{{end}}
+
+{{/* resync-status is the resync progress label. While a resync runs it shows a
+     "Resyncing…" note and self-polls GET /resync/status until it finishes; when
+     idle it shows how fresh the projection is (last synced), or a "not synced
+     yet" note on a cold store. Takes a resyncStatusView. */}}
+{{define "resync-status"}}
+{{if .Running}}
+<span data-testid="resync-running" class="text-amber-800"
+      hx-get="/resync/status" hx-trigger="load delay:1500ms" hx-target="#resync-status" hx-swap="innerHTML">Resyncing…</span>
+{{else if .HasSynced}}
+<span data-testid="resync-idle">Synced {{.SyncedAgo}}</span>
+{{else}}
+<span data-testid="resync-idle">Not synced yet</span>
+{{end}}
 {{end}}
 
 {{/* nav-link is one tab of the shared nav. Takes a dict of Href, Label, Key and

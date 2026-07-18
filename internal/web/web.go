@@ -61,10 +61,26 @@ type Rollups interface {
 	IssuesCreatedInRange(creator string, from, to time.Time) ([]store.CreatedTicket, error)
 }
 
+// Resyncer triggers a full rebuild of the SQLite projection from Jira and
+// reports whether one is running. It is the web layer's handle on the sync
+// engine's resync capability (the app binds it to the running Syncer with a
+// long-lived context). It is nil when the server is built without one (most
+// in-process tests): the resync button still renders and the status endpoint
+// still reports freshness, but a trigger is a no-op.
+type Resyncer interface {
+	// Resync starts a full resync in the background if none is running, returning
+	// true when it started one and false when a resync was already in progress
+	// (a safe no-op). It must return promptly — the rebuild runs in the background.
+	Resync() bool
+	// Resyncing reports whether a full resync is currently running.
+	Resyncing() bool
+}
+
 // Server holds the parsed templates and the rollup source, and implements
 // http.Handler via its router.
 type Server struct {
 	rollups       Rollups
+	resyncer      Resyncer
 	templates     *template.Template
 	mux           *http.ServeMux
 	now           func() time.Time
@@ -109,6 +125,14 @@ func WithJiraBaseURL(base string) Option {
 // "All" default. See CONTEXT.md → Me and docs/adr/0003-daily-what-i-did-view.md.
 func WithMe(name string) Option {
 	return func(s *Server) { s.me = strings.TrimSpace(name) }
+}
+
+// WithResyncer wires the sync engine's full-resync capability into the server,
+// enabling POST /resync to rebuild the projection from Jira. Left unset, the
+// resync button renders but a trigger is a no-op (the status endpoint still
+// reports data freshness).
+func WithResyncer(r Resyncer) Option {
+	return func(s *Server) { s.resyncer = r }
 }
 
 // WithVelocityWeeks overrides how many trailing ISO weeks the Velocity view
@@ -156,6 +180,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /weekly", s.handleWeekly)
 	s.mux.HandleFunc("GET /weekly/results", s.handleWeeklyResults)
 	s.mux.HandleFunc("GET /velocity", s.handleVelocity)
+	s.mux.HandleFunc("POST /resync", s.handleResync)
+	s.mux.HandleFunc("GET /resync/status", s.handleResyncStatus)
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(mustSub(assetsFS)))))
 }
 
@@ -220,13 +246,25 @@ func (s *Server) nowView() (nowView, error) {
 		sprintName = sprint.Name
 	}
 	updated := "just now"
-	switch t, ok, err := s.rollups.LastSyncedAt(); {
+	switch ago, ok, err := s.syncedAgo(); {
 	case err != nil:
 		return nowView{}, err
 	case ok:
-		updated = humanizeAgo(time.Since(t))
+		updated = ago
 	}
 	return nowView{Board: board, SprintName: sprintName, UpdatedAgo: updated}, nil
+}
+
+// syncedAgo reports how long ago the projection was last synced as a compact
+// "Ns ago" label. ok is false on a never-synced (empty) store. It is the single
+// source of the data-freshness label shared by the Now heading and the resync
+// status widget.
+func (s *Server) syncedAgo() (string, bool, error) {
+	t, ok, err := s.rollups.LastSyncedAt()
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return humanizeAgo(time.Since(t)), true, nil
 }
 
 // humanizeAgo renders an elapsed duration as a compact "Ns/Nm/Nh ago" label,

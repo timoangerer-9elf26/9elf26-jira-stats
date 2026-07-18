@@ -417,6 +417,43 @@ func (s *Store) SetLastSync(t time.Time) error {
 	return nil
 }
 
+// Reset empties the whole rebuildable projection: every issue snapshot, the
+// status- and sprint-membership transition logs, the sprint entities, and the
+// last_sync bookkeeping row. It backs the full-resync button (#52): after Reset
+// the store looks cold, so the next sync cycle re-backfills all issues, full
+// changelog history and sprints from Jira. Child tables are deleted before the
+// issue table they reference (foreign keys are not enforced on the connection),
+// and the whole wipe runs in one transaction so a resync never observes a
+// half-cleared projection. Other meta rows (none today) are preserved; only
+// last_sync is removed so the cold-store re-backfill path is taken.
+func (s *Store) Reset() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Child transition logs are deleted before the issue rows they reference.
+	tables := []string{
+		`DELETE FROM sprint_membership_transition`,
+		`DELETE FROM status_transition`,
+		`DELETE FROM issue`,
+		`DELETE FROM sprint`,
+	}
+	for _, stmt := range tables {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("reset projection: %w", err)
+		}
+	}
+	// Only last_sync is cleared (parameterized, matching the other meta queries)
+	// so the next cycle takes the cold-store re-backfill path; any other meta rows
+	// are preserved.
+	if _, err := tx.Exec(`DELETE FROM meta WHERE key = ?`, lastSyncKey); err != nil {
+		return fmt.Errorf("reset last_sync: %w", err)
+	}
+	return tx.Commit()
+}
+
 // SizeTally counts work items by estimate bucket (S/M/L or no-estimate) and
 // sums their points (S=1, M=2, L=3; no-estimate contributes 0).
 type SizeTally struct {
