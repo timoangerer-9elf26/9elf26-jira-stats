@@ -92,6 +92,11 @@ func run() error {
 		web.WithVelocityWeeks(velocityWeeks),
 		web.WithJiraBaseURL(os.Getenv("JIRA_BASE_URL")),
 		web.WithMe(os.Getenv("DAILY_ME")),
+		// The resync button rebuilds the projection through the same Syncer that
+		// runs the periodic loop, so a resync and an incremental never overlap. It
+		// runs under the app context (ctx), not a request context, so it survives
+		// the POST handler returning promptly.
+		web.WithResyncer(resyncer{ctx: ctx, syncer: syncer}),
 	}
 	// Only override the web clock when REVIEW_NOW is set; leaving it out keeps the
 	// server's default time.Now for every production deployment.
@@ -120,6 +125,17 @@ func run() error {
 	}
 	return nil
 }
+
+// resyncer adapts the running Syncer to web.Resyncer, binding the app-lifetime
+// context so a resync triggered from the UI survives the HTTP handler returning
+// and stops cleanly on shutdown.
+type resyncer struct {
+	ctx    context.Context
+	syncer *sync.Syncer
+}
+
+func (r resyncer) Resync() bool    { return r.syncer.TriggerResync(r.ctx) }
+func (r resyncer) Resyncing() bool { return r.syncer.Resyncing() }
 
 // jiraClient builds the live Jira client from environment configuration when
 // credentials are present, and otherwise falls back to the canned fake so the
