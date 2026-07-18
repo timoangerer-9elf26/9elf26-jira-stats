@@ -92,7 +92,7 @@ func TestVelocityViewPerWeekPoints(t *testing.T) {
 
 	// The series must have no gaps: exactly 10 weeks, in chronological order.
 	if n := strings.Count(body, `data-testid="velocity-week"`); n != 10 {
-		t.Errorf("expected 10 gapless weekly bars, got %d\n%s", n, body)
+		t.Errorf("expected 10 gapless per-week bars, got %d\n%s", n, body)
 	}
 	assertOrder(t, body,
 		`data-week="KW20"`, `data-week="KW21"`, `data-week="KW22"`, `data-week="KW23"`,
@@ -132,7 +132,7 @@ func TestVelocityWeekCountConfigurable(t *testing.T) {
 
 	body := get(t, app.URL+"/velocity")
 	if n := strings.Count(body, `data-testid="velocity-week"`); n != 4 {
-		t.Errorf("expected 4 weekly bars with WithVelocityWeeks(4), got %d\n%s", n, body)
+		t.Errorf("expected 4 per-week bars with WithVelocityWeeks(4), got %d\n%s", n, body)
 	}
 	// The window is KW26 .. KW29; older weeks must not appear.
 	if strings.Contains(body, `data-week="KW25"`) {

@@ -211,7 +211,7 @@ func (s *Store) Sprints() ([]Sprint, error) {
 }
 
 // ActiveSprint is the active sprint window derived from the sprint entity: its
-// name and its activation instant, which is the live-sprint window START
+// name and its activation instant, which is the sprint window START
 // (docs/adr/0002). The window is open-ended (end = now), resolved by the caller,
 // so no end instant is carried here.
 type ActiveSprint struct {
@@ -259,7 +259,7 @@ func (s *Store) ActiveSprintWindow() (ActiveSprint, bool, error) {
 // membership log: for each issue the latest entering/leaving transition at or
 // before the instant decides membership (entered => in). Binds two args in order:
 // the sprint id and the RFC3339 instant. The single source of the membership-
-// reconstruction SQL — IssuesInSprintAt and the Weekly categories both build on
+// reconstruction SQL — IssuesInSprintAt and the Sprint categories both build on
 // it so the "members at instant" logic never drifts.
 const membersAtSubquery = `
 		SELECT issue_key FROM (
@@ -295,7 +295,7 @@ const statusAtSubquery = `
 // issue, the latest entering/leaving transition at or before `at` decides
 // membership (entered => in, left => out). It mirrors how status history
 // reconstructs status at an instant. Returns the member issue keys sorted for a
-// stable result. This is the started-with/added primitive for the Weekly view:
+// stable result. This is the started-with/added primitive for the Sprint view:
 // members at the sprint's activation instant are "started with"; members later
 // that were not members at activation are "added during the window".
 func (s *Store) IssuesInSprintAt(sprintID int, at time.Time) ([]string, error) {
@@ -490,14 +490,14 @@ const rollupTypes = `'Task', 'Bug', 'Story'`
 
 // openStatuses and doneStatuses are the authoritative DCAI status buckets — the
 // SINGLE source of truth for open/finished across every view (Now board,
-// Weekly, Velocity, Completed). They come straight from CONTEXT.md's "Ticket
+// Sprint, Velocity, Completed). They come straight from CONTEXT.md's "Ticket
 // status buckets", NOT from Jira's status_category, which does not match the
 // DCAI buckets: Jira categorizes Canceled as "Done" and Triage as "To Do", so a
 // category-based test would wrongly count Canceled as finished and Triage as
 // open. Both buckets are matched case-insensitively (see normalizeStatus).
 //
 // openStatuses is a POSITIVE membership test: "open" means one of exactly these
-// four live-sprint statuses, not "any status Jira doesn't call Done". Triage
+// four active-sprint statuses, not "any status Jira doesn't call Done". Triage
 // (pre-sprint), Canceled (abandoned) and every Done status are therefore not
 // open, and an unknown status never counts as open either.
 var openStatuses = []string{
@@ -734,8 +734,8 @@ func (s *Store) CompletedInRange(from, to time.Time) (SizeTally, error) {
 
 // FinishedInWindow tallies the ACTIVE-SPRINT work items whose completion falls
 // in [from, to). It is CompletedInRange scoped to the active-sprint membership
-// snapshot (active_sprint IS NOT NULL): the Weekly view's "Finished this week"
-// figure. Crossing detection, the Done set (incl. Ready for Release),
+// snapshot (active_sprint IS NOT NULL): the Sprint view's "Finished" figure.
+// Crossing detection, the Done set (incl. Ready for Release),
 // current-size counting and the half-open [from, to) window are all identical to
 // CompletedInRange; only the active-sprint scope is added.
 //
@@ -778,7 +778,7 @@ func (s *Store) completedTally(from, to time.Time, activeSprintOnly bool) (SizeT
 // doneStatuses) — projecting (issue_key, completed_at), plus the ordered args to
 // bind. A move BETWEEN two Done statuses is within-set and not a crossing; on
 // reopen the latest crossing wins (MAX). It is the single source of Done-crossing
-// detection and of the Done set, shared by completedTally and the Weekly
+// detection and of the Done set, shared by completedTally and the Sprint
 // finished-split so the two can never drift.
 func doneCrossingClause() (query string, args []any) {
 	doneIn, doneArgs := statusInClause(doneStatuses)
@@ -795,12 +795,12 @@ func doneCrossingClause() (query string, args []any) {
 	return query, args
 }
 
-// WeeklyCategories is the Weekly view's three-category breakdown for a sprint
+// SprintCategories is the Sprint view's three-category breakdown for a sprint
 // over a window [from, to): the Started-with and Added tallies, the Finished
 // tally split by which category the finished ticket belongs to (Added takes
 // precedence, since the two sets are disjoint), and the two derived totals. Each
 // tally is at the ticket's CURRENT size.
-type WeeklyCategories struct {
+type SprintCategories struct {
 	// StartedWith is tickets open AND in the sprint at the window start — a
 	// snapshot (later removal/status change does not rewrite it).
 	StartedWith SizeTally
@@ -817,15 +817,15 @@ type WeeklyCategories struct {
 	Total SizeTally
 }
 
-// weeklyCategory selects which category-membership predicate categoryTally builds.
-type weeklyCategory int
+// sprintCategory selects which category-membership predicate categoryTally builds.
+type sprintCategory int
 
 const (
-	catStartedWith weeklyCategory = iota
+	catStartedWith sprintCategory = iota
 	catAdded
 )
 
-// WeeklyCategoriesInWindow computes the Weekly view's Started-with / Added /
+// SprintCategoriesInWindow computes the Sprint view's Started-with / Added /
 // Finished breakdown for the sprint with the given id over [from, to).
 //
 // Started-with = open (status ∈ openStatuses) AND in the sprint at the window
@@ -835,27 +835,27 @@ const (
 // of Added). The two sets are disjoint by construction, so a ticket both added
 // and finished lands only under Added. Finished reuses the shared Done-crossing
 // detection (doneCrossingClause); the per-category and combined totals follow.
-func (s *Store) WeeklyCategoriesInWindow(sprintID int, from, to time.Time) (WeeklyCategories, error) {
-	var wc WeeklyCategories
+func (s *Store) SprintCategoriesInWindow(sprintID int, from, to time.Time) (SprintCategories, error) {
+	var wc SprintCategories
 	var err error
 	if wc.StartedWith, err = s.categoryTally(catStartedWith, sprintID, from, to, false); err != nil {
-		return WeeklyCategories{}, err
+		return SprintCategories{}, err
 	}
 	if wc.Added, err = s.categoryTally(catAdded, sprintID, from, to, false); err != nil {
-		return WeeklyCategories{}, err
+		return SprintCategories{}, err
 	}
 	if wc.FinishedFromStarted, err = s.categoryTally(catStartedWith, sprintID, from, to, true); err != nil {
-		return WeeklyCategories{}, err
+		return SprintCategories{}, err
 	}
 	if wc.FinishedFromAdded, err = s.categoryTally(catAdded, sprintID, from, to, true); err != nil {
-		return WeeklyCategories{}, err
+		return SprintCategories{}, err
 	}
 	wc.FinishedTotal = addTally(wc.FinishedFromStarted, wc.FinishedFromAdded)
 	wc.Total = addTally(wc.StartedWith, wc.Added)
 	return wc, nil
 }
 
-// categoryTally tallies the rollup issues in one Weekly category (at current
+// categoryTally tallies the rollup issues in one Sprint category (at current
 // size), optionally restricted to those that also crossed into the Done set
 // within the window (finishedOnly). It assembles the category-membership joins
 // and the optional finished-crossing join from the shared SQL fragments so the
@@ -863,7 +863,7 @@ func (s *Store) WeeklyCategoriesInWindow(sprintID int, from, to time.Time) (Week
 // place each. Join-side and where-side args are collected separately and then
 // concatenated, matching the order the placeholders appear in the assembled
 // query.
-func (s *Store) categoryTally(cat weeklyCategory, sprintID int, from, to time.Time, finishedOnly bool) (SizeTally, error) {
+func (s *Store) categoryTally(cat sprintCategory, sprintID int, from, to time.Time, finishedOnly bool) (SizeTally, error) {
 	fromStr := from.UTC().Format(time.RFC3339)
 	toStr := to.UTC().Format(time.RFC3339)
 
@@ -903,12 +903,12 @@ func (s *Store) categoryTally(cat weeklyCategory, sprintID int, from, to time.Ti
 	args := append(joinArgs, whereArgs...)
 	tally, err := scanTally(s.db.QueryRow(query, args...))
 	if err != nil {
-		return SizeTally{}, fmt.Errorf("weekly category tally: %w", err)
+		return SizeTally{}, fmt.Errorf("sprint category tally: %w", err)
 	}
 	return tally, nil
 }
 
-// addTally sums two size tallies field-by-field — the Weekly Total and
+// addTally sums two size tallies field-by-field — the Sprint Total and
 // finished-total rows.
 func addTally(a, b SizeTally) SizeTally {
 	return SizeTally{

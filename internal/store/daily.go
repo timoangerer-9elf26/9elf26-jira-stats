@@ -42,7 +42,7 @@ const (
 	// net-zero churn (moved out and back to the same status).
 	MovementAdvanced DailyMovement = iota
 	// MovementFinished crossed into the Done set within the window (the same
-	// crossing the Weekly view counts as Finished).
+	// crossing the Sprint view counts as Finished).
 	MovementFinished
 	// MovementPulledBack is net backward in the workflow, including a move to
 	// Canceled.
@@ -60,7 +60,7 @@ func (t DailyTicket) EndStatus() string { return t.Changes[len(t.Changes)-1].To 
 
 // Movement classifies the ticket's net movement over the window into exactly one
 // bucket. Finished takes priority: any in-window crossing INTO the Done set
-// (mirroring the Weekly view's completion crossing) buckets Finished regardless
+// (mirroring the Sprint view's completion crossing) buckets Finished regardless
 // of intermediate hops. Otherwise the net position from the window start
 // (StartStatus) to the window end (EndStatus) decides — a move ending in
 // Canceled, or one net backward in the DCAI workflow, is Pulled back; net
