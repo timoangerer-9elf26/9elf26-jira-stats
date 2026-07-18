@@ -267,6 +267,54 @@ func TestSprintCarryOverLandsInStartedWithNotAdded(t *testing.T) {
 	}
 }
 
+// TestSprintIncludesTicketCreatedDirectlyIntoSprint is the #55 impact at the
+// view: a ticket created directly into the active sprint (its Sprint field set at
+// creation, so no "Sprint" changelog item and no SprintChanges) must still be
+// counted. Created mid-sprint (after the start, the observed real case), it lands
+// in Added via the store's synthetic membership entry at its created instant —
+// where before the fix it was dropped from the tallies entirely.
+func TestSprintIncludesTicketCreatedDirectlyIntoSprint(t *testing.T) {
+	loc := berlin(t)
+	start := time.Date(2026, time.July, 20, 9, 0, 0, 0, loc)
+	now := time.Date(2026, time.July, 22, 12, 0, 0, 0, loc)
+	created := time.Date(2026, time.July, 21, 10, 0, 0, 0, loc) // created after the sprint started
+	beforeStart := time.Date(2026, time.July, 14, 9, 0, 0, 0, loc)
+
+	fake := &jira.FakeClient{
+		Sprints: []jira.Sprint{{ID: 30, Name: "KW30", State: "active", ActivatedAt: start.UTC()}},
+		Issues: []jira.Issue{
+			// Normal started-with ticket, for contrast (real membership + status).
+			sprintIssue("DCAI-STD", "L", "In Progress", "KW30",
+				[]jira.ChangelogEntry{sprintStatus("std-s", "Ready To Do", "In Progress", beforeStart)},
+				[]jira.SprintMembershipChange{enteredSprintID("std-m", 30, "KW30", beforeStart)}),
+			// Created directly into KW30 after it started: no Sprint changelog item,
+			// so no SprintChanges — only the current active-sprint id + created carry
+			// it. The store synthesizes its membership entry at `created`.
+			{
+				Key: "DCAI-BORN", Type: "Task", Summary: "born mid-sprint", Status: "In Progress",
+				StatusCategory: "In Progress", Size: "M",
+				ActiveSprint: "KW30", ActiveSprintID: 30, CreatedAt: created.UTC(),
+			},
+		},
+	}
+	app := newTestAppAt(t, fake, now)
+
+	body := get(t, app.URL+"/sprint/results")
+	wants := []string{
+		// Added = the created-into-sprint DCAI-BORN (M) only: 1 ticket, 2 pts.
+		`data-testid="sprint-added:tickets">1<`,
+		`data-testid="sprint-added:points">2<`,
+		// Started with = the normal DCAI-STD (L).
+		`data-testid="sprint-started:tickets">1<`,
+		`data-testid="sprint-total:tickets">2<`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(body, w) {
+			t.Errorf("created-into-sprint ticket missing from the Sprint tallies; want %q\n%s", w, body)
+		}
+	}
+}
+
 // TestSprintNoActiveSprintRendersEmptyState asserts that with no active sprint
 // recorded, the Sprint view shows the Board-style no-sprint empty state rather
 // than a row of zeros.

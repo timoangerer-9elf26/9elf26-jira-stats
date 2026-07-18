@@ -31,8 +31,15 @@ type Issue struct {
 	// This is per-issue MEMBERSHIP only; the sprint's window (activation instant)
 	// comes from the Sprint entity, not from planned dates carried on the issue.
 	ActiveSprint string
-	Assignee     string
-	Changelog    []ChangelogEntry
+	// ActiveSprintID is the id of the active sprint named in ActiveSprint (0 when
+	// in no active sprint). It is the key sprint-membership history is stored
+	// under, and lets the store synthesize a membership entry (at CreatedAt) for a
+	// ticket created directly into a sprint — whose Sprint field was set at creation,
+	// so it carries no "Sprint" changelog item and would otherwise be missing from
+	// history (see #55).
+	ActiveSprintID int
+	Assignee       string
+	Changelog      []ChangelogEntry
 	// SprintChanges is the issue's sprint-membership history: each entering or
 	// leaving of a single sprint, derived from the "Sprint" changelog field. It
 	// lets the store reconstruct which sprint(s) the issue belonged to at any past

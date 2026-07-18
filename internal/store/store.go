@@ -141,7 +141,103 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 		}
 	}
 
+	if err := synthesizeCreatedMembership(tx, iss); err != nil {
+		return err
+	}
+
 	return tx.Commit()
+}
+
+// synthesizeCreatedMembership records the membership entry that a ticket created
+// directly into a sprint is missing (#55). Such a ticket has its Sprint field
+// set at creation and never changed, so its changelog carries no "Sprint" item
+// and nothing entered it into sprint_membership_transition — leaving it invisible
+// to membership history even though it currently belongs to the active sprint.
+//
+// When the issue currently belongs to an active sprint (ActiveSprintID != 0) for
+// which the changelog holds NO entering transition, it inserts a synthetic entry
+// at the issue's created instant (falling back to the sprint's activation instant
+// when created is unknown), keyed by a stable synthetic id so re-syncs are
+// idempotent. When a real changelog entry for that sprint DOES exist, it instead
+// clears any stale synthetic shadow, so a synthetic never duplicates or shadows a
+// real entry. Only the issue's CURRENT active sprint is reconciled here; a
+// synthetic recorded earlier for a since-superseded active sprint is left as-is
+// (the ticket was a member of it from creation). Runs inside SaveIssue's
+// transaction.
+func synthesizeCreatedMembership(tx *sql.Tx, iss jira.Issue) error {
+	if iss.ActiveSprintID == 0 {
+		return nil
+	}
+	entryID := fmt.Sprintf("synthetic-created:%s:%d", iss.Key, iss.ActiveSprintID)
+
+	if hasEnteredChange(iss.SprintChanges, iss.ActiveSprintID) {
+		// A real entering transition covers this sprint; drop any stale synthetic
+		// (e.g. from an earlier sync before the real move was recorded).
+		if _, err := tx.Exec(
+			`DELETE FROM sprint_membership_transition WHERE changelog_entry_id = ? AND sprint_id = ?`,
+			entryID, iss.ActiveSprintID,
+		); err != nil {
+			return fmt.Errorf("clear stale synthetic membership %s/%d: %w", iss.Key, iss.ActiveSprintID, err)
+		}
+		return nil
+	}
+
+	at := iss.CreatedAt
+	if at.IsZero() {
+		// Fallback: the sprint's activation instant (its startDate), the best
+		// available "in the sprint since" anchor when the created time is unknown.
+		start, ok, err := sprintActivatedTx(tx, iss.ActiveSprintID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil // no anchor to place the entry at; leave it unrecorded
+		}
+		at = start
+	}
+
+	var sprintName any
+	if iss.ActiveSprint != "" {
+		sprintName = iss.ActiveSprint
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO sprint_membership_transition
+		     (changelog_entry_id, issue_key, sprint_id, sprint_name, entered, transitioned_at)
+		 VALUES (?, ?, ?, ?, 1, ?)
+		 ON CONFLICT(changelog_entry_id, sprint_id) DO NOTHING`,
+		entryID, iss.Key, iss.ActiveSprintID, sprintName, at.UTC().Format(time.RFC3339),
+	); err != nil {
+		return fmt.Errorf("insert synthetic membership %s/%d: %w", iss.Key, iss.ActiveSprintID, err)
+	}
+	return nil
+}
+
+// hasEnteredChange reports whether the changelog-derived membership changes carry
+// an entering transition into the given sprint.
+func hasEnteredChange(changes []jira.SprintMembershipChange, sprintID int) bool {
+	for _, sc := range changes {
+		if sc.Entered && sc.SprintID == sprintID {
+			return true
+		}
+	}
+	return false
+}
+
+// sprintActivatedTx reads a sprint's activation instant within a transaction. ok
+// is false when the sprint is unknown or has no recorded activation.
+func sprintActivatedTx(tx *sql.Tx, sprintID int) (time.Time, bool, error) {
+	var activated sql.NullString
+	switch err := tx.QueryRow(`SELECT activated_at FROM sprint WHERE id = ?`, sprintID).Scan(&activated); {
+	case errors.Is(err, sql.ErrNoRows):
+		return time.Time{}, false, nil
+	case err != nil:
+		return time.Time{}, false, fmt.Errorf("read sprint %d activation: %w", sprintID, err)
+	}
+	t, err := parseNullableInstant(activated)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return t, !t.IsZero(), nil
 }
 
 // lastSyncKey is the meta row holding the RFC3339 UTC timestamp of the most
