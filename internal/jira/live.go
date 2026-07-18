@@ -183,10 +183,13 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		SprintChanges:  sprintChanges,
 	}
 
-	// Record active-sprint MEMBERSHIP (the name) only; the sprint's window comes
+	// Record active-sprint MEMBERSHIP (name + id) only; the sprint's window comes
 	// from the Sprint entity (FetchSprints), never the planned dates on the issue.
+	// The id lets the store synthesize membership for a ticket created directly
+	// into the sprint (no "Sprint" changelog item; see #55).
 	if sp, ok := activeSprint(dto.Fields.Sprint); ok {
 		iss.ActiveSprint = sp.Name
+		iss.ActiveSprintID = sp.ID
 	}
 
 	return iss, nil
@@ -288,11 +291,14 @@ type selectDTO struct {
 	Value string `json:"value"`
 }
 
-// sprintDTO is the issue-field sprint entry. Only name + state are parsed: it
-// establishes per-issue active-sprint MEMBERSHIP. The planned startDate/endDate
-// on this entry are deliberately ignored — the trusted window comes from the
-// sprint entity (see FetchSprints / agileSprintDTO).
+// sprintDTO is the issue-field sprint entry. id + name + state are parsed: they
+// establish per-issue active-sprint MEMBERSHIP and its id (the key membership
+// history is stored under, needed to synthesize membership for a ticket created
+// directly into a sprint — see #55). The planned startDate/endDate on this entry
+// are deliberately ignored — the trusted window comes from the sprint entity
+// (see FetchSprints / agileSprintDTO).
 type sprintDTO struct {
+	ID    int    `json:"id"`
 	Name  string `json:"name"`
 	State string `json:"state"` // "active", "closed", or "future"
 }
