@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en">
+{{template "page-head" "Sprint — 9elf26 Jira Stats"}}
+<body class="min-h-screen bg-slate-50 text-slate-900">
+  <main class="px-6 py-12">
+    {{template "nav" "sprint"}}
+    {{template "page-header" "Sprint — what happened in the active sprint since it started."}}
+
+    <div id="sprint-panel">
+      {{template "sprint-panel" .}}
+    </div>
+  </main>
+</body>
+</html>

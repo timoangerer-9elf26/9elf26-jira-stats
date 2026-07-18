@@ -12,7 +12,7 @@
 {{end}}
 
 {{/* nav is the one shared top navigation across all views. The string argument
-     is the active view key ("now" | "board" | "daily" | "weekly" |
+     is the active view key ("now" | "board" | "daily" | "sprint" |
      "velocity"); the matching tab is marked current. The right side carries the
      shared full-resync control (present on every view). */}}
 {{define "nav"}}
@@ -20,7 +20,7 @@
   {{template "nav-link" (dict "Href" "/" "Label" "Now" "Key" "now" "Active" .)}}
   {{template "nav-link" (dict "Href" "/board" "Label" "Board" "Key" "board" "Active" .)}}
   {{template "nav-link" (dict "Href" "/daily" "Label" "Daily" "Key" "daily" "Active" .)}}
-  {{template "nav-link" (dict "Href" "/weekly" "Label" "Weekly" "Key" "weekly" "Active" .)}}
+  {{template "nav-link" (dict "Href" "/sprint" "Label" "Sprint" "Key" "sprint" "Active" .)}}
   {{template "nav-link" (dict "Href" "/velocity" "Label" "Velocity" "Key" "velocity" "Active" .)}}
   <span class="grow"></span>
   {{template "resync-control" .}}
@@ -180,30 +180,6 @@
 </div>
 {{end}}
 
-{{/* weekly-window-selector is the Weekly-view mode selector: the two window
-     modes (Work week / Live sprint) as radio pills. A change fires an HTMX GET
-     that swaps the whole #weekly-panel, so the picked mode stays highlighted
-     after the swap (the #10 whole-panel fix). Takes a weeklyView (needs
-     .Windows). */}}
-{{define "weekly-window-selector"}}
-<form data-testid="weekly-window-selector"
-      hx-get="/weekly/results"
-      hx-target="#weekly-panel"
-      hx-swap="innerHTML"
-      hx-trigger="change"
-      class="mt-8 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-  <fieldset class="flex flex-wrap gap-2">
-    {{range .Windows}}
-    <label class="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
-                  {{if .Selected}}border-slate-900 bg-slate-900 text-white{{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
-      <input type="radio" name="window" value="{{.Key}}" data-testid="weekly-window:{{.Key}}"{{if .Selected}} checked{{end}} class="sr-only">
-      {{.Label}}
-    </label>
-    {{end}}
-  </fieldset>
-</form>
-{{end}}
-
 {{/* velocity-bar renders one ISO week of the Velocity view as an accessible
      CSS bar (no JS charting library). Takes a velocityWeek (Label, Points,
      Percent). The full-height track marks the week even when it is empty, so
@@ -222,40 +198,40 @@
 </div>
 {{end}}
 
-{{/* weekly-panel is the swappable Weekly unit: the window-mode selector (so the
-     picked mode re-renders highlighted) plus the results — or, when no active
-     sprint is recorded, the friendly no-sprint state alone (same treatment as
-     the Board view, not a row of zeros). HTMX swaps the whole panel, keeping the
-     selector in sync with the data. Takes a weeklyView. */}}
-{{define "weekly-panel"}}
+{{/* sprint-panel is the swappable Sprint unit: the three-category results for
+     the active sprint over [sprint start, now) — or, when no active sprint is
+     recorded, the friendly no-sprint state alone (same treatment as the Board
+     view, not a row of zeros). There is no window selector (see #53); the view
+     always centers on the current active sprint. Takes a sprintView. */}}
+{{define "sprint-panel"}}
   {{if .HasSprint}}
-  {{template "weekly-window-selector" .}}
-  <div id="weekly-results" class="mt-6">
-    {{template "weekly-results" .}}
+  <div id="sprint-results" class="mt-8">
+    {{template "sprint-results" .}}
   </div>
   {{else}}
-  <div data-testid="weekly-no-sprint" class="mt-8 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
-    <p>No active sprint to show. Once a sprint is active in Jira and synced, this week's numbers appear here.</p>
+  <div data-testid="sprint-no-sprint" class="mt-8 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+    <p>No active sprint to show. Once a sprint is active in Jira and synced, this sprint's numbers appear here.</p>
   </div>
   {{end}}
 {{end}}
 
-{{/* weekly-results is the Weekly-view results fragment: the three-category table
-     (Started with / Added / Total) for the active sprint over the selected
-     window, plus the resolved window label. Each row is a tickets+points headline
-     with the S/M/L split as detail and the finished figure attributed to that
-     category. Takes a weeklyView (needs .Rows, .Empty, .WindowLabel, .SprintName). */}}
-{{define "weekly-results"}}
-<div data-testid="weekly-results">
+{{/* sprint-results is the Sprint-view results fragment: the three-category table
+     (Started with / Added / Total) for the active sprint over its window, headed
+     by the sprint name and the resolved window. Each row is a tickets+points
+     headline with the S/M/L split as detail and the finished figure attributed to
+     that category. Takes a sprintView (needs .Rows, .Empty, .WindowLabel,
+     .SprintName). */}}
+{{define "sprint-results"}}
+<div data-testid="sprint-results">
   <div class="flex items-baseline justify-between">
-    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">This week{{if .SprintName}} in {{.SprintName}}{{end}}</h2>
-    <span class="text-xs text-slate-400" data-testid="weekly-window-label">{{.WindowLabel}}</span>
+    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500" data-testid="sprint-name">{{.SprintName}}</h2>
+    <span class="text-xs text-slate-400" data-testid="sprint-window-label">{{.WindowLabel}}</span>
   </div>
   {{if .Empty}}
-  <p data-testid="weekly-empty" class="mt-4 text-sm text-slate-500">No work started or added in this window yet.</p>
+  <p data-testid="sprint-empty" class="mt-4 text-sm text-slate-500">No work started or added in this sprint yet.</p>
   {{else}}
   <div class="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-    <table class="w-full text-left text-sm" data-testid="weekly-table">
+    <table class="w-full text-left text-sm" data-testid="sprint-table">
       <thead>
         <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400">
           <th class="px-4 py-3 font-medium">Category</th>
@@ -265,7 +241,7 @@
       </thead>
       <tbody>
         {{range .Rows}}
-        {{template "weekly-category-row" .}}
+        {{template "sprint-category-row" .}}
         {{end}}
       </tbody>
     </table>
@@ -274,29 +250,29 @@
 </div>
 {{end}}
 
-{{/* weekly-category-row is one row of the Weekly table: the category label, a
+{{/* sprint-category-row is one row of the Sprint table: the category label, a
      tickets+points headline with the S/M/L/no-estimate split as detail, and the
      finished figure attributed to that category. The Total row (Key "total") is
-     emphasized. Takes a weeklyCategoryRow. */}}
-{{define "weekly-category-row"}}
-<tr data-testid="weekly-row:{{.Key}}"
+     emphasized. Takes a sprintCategoryRow. */}}
+{{define "sprint-category-row"}}
+<tr data-testid="sprint-row:{{.Key}}"
     class="border-b border-slate-100 last:border-0 {{if eq .Key "total"}}bg-slate-50 font-semibold text-slate-900{{else}}text-slate-700{{end}}">
   <td class="px-4 py-3">{{.Label}}</td>
   <td class="px-4 py-3">
     <div class="tabular-nums">
-      <span data-testid="weekly-{{.Key}}:tickets">{{.Tickets}}</span> tickets ·
-      <span data-testid="weekly-{{.Key}}:points">{{.Points}}</span> pts
+      <span data-testid="sprint-{{.Key}}:tickets">{{.Tickets}}</span> tickets ·
+      <span data-testid="sprint-{{.Key}}:points">{{.Points}}</span> pts
     </div>
     <div class="mt-0.5 text-xs font-normal text-slate-400 tabular-nums">
-      S <span data-testid="weekly-{{.Key}}:s">{{.S}}</span> ·
-      M <span data-testid="weekly-{{.Key}}:m">{{.M}}</span> ·
-      L <span data-testid="weekly-{{.Key}}:l">{{.L}}</span> ·
-      none <span data-testid="weekly-{{.Key}}:none">{{.NoEstimate}}</span>
+      S <span data-testid="sprint-{{.Key}}:s">{{.S}}</span> ·
+      M <span data-testid="sprint-{{.Key}}:m">{{.M}}</span> ·
+      L <span data-testid="sprint-{{.Key}}:l">{{.L}}</span> ·
+      none <span data-testid="sprint-{{.Key}}:none">{{.NoEstimate}}</span>
     </div>
   </td>
   <td class="px-4 py-3 tabular-nums">
-    <span data-testid="weekly-{{.Key}}:finished-tickets">{{.FinishedTickets}}</span> tickets ·
-    <span data-testid="weekly-{{.Key}}:finished-points">{{.FinishedPoints}}</span> pts
+    <span data-testid="sprint-{{.Key}}:finished-tickets">{{.FinishedTickets}}</span> tickets ·
+    <span data-testid="sprint-{{.Key}}:finished-points">{{.FinishedPoints}}</span> pts
   </td>
 </tr>
 {{end}}

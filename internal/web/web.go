@@ -36,10 +36,10 @@ var assetsFS embed.FS
 type Rollups interface {
 	OpenByStatus() (store.OpenBoard, error)
 	CompletedInRange(from, to time.Time) (store.SizeTally, error)
-	// WeeklyCategoriesInWindow is the Weekly view's Started-with / Added / Finished
+	// SprintCategoriesInWindow is the Sprint view's Started-with / Added / Finished
 	// breakdown for a sprint over [from, to), reconstructed from status and
 	// membership history.
-	WeeklyCategoriesInWindow(sprintID int, from, to time.Time) (store.WeeklyCategories, error)
+	SprintCategoriesInWindow(sprintID int, from, to time.Time) (store.SprintCategories, error)
 	LastSyncedAt() (t time.Time, ok bool, err error)
 	// ActiveSprintWindow reports the active sprint entity (name and activation
 	// instant). ok is false when no sprint is active.
@@ -94,7 +94,7 @@ type Server struct {
 type Option func(*Server)
 
 // WithClock overrides the wall clock used to resolve relative windows (the
-// Weekly work-week / live-sprint window, the Daily window, Velocity weeks), so
+// Sprint window [sprint start, now), the Daily window, Velocity weeks), so
 // tests can pin "now" deterministically.
 func WithClock(now func() time.Time) Option {
 	return func(s *Server) { s.now = now }
@@ -177,8 +177,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /board", s.handleBoard)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
-	s.mux.HandleFunc("GET /weekly", s.handleWeekly)
-	s.mux.HandleFunc("GET /weekly/results", s.handleWeeklyResults)
+	s.mux.HandleFunc("GET /sprint", s.handleSprint)
+	s.mux.HandleFunc("GET /sprint/results", s.handleSprintResults)
 	s.mux.HandleFunc("GET /velocity", s.handleVelocity)
 	s.mux.HandleFunc("POST /resync", s.handleResync)
 	s.mux.HandleFunc("GET /resync/status", s.handleResyncStatus)

@@ -102,7 +102,7 @@ func TestSyncReconstructsSprintMembershipAtInstant(t *testing.T) {
 		t.Fatalf("SprintEntry for never-member: ok=%v err=%v, want ok=false", ok, err)
 	}
 
-	// Started-with vs Added (what the Weekly view derives): started-with =
+	// Started-with vs Added (what the Sprint view derives): started-with =
 	// members at activation; added = members later that were not members at
 	// activation.
 	startedWith, err := st.IssuesInSprintAt(sprintID, activation)

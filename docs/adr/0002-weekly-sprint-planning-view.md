@@ -4,6 +4,16 @@ status: accepted
 
 # Weekly sprint-planning view
 
+> **Amended by #53 (2026-07):** the view is renamed **Weekly → Sprint** (`/sprint`)
+> and the **week-window selector is dropped**. It now always centers on the current
+> active sprint over the single window `[sprint start, now)` — i.e. the former
+> "live-sprint" mode is the only mode. Started-with / Added are anchored on the
+> sprint's *own* start instant (not a calendar Monday), so a carry-over pulled from
+> the previous sprint at rollover counts as **Started with**, not Added. "Added
+> during the week" is renamed **Added** (entered the sprint after its start). The
+> "work-week" mode below is historical. The membership/lifecycle machinery this ADR
+> introduced is unchanged and still underpins the view.
+
 We repurpose the "Completed" view into a **Weekly** sprint-planning overview.
 For the active sprint over a selectable week window, it reports three
 categories — **Started with**, **Added during the week**, **Finished** (broken

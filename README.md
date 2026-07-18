@@ -14,11 +14,14 @@ silently removes it from the counts.
 - **Now** (`/`) — a live board of open work by workflow status, each column
   showing S / M / L / no-estimate counts and total points, plus a grand total.
   Self-refreshes every ~30s.
-- **Weekly** (`/weekly`) — the sprint-planning view: for the active sprint over
-  a chosen **week window**, the finished-this-week size tally (S/M/L/no-estimate
-  counts and points). The window selector offers **Work week** (Mon 00:00 →
-  Sat 00:00 Europe/Berlin, the default) and **Live sprint** (sprint activation →
-  now). With no active sprint it shows a friendly empty state.
+- **Sprint** (`/sprint`) — the sprint-planning view: for the current active
+  sprint over its own window **`[sprint start, now)`**, a three-category
+  breakdown — **Started with** (open and in the sprint at its start, carry-overs
+  included), **Added** (entered the sprint after it started), and **Total** —
+  each a size tally (S/M/L/no-estimate counts and points) with its finished
+  figure. There is no window selector; the view always anchors on the active
+  sprint's start, so a carry-over at a sprint boundary counts as Started-with,
+  not Added. With no active sprint it shows a friendly empty state.
 - **Velocity** (`/velocity`) — completed points per ISO calendar week (labeled
   `KW##`) for the last several weeks, to inform planning.
 

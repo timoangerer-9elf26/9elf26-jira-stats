@@ -86,3 +86,13 @@ func barPercent(points, max int) int {
 	}
 	return points * 100 / max
 }
+
+// weekStart returns Monday 00:00 in loc for the ISO week containing t — the
+// per-week boundary the Velocity view buckets on.
+func weekStart(t time.Time, loc *time.Location) time.Time {
+	t = t.In(loc)
+	// Go weekdays are Sunday=0..Saturday=6; ISO weeks start Monday.
+	offset := (int(t.Weekday()) + 6) % 7
+	y, m, d := t.Date()
+	return time.Date(y, m, d-offset, 0, 0, 0, 0, loc)
+}

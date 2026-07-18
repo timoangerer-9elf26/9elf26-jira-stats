@@ -36,7 +36,7 @@ func (r testResyncer) Resyncing() bool { return r.syncer.Resyncing() }
 // nav, so it renders on every view.
 func TestResyncButtonPresentOnAllViews(t *testing.T) {
 	app := newTestApp(t, jira.NewFakeClient())
-	for _, path := range []string{"/", "/board", "/daily", "/weekly", "/velocity"} {
+	for _, path := range []string{"/", "/board", "/daily", "/sprint", "/velocity"} {
 		body := get(t, app.URL+path)
 		if !strings.Contains(body, `data-testid="resync-button"`) {
 			t.Errorf("%s: missing resync button", path)

@@ -169,7 +169,7 @@ func TestBoardInNavOnEveryPage(t *testing.T) {
 		t.Errorf("/board: expected exactly one active nav item, got %d", n)
 	}
 
-	for _, path := range []string{"/", "/weekly", "/velocity"} {
+	for _, path := range []string{"/", "/sprint", "/velocity"} {
 		body := get(t, app.URL+path)
 		if !strings.Contains(body, `href="/board"`) {
 			t.Errorf("%s: nav missing Board link\n%s", path, body)

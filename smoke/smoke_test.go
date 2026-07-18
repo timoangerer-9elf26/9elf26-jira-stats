@@ -148,10 +148,10 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 		{"/", "Now"},
 		{"/board", "Board"},
 		{"/daily", "Daily"},
-		{"/weekly", "Weekly"},
+		{"/sprint", "Sprint"},
 		{"/velocity", "Velocity"},
 		{"/now/board", ""},
-		{"/weekly/results", ""},
+		{"/sprint/results", ""},
 		{"/daily/results", ""},
 		{"/resync/status", ""},
 		{"/static/output.css", ""},
@@ -175,21 +175,21 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 // instant and asserts the date-bearing views resolve against it deterministically
 // (independent of the wall clock this test runs on). The pinned instant
 // 2026-07-15T12:00:00Z is 14:00 Europe/Berlin on Wednesday 15 Jul 2026, which
-// sits in ISO week KW29 (Mon 13 Jul – Sun 19 Jul), so:
-//   - /weekly (default Work week: Mon 00:00 → Sat 00:00 Berlin) echoes the
-//     window "13 Jul – 17 Jul 2026" (Monday → Friday, the weekend excluded), and
+// sits in ISO week KW29 (activated 2026-07-13 09:00 Berlin), so:
+//   - /sprint (window [sprint start, now)) echoes the window "13 Jul – 14 Jul
+//     2026" (activation day → the day before now), and
 //   - /velocity's latest bar is labelled KW29.
 //
-// Both labels are computed from `now` alone (not the synced tally), so the
-// assertion holds without waiting on the background sync. /weekly renders the
-// window because the canned fake has an active sprint (KW29).
+// Both labels are computed from `now` (and the sprint start) alone, not the
+// synced tally, so the assertion holds without waiting on the background sync.
+// /sprint renders the window because the canned fake has an active sprint (KW29).
 func TestReviewNowPinsDateViews(t *testing.T) {
 	base := startDashboardEnv(t, "REVIEW_NOW=2026-07-15T12:00:00Z")
 
-	if code, body := get(t, base+"/weekly"); code != http.StatusOK {
-		t.Fatalf("GET /weekly: got status %d, want 200", code)
-	} else if want := "13 Jul – 17 Jul 2026"; !strings.Contains(body, want) {
-		t.Fatalf("/weekly: body missing pinned work-week window %q", want)
+	if code, body := get(t, base+"/sprint"); code != http.StatusOK {
+		t.Fatalf("GET /sprint: got status %d, want 200", code)
+	} else if want := "13 Jul – 14 Jul 2026"; !strings.Contains(body, want) {
+		t.Fatalf("/sprint: body missing pinned sprint window %q", want)
 	}
 
 	if code, body := get(t, base+"/velocity"); code != http.StatusOK {

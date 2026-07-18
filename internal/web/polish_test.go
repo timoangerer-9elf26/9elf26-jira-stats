@@ -45,7 +45,7 @@ func TestSharedNavRendersWithActiveItem(t *testing.T) {
 	cases := []struct{ path, activeKey string }{
 		{"/", "now"},
 		{"/board", "board"},
-		{"/weekly", "weekly"},
+		{"/sprint", "sprint"},
 		{"/velocity", "velocity"},
 	}
 	for _, c := range cases {
@@ -54,7 +54,7 @@ func TestSharedNavRendersWithActiveItem(t *testing.T) {
 		if !strings.Contains(body, `data-testid="nav"`) {
 			t.Errorf("%s: missing shared nav\n%s", c.path, body)
 		}
-		for _, link := range []string{`href="/"`, `href="/board"`, `href="/weekly"`, `href="/velocity"`} {
+		for _, link := range []string{`href="/"`, `href="/board"`, `href="/sprint"`, `href="/velocity"`} {
 			if !strings.Contains(body, link) {
 				t.Errorf("%s: nav missing link %q", c.path, link)
 			}
@@ -79,9 +79,9 @@ func TestViewsRenderFriendlyEmptyStateBeforeFirstSync(t *testing.T) {
 	cases := []struct{ path, want string }{
 		{"/", "No open work"},
 		{"/now/board", "No open work"},
-		// A never-synced store has no active sprint, so Weekly shows the no-sprint
+		// A never-synced store has no active sprint, so Sprint shows the no-sprint
 		// empty state (same treatment as the Board), not a finished-work note.
-		{"/weekly", "No active sprint"},
+		{"/sprint", "No active sprint"},
 		{"/velocity", "No completed work"},
 	}
 	for _, c := range cases {
@@ -102,8 +102,8 @@ func (failingRollups) OpenByStatus() (store.OpenBoard, error) {
 func (failingRollups) CompletedInRange(_, _ time.Time) (store.SizeTally, error) {
 	return store.SizeTally{}, errBoom
 }
-func (failingRollups) WeeklyCategoriesInWindow(_ int, _, _ time.Time) (store.WeeklyCategories, error) {
-	return store.WeeklyCategories{}, errBoom
+func (failingRollups) SprintCategoriesInWindow(_ int, _, _ time.Time) (store.SprintCategories, error) {
+	return store.SprintCategories{}, errBoom
 }
 func (failingRollups) LastSyncedAt() (time.Time, bool, error) {
 	return time.Time{}, false, errBoom
@@ -140,7 +140,7 @@ func TestRollupErrorRendersFriendlyMessage(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	for _, path := range []string{"/", "/board", "/weekly", "/velocity"} {
+	for _, path := range []string{"/", "/board", "/sprint", "/velocity"} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
