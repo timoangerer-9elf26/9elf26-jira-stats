@@ -4,6 +4,28 @@ status: accepted
 
 # Daily view becomes a "what I did since yesterday" overview
 
+> **Amended by #90 (2026-07):** the two fixed windows (Last 24h, Since yesterday)
+> are replaced by a **selectable date-time range**: a custom **From / Until**
+> (date + time, Europe/Berlin) plus three **working-day presets** — **Today**,
+> **Yesterday**, and the working day before that (labelled by its weekday name) —
+> each spanning one whole calendar day. Working days are Mon–Fri. **Yesterday** and
+> the **day-before** preset walk back over weekends to the most recent working days
+> (reusing the #48 skip logic — so on a Monday, Yesterday = Friday and the third =
+> Thursday), while **Today** is literal and is *disabled* on a weekend. The default
+> is Today, falling back to the most recent enabled preset when Today is disabled.
+> Weekend exclusion applies to the **presets only** — a custom range is honoured
+> verbatim (weekends included). An invalid custom range (From ≥ Until or malformed)
+> shows an inline error rather than silently falling back. State is carried as
+> `?preset=today|yesterday|day-before-yesterday` or `?from=&to=`.
+>
+> Two choices worth recording. **The Yesterday preset keeps the word "Yesterday"
+> even when it resolves to Friday** (a Monday) — the label names the *slot*, not the
+> date, so each button carries a hover title with the concrete date to disambiguate;
+> naming it "Friday" was rejected because the slot's meaning (the previous working
+> day) is what a standup wants. **Only the Today preset can be disabled** — walking
+> Yesterday/day-before back over weekends keeps them always-valid, so a Monday still
+> offers three useful days rather than greying two out.
+
 We reshape the Daily view from a neutral per-assignee status-change browser into
 a personal morning overview centred on **me** (a single configured Jira display
 name; Daily defaults to it, the dropdown still selects teammates/All). Over a

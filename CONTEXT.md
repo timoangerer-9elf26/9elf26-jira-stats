@@ -51,9 +51,17 @@ reconstructed from the sprint-membership history at the window bounds.
 ## Daily view
 
 The morning standup overview. For a chosen **assignee** — defaulting to **me** —
-over a recent window, it answers "what did this person do since yesterday". Two
+over a **selectable date-time range**, it answers "what did this person do". Two
 stacked sections: a **daily digest** summarising the net outcome, and beneath it
 the granular per-transition log. Scoped to active-sprint work items.
+
+The range is chosen either with a custom **From / Until** (date + time) or with
+one of three **working-day presets** — **Today**, **Yesterday**, and the working
+day before that (labelled by its weekday name) — each spanning one whole calendar
+day. Working days are Monday–Friday: the Yesterday / day-before presets **walk
+back over weekends** to the most recent working days (so on a Monday, Yesterday is
+Friday), while the Today preset is literal and is disabled on a weekend. Weekend
+exclusion applies to the presets only — a custom range is honoured verbatim.
 
 ## Me
 
