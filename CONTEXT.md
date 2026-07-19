@@ -3,6 +3,20 @@
 Glossary of the domain language for the 9elf26-jira-stats dashboard. Terms only —
 no implementation detail. See `docs/adr/` for decisions.
 
+## Sync
+
+How the dashboard's projection is kept in step with Jira. Two distinct kinds,
+which must not be conflated (avoid the phrase "incremental resync"):
+
+- **Full resync** — the manual, user-triggered wipe-and-rebuild of the whole
+  projection from Jira (the resync button). Records its own completion instant;
+  before the first one it has *never* happened. The cold-start backfill on an
+  empty store is **not** a full resync.
+- **Incremental sync** — the automatic periodic sync cycle that pulls only the
+  issues changed since the last successful cycle. Its **heartbeat** — the last
+  successful cycle — is the trusted "sync is alive" signal: a frozen heartbeat
+  means syncing has broken, independent of whether any ticket happened to change.
+
 ## Sprint
 
 A one-week unit of planned work in the DCAI Jira project, named `KW##` (ISO

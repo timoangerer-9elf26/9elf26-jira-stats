@@ -44,7 +44,14 @@ type Rollups interface {
 	// sorted by workflow order — the drill target behind each non-zero cell's
 	// "N tickets" link. The list always matches the cell's count.
 	SprintCellIssues(sprintID int, from, to time.Time, cohort store.SprintCohortSel, outcome store.SprintOutcomeSel) ([]store.SprintCellIssue, error)
-	LastSyncedAt() (t time.Time, ok bool, err error)
+	// LastFullResync is the instant of the last successful user-triggered full
+	// resync (CONTEXT.md → Sync). ok is false until the first one — the cold-start
+	// backfill does not count — so the tooltip reads "never".
+	LastFullResync() (t time.Time, ok bool, err error)
+	// LastSync is the incremental-sync heartbeat: the instant of the last
+	// successful periodic sync cycle. ok is false before any cycle has run. A
+	// frozen value means syncing has broken.
+	LastSync() (t time.Time, ok bool, err error)
 	// ActiveSprintWindow reports the active sprint entity (name and activation
 	// instant). ok is false when no sprint is active.
 	ActiveSprintWindow() (store.ActiveSprint, bool, error)
@@ -211,15 +218,16 @@ func (s *Server) renderError(w http.ResponseWriter) {
 	}
 }
 
-// syncedAgo reports how long ago the projection was last synced as a compact
-// "Ns ago" label. ok is false on a never-synced (empty) store. It is the single
-// source of the data-freshness label shown by the resync status widget.
-func (s *Server) syncedAgo() (string, bool, error) {
-	t, ok, err := s.rollups.LastSyncedAt()
-	if err != nil || !ok {
-		return "", ok, err
+// agoOrNever renders an instant as a compact "Ns/Nm/Nh ago" label relative to
+// the server clock, or the literal "never" when ok is false — the shared
+// rendering for both tooltip timestamps (last full resync, last incremental
+// sync). Using the server clock (s.now) keeps the label deterministic under a
+// pinned test clock.
+func (s *Server) agoOrNever(t time.Time, ok bool) string {
+	if !ok {
+		return "never"
 	}
-	return humanizeAgo(time.Since(t)), true, nil
+	return humanizeAgo(s.now().Sub(t))
 }
 
 // humanizeAgo renders an elapsed duration as a compact "Ns/Nm/Nh ago" label,

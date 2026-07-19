@@ -22,6 +22,10 @@ type Store interface {
 	IssueCount() (int, error)
 	LastSync() (t time.Time, ok bool, err error)
 	SetLastSync(t time.Time) error
+	// SetLastFullResync records the completion instant of a successful full
+	// resync. Written only by resync (never by the cold-start backfill), so it
+	// stays "never" until the first user-triggered full resync.
+	SetLastFullResync(t time.Time) error
 	// Reset empties the rebuildable projection (all snapshots, transition logs,
 	// sprints and last_sync). It is the first half of a full resync: clear, then
 	// re-backfill.
@@ -141,9 +145,13 @@ func (s *Syncer) TriggerResync(ctx context.Context) bool {
 // Resyncing reports whether a full resync is currently running.
 func (s *Syncer) Resyncing() bool { return s.resyncing.Load() }
 
-// resync clears the projection and re-backfills the whole project. It holds the
-// sync mutex for the duration so no incremental cycle interleaves with the wipe
-// or the rebuild, and records the start instant as the new last_sync on success.
+// resync clears the projection and re-backfills the whole project — a full
+// resync (CONTEXT.md → Sync). It holds the sync mutex for the duration so no
+// incremental cycle interleaves with the wipe or the rebuild, and on success
+// records the start instant both as the new last_sync (incremental heartbeat)
+// and as the last_full_resync stamp. Recording last_full_resync ONLY here (never
+// in Cycle's cold-start backfill) is what keeps a full resync distinct from a
+// cold-start backfill.
 func (s *Syncer) resync(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -159,6 +167,9 @@ func (s *Syncer) resync(ctx context.Context) error {
 	log.Printf("sync: resync backfilled %d issues", n)
 	if err := s.store.SetLastSync(startedAt); err != nil {
 		return fmt.Errorf("record last_sync: %w", err)
+	}
+	if err := s.store.SetLastFullResync(startedAt); err != nil {
+		return fmt.Errorf("record last_full_resync: %w", err)
 	}
 	return nil
 }
