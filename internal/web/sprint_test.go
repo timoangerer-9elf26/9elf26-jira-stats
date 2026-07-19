@@ -531,7 +531,10 @@ func TestSprintNoActiveSprintRendersEmptyState(t *testing.T) {
 // The canned KW29 story (over the sprint window, now = Wed):
 //   - DCAI-1 (L): started-with, finishes Tue → finished-from-started
 //   - DCAI-2 (M), DCAI-8 (S), DCAI-9 (M): started-with, still open
-//   - DCAI-3 (S): started-with; crosses Done THURSDAY (after now) → not finished
+//   - DCAI-3 (S): started-with; current status DONE (This Sprint) but its Done
+//     crossing (Thu, 16 Jul) is AFTER the window end, so it did not finish within
+//     the window while currently sitting in the done bucket → a pre-finished
+//     carry-over, excluded from every cell (#87).
 //   - DCAI-4 (no estimate): added mid-sprint, still open
 //   - DCAI-5 (M): added mid-sprint, finishes Tue → finished-from-added
 //   - DCAI-6 (Epic): excluded from every rollup (rollup types are Task/Bug/Story)
@@ -546,15 +549,16 @@ func TestSprintCannedDatasetPopulatesTable(t *testing.T) {
 	wants := []string{
 		`data-testid="sprint-table"`,
 		`data-testid="sprint-window-label">13 Jul – 14 Jul 2026<`,
-		// Started-with cohort = DCAI-1(L)+DCAI-2(M)+DCAI-3(S)+DCAI-8(S)+DCAI-9(M):
-		// Total 5 / 9pts. DCAI-1 finished; the rest still open (DCAI-3 crosses Thu,
-		// AFTER now). Nothing cancelled or removed.
-		`data-testid="sprint-cell:started:total:tickets">5<`,
-		`data-testid="sprint-cell:started:total:points">9<`,
+		// Started-with cohort = DCAI-1(L)+DCAI-2(M)+DCAI-8(S)+DCAI-9(M): Total 4 /
+		// 8pts. DCAI-1 finished; DCAI-2/8/9 still open. DCAI-3 (S) is excluded as a
+		// pre-finished carry-over (#87): its current status is done but its Done
+		// crossing (Thu) is after the window. Nothing cancelled or removed.
+		`data-testid="sprint-cell:started:total:tickets">4<`,
+		`data-testid="sprint-cell:started:total:points">8<`,
 		`data-testid="sprint-cell:started:finished:tickets">1<`,
 		`data-testid="sprint-cell:started:finished:points">3<`,
-		`data-testid="sprint-cell:started:open:tickets">4<`,
-		`data-testid="sprint-cell:started:open:points">6<`,
+		`data-testid="sprint-cell:started:open:tickets">3<`,
+		`data-testid="sprint-cell:started:open:points">5<`,
 		`data-testid="sprint-cell:started:removed:tickets">0<`,
 		// Added cohort = DCAI-4(none, open) + DCAI-5(M, finished): Total 2 / 2pts.
 		`data-testid="sprint-cell:added:total:tickets">2<`,
@@ -563,8 +567,8 @@ func TestSprintCannedDatasetPopulatesTable(t *testing.T) {
 		`data-testid="sprint-cell:added:finished:points">2<`,
 		`data-testid="sprint-cell:added:open:tickets">1<`,
 		// Total row.
-		`data-testid="sprint-cell:total:total:tickets">7<`,
-		`data-testid="sprint-cell:total:total:points">11<`,
+		`data-testid="sprint-cell:total:total:tickets">6<`,
+		`data-testid="sprint-cell:total:total:points">10<`,
 		`data-testid="sprint-cell:total:finished:tickets">2<`,
 		`data-testid="sprint-cell:total:finished:points">5<`,
 	}

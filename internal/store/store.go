@@ -1086,6 +1086,21 @@ func sprintCellPredicate(cohort sprintCategory, outcome sprintOutcome, sprintID 
 		}
 	}
 
+	// Exclude pre-finished carry-overs (#87), applied to EVERY cohort × outcome
+	// cell (and thus every drill-down, which shares this predicate). A pre-finished
+	// carry-over is a member CURRENTLY in the finished bucket whose Done crossing
+	// happened in a PRIOR sprint — it lingers in the active sprint only because it
+	// isn't Released yet and is not this sprint's work. Drop the row when its
+	// current status is Done AND it did not cross into Done within the window. The
+	// test is by CURRENT state: a reopened carry-over has left the done bucket, so
+	// the status arm no longer matches and it stays in the counts (Open, or
+	// Finished if re-finished within the window, when it re-enters finishedInWindow).
+	donePlaceholders, doneArgs := statusInClause(doneStatuses)
+	finSQL, finArgs := finishedInWindowSubquery(fromStr, toStr)
+	whereB.WriteString(` AND (LOWER(issue.status) NOT IN (` + donePlaceholders + `) OR issue.key IN (` + finSQL + `))`)
+	whereArgs = append(whereArgs, doneArgs...)
+	whereArgs = append(whereArgs, finArgs...)
+
 	return joinB.String(), whereB.String(), joinArgs, whereArgs
 }
 

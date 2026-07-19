@@ -158,6 +158,76 @@ func TestSprintCategoriesCohortOutcome(t *testing.T) {
 	assertTally(t, "total/total", wc.Total.Total, SizeTally{S: 3, M: 3, L: 1, Points: 12})
 }
 
+// TestSprintCategoriesPreFinishedCarryOver pins the #87 exclusion: a
+// pre-finished carry-over — a member CURRENTLY in the finished bucket whose Done
+// crossing happened in a PRIOR sprint (before the window) — is excluded from the
+// whole cohort × outcome table and from every cell drill-down. The test is by
+// CURRENT state, so a carry-over reopened this sprint re-enters the counts (Open,
+// or Finished if re-finished within the window). Covers three cases:
+//   (a) lingering carry-over still done at entry → in NO cell / drill-down
+//   (b) reopened carry-over → Open
+//   (c) reopened-and-re-finished carry-over → Finished
+func TestSprintCategoriesPreFinishedCarryOver(t *testing.T) {
+	st := openTempStore(t)
+
+	from := time.Date(2026, time.July, 13, 9, 0, 0, 0, time.UTC)
+	to := time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC)
+	atStart := from                          // within the grace window → Started-with
+	priorSprint := from.Add(-72 * time.Hour) // a Done crossing BEFORE the window
+	reopenAt := from.Add(48 * time.Hour)     // reopened inside the window
+	refinAt := from.Add(60 * time.Hour)      // re-finished inside the window
+
+	if err := st.SaveSprint(jira.Sprint{ID: wcSprintID, Name: "KW29", State: "active", ActivatedAt: from}); err != nil {
+		t.Fatalf("save sprint: %v", err)
+	}
+
+	// (a) Lingering carry-over: crossed Done in a prior sprint, still done at
+	// entry, no movement since. Currently done, did NOT cross in-window → excluded
+	// from every cell.
+	saveCategoryIssue(t, st, "CO-LINGER", "M", "Ready for Release",
+		[]jira.ChangelogEntry{status("li1", "In Progress", "DONE (This Sprint)", priorSprint)},
+		[]jira.SprintMembershipChange{enteredSprint("co-li", atStart)})
+
+	// (b) Reopened carry-over: crossed Done in a prior sprint, then reopened this
+	// sprint. Currently NOT done → back in the counts as Open.
+	saveCategoryIssue(t, st, "CO-REOPEN", "S", "In Progress",
+		[]jira.ChangelogEntry{
+			status("re1", "In Progress", "DONE (This Sprint)", priorSprint),
+			status("re2", "DONE (This Sprint)", "In Progress", reopenAt),
+		},
+		[]jira.SprintMembershipChange{enteredSprint("co-re", atStart)})
+
+	// (c) Reopened-and-re-finished carry-over: prior-sprint completion, reopened,
+	// then re-crossed Done inside the window → a genuine in-window completion →
+	// Finished.
+	saveCategoryIssue(t, st, "CO-REFIN", "L", "DONE (This Sprint)",
+		[]jira.ChangelogEntry{
+			status("rf1", "In Progress", "DONE (This Sprint)", priorSprint),
+			status("rf2", "DONE (This Sprint)", "In Progress", reopenAt),
+			status("rf3", "In Progress", "DONE (This Sprint)", refinAt),
+		},
+		[]jira.SprintMembershipChange{enteredSprint("co-rf", atStart)})
+
+	wc, err := st.SprintCategoriesInWindow(wcSprintID, from, to)
+	if err != nil {
+		t.Fatalf("SprintCategoriesInWindow: %v", err)
+	}
+
+	// CO-LINGER excluded everywhere; CO-REOPEN → Open; CO-REFIN → Finished.
+	assertTally(t, "started/open", wc.StartedWith.Open, SizeTally{S: 1, Points: 1})
+	assertTally(t, "started/finished", wc.StartedWith.Finished, SizeTally{L: 1, Points: 3})
+	assertTally(t, "started/removed", wc.StartedWith.Removed, SizeTally{})
+	assertTally(t, "started/total", wc.StartedWith.Total, SizeTally{S: 1, L: 1, Points: 4})
+	assertTally(t, "total/total", wc.Total.Total, SizeTally{S: 1, L: 1, Points: 4})
+
+	// Drill-downs stay in lock-step: CO-LINGER appears in no cell, including Total.
+	assertKeys(t, "co/open", cellKeys(t, st, CohortStartedWith, OutcomeOpen, from, to), []string{"CO-REOPEN"})
+	assertKeys(t, "co/finished", cellKeys(t, st, CohortStartedWith, OutcomeFinished, from, to), []string{"CO-REFIN"})
+	assertKeys(t, "co/removed", cellKeys(t, st, CohortStartedWith, OutcomeRemoved, from, to), nil)
+	// Total: CO-REOPEN (In Progress) precedes CO-REFIN (DONE) by workflow order.
+	assertKeys(t, "co/total", cellKeys(t, st, CohortTotal, OutcomeTotal, from, to), []string{"CO-REOPEN", "CO-REFIN"})
+}
+
 // TestSprintCategoriesGraceWindow pins the one-hour grace window (#65): the
 // Started-with / Added split anchors on `sprint start + 1h`, not the start
 // instant. A ticket that is a member at the end of the grace window is Started
