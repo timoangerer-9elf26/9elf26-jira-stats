@@ -46,6 +46,10 @@
 <style>
   @keyframes resync-spin { to { transform: rotate(360deg); } }
   [data-resync-control] { position: relative; }
+  /* The <button> would otherwise get the browser default cursor; give it a
+     pointer on hover to match the nav view-switch links. The running rule below
+     overrides this with not-allowed (higher specificity) while a resync runs. */
+  [data-testid="resync-button"] { cursor: pointer; }
   /* While the polled status reports a resync in flight, spin the icon and
      disable the button (no JS: pointer-events off + a dimmed, not-allowed look).
      Keyed off the running hook the poll swaps in. */
