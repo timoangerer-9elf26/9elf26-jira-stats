@@ -1,18 +1,17 @@
 package store
 
-// Projection-level tests for the Sprint view's three-category breakdown
-// (SprintCategoriesInWindow): Started with / Added / Finished, reconstructed from
-// the status-transition AND sprint-membership history over a fixed window.
+// Projection-level tests for the Sprint view's cohort × outcome breakdown
+// (SprintCategoriesInWindow): rows Started with / Added / Total × columns
+// Open / Finished / Removed / Total, reconstructed from the status-transition AND
+// sprint-membership history over a fixed window.
 //
-// Covers the ticket's required cases:
-//   - an OPEN-AT-START ticket (open + in the sprint at the window start) lands in
-//     Started with
-//   - a MID-WINDOW ADDED ticket (entered the sprint during the window) lands in
-//     Added
-//   - an ADDED-AND-FINISHED ticket counts under Added, and in Finished
-//     (finished-from-added, not finished-from-started)
-//   - a ticket FINISHED AFTER THE WINDOW is excluded from Finished
-//   - the Total row = Started-with + Added
+// Covers each outcome bucket for both cohorts, including the removal asymmetry:
+//   - Finished = crossed Done within [sprint start, now)
+//   - Removed = not finished AND (cancelled OR no longer a member); for Added,
+//     ONLY cancellation counts — an added-then-reprioritised-out ticket is dropped
+//     entirely (not counted in any cell)
+//   - Open = the remainder (still a member, not cancelled, not finished)
+//   - Total = Open + Finished + Removed; the Total row = Started-with + Added
 
 import (
 	"testing"
@@ -27,6 +26,10 @@ const wcSprintID = 29
 // enteredSprint / leftSprint build one sprint-membership changelog change.
 func enteredSprint(entryID string, at time.Time) jira.SprintMembershipChange {
 	return jira.SprintMembershipChange{EntryID: entryID, SprintID: wcSprintID, SprintName: "KW29", Entered: true, Timestamp: at}
+}
+
+func leftSprint(entryID string, at time.Time) jira.SprintMembershipChange {
+	return jira.SprintMembershipChange{EntryID: entryID, SprintID: wcSprintID, SprintName: "KW29", Entered: false, Timestamp: at}
 }
 
 // saveCategoryIssue saves a Task/Bug/Story with its status changelog and sprint-
@@ -54,71 +57,105 @@ func status(id, from, to string, at time.Time) jira.ChangelogEntry {
 	return jira.ChangelogEntry{ID: id, Field: "status", From: from, To: to, Timestamp: at}
 }
 
-// TestSprintCategoriesInWindowSplitsStartedAddedFinished exercises all four
-// required cases in one window over the active sprint.
-func TestSprintCategoriesInWindowSplitsStartedAddedFinished(t *testing.T) {
+// TestSprintCategoriesCohortOutcome exercises every outcome bucket (Open,
+// Finished, Removed) for BOTH cohorts (Started with, Added) in one window,
+// including the removal asymmetry: a Started-with ticket reprioritised out counts
+// under Removed, while an Added ticket reprioritised out is dropped entirely.
+func TestSprintCategoriesCohortOutcome(t *testing.T) {
 	st := openTempStore(t)
 
-	// A fixed window [from, to). Instants around it.
-	from := time.Date(2026, time.July, 13, 0, 0, 0, 0, time.UTC)
-	to := time.Date(2026, time.July, 18, 0, 0, 0, 0, time.UTC)
-	beforeStart := time.Date(2026, time.July, 12, 8, 0, 0, 0, time.UTC)
-	mid := time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC)
-	midLater := time.Date(2026, time.July, 15, 10, 0, 0, 0, time.UTC)
-	afterWindow := time.Date(2026, time.July, 19, 10, 0, 0, 0, time.UTC)
+	// Window [from, to). Sprint starts at `from`; the grace window ends at +1h.
+	from := time.Date(2026, time.July, 13, 9, 0, 0, 0, time.UTC)
+	to := time.Date(2026, time.July, 20, 0, 0, 0, 0, time.UTC)
+	atStart := from                       // within the grace window → Started-with cohort
+	afterGrace := from.Add(2 * time.Hour) // after the grace window → Added cohort
+	inWindow := from.Add(48 * time.Hour)  // a Done crossing / a leave, inside the window
+	doneAt := from.Add(24 * time.Hour)    // a Done crossing inside the window
 
 	if err := st.SaveSprint(jira.Sprint{ID: wcSprintID, Name: "KW29", State: "active", ActivatedAt: from}); err != nil {
 		t.Fatalf("save sprint: %v", err)
 	}
 
-	// Open at start: member + open (In Progress) at the window start → Started with.
-	saveCategoryIssue(t, st, "DCAI-100", "S", "In Progress",
-		[]jira.ChangelogEntry{status("s100", "Ready To Do", "In Progress", beforeStart)},
-		[]jira.SprintMembershipChange{enteredSprint("m100", beforeStart)})
+	// --- Started-with cohort (member at the grace-window end) ---
 
-	// Added mid-window: entered the sprint during the window → Added (regardless
-	// of status).
-	saveCategoryIssue(t, st, "DCAI-200", "M", "Ready To Do",
-		nil,
-		[]jira.SprintMembershipChange{enteredSprint("m200", mid)})
+	// Still a member, not finished, not cancelled → Open.
+	saveCategoryIssue(t, st, "SW-OPEN", "S", "In Progress",
+		[]jira.ChangelogEntry{status("swo", "Ready To Do", "In Progress", atStart)},
+		[]jira.SprintMembershipChange{enteredSprint("sw-o", atStart)})
 
-	// Added AND finished: entered mid-window and crossed into Done in-window →
-	// counts under Added and in finished-from-added (never finished-from-started).
-	saveCategoryIssue(t, st, "DCAI-300", "L", "DONE (This Sprint)",
+	// Crossed Done in-window → Finished.
+	saveCategoryIssue(t, st, "SW-FIN", "M", "DONE (This Sprint)",
 		[]jira.ChangelogEntry{
-			status("s300a", "Ready To Do", "In Progress", mid),
-			status("s300b", "In Progress", "DONE (This Sprint)", midLater),
+			status("swf1", "Ready To Do", "In Progress", atStart),
+			status("swf2", "In Progress", "DONE (This Sprint)", doneAt),
 		},
-		[]jira.SprintMembershipChange{enteredSprint("m300", mid)})
+		[]jira.SprintMembershipChange{enteredSprint("sw-f", atStart)})
 
-	// Started with, finished AFTER the window: in Started with, but excluded from
-	// Finished (its Done crossing is at/after `to`).
-	saveCategoryIssue(t, st, "DCAI-400", "S", "DONE (This Sprint)",
+	// Cancelled (still a member) → Removed.
+	saveCategoryIssue(t, st, "SW-CANCEL", "L", "Canceled",
 		[]jira.ChangelogEntry{
-			status("s400a", "Ready To Do", "In Progress", beforeStart),
-			status("s400b", "In Progress", "DONE (This Sprint)", afterWindow),
+			status("swc1", "Ready To Do", "In Progress", atStart),
+			status("swc2", "In Progress", "Canceled", inWindow),
 		},
-		[]jira.SprintMembershipChange{enteredSprint("m400", beforeStart)})
+		[]jira.SprintMembershipChange{enteredSprint("sw-c", atStart)})
 
-	// Started with, finished IN the window → finished-from-started.
-	saveCategoryIssue(t, st, "DCAI-500", "M", "DONE (This Sprint)",
+	// Reprioritised out (left the sprint), not cancelled, not finished → Removed
+	// (the Started-with cohort KEEPS its reprioritised-out tickets).
+	saveCategoryIssue(t, st, "SW-LEFT", "S", "In Progress",
+		[]jira.ChangelogEntry{status("swl", "Ready To Do", "In Progress", atStart)},
+		[]jira.SprintMembershipChange{enteredSprint("sw-l", atStart), leftSprint("sw-l2", inWindow)})
+
+	// --- Added cohort (first entry after the grace window) ---
+
+	// Still a member, not finished, not cancelled → Open.
+	saveCategoryIssue(t, st, "AD-OPEN", "M", "In Progress",
+		[]jira.ChangelogEntry{status("ado", "Ready To Do", "In Progress", afterGrace)},
+		[]jira.SprintMembershipChange{enteredSprint("ad-o", afterGrace)})
+
+	// Crossed Done in-window → Finished.
+	saveCategoryIssue(t, st, "AD-FIN", "S", "DONE (This Sprint)",
 		[]jira.ChangelogEntry{
-			status("s500a", "Ready To Do", "In Progress", beforeStart),
-			status("s500b", "In Progress", "DONE (This Sprint)", midLater),
+			status("adf1", "Ready To Do", "In Progress", afterGrace),
+			status("adf2", "In Progress", "DONE (This Sprint)", doneAt),
 		},
-		[]jira.SprintMembershipChange{enteredSprint("m500", beforeStart)})
+		[]jira.SprintMembershipChange{enteredSprint("ad-f", afterGrace)})
+
+	// Cancelled → Removed (cancellation DOES reach Removed for Added).
+	saveCategoryIssue(t, st, "AD-CANCEL", "M", "Canceled",
+		[]jira.ChangelogEntry{
+			status("adc1", "Ready To Do", "In Progress", afterGrace),
+			status("adc2", "In Progress", "Canceled", inWindow),
+		},
+		[]jira.SprintMembershipChange{enteredSprint("ad-c", afterGrace)})
+
+	// Reprioritised out (left the sprint), not cancelled, not finished → DROPPED
+	// entirely (an added-then-removed ticket is not counted in any cell).
+	saveCategoryIssue(t, st, "AD-LEFT", "L", "In Progress",
+		[]jira.ChangelogEntry{status("adl", "Ready To Do", "In Progress", afterGrace)},
+		[]jira.SprintMembershipChange{enteredSprint("ad-l", afterGrace), leftSprint("ad-l2", inWindow)})
 
 	wc, err := st.SprintCategoriesInWindow(wcSprintID, from, to)
 	if err != nil {
 		t.Fatalf("SprintCategoriesInWindow: %v", err)
 	}
 
-	assertTally(t, "started-with", wc.StartedWith, SizeTally{S: 2, M: 1, Points: 1 + 1 + 2})
-	assertTally(t, "added", wc.Added, SizeTally{M: 1, L: 1, Points: 2 + 3})
-	assertTally(t, "finished-from-started", wc.FinishedFromStarted, SizeTally{M: 1, Points: 2})
-	assertTally(t, "finished-from-added", wc.FinishedFromAdded, SizeTally{L: 1, Points: 3})
-	assertTally(t, "finished-total", wc.FinishedTotal, SizeTally{M: 1, L: 1, Points: 2 + 3})
-	assertTally(t, "total", wc.Total, SizeTally{S: 2, M: 2, L: 1, Points: 9})
+	// Started-with cohort.
+	assertTally(t, "started/open", wc.StartedWith.Open, SizeTally{S: 1, Points: 1})
+	assertTally(t, "started/finished", wc.StartedWith.Finished, SizeTally{M: 1, Points: 2})
+	assertTally(t, "started/removed", wc.StartedWith.Removed, SizeTally{S: 1, L: 1, Points: 1 + 3})
+	assertTally(t, "started/total", wc.StartedWith.Total, SizeTally{S: 2, M: 1, L: 1, Points: 1 + 2 + 1 + 3})
+
+	// Added cohort — AD-LEFT dropped entirely.
+	assertTally(t, "added/open", wc.Added.Open, SizeTally{M: 1, Points: 2})
+	assertTally(t, "added/finished", wc.Added.Finished, SizeTally{S: 1, Points: 1})
+	assertTally(t, "added/removed", wc.Added.Removed, SizeTally{M: 1, Points: 2})
+	assertTally(t, "added/total", wc.Added.Total, SizeTally{S: 1, M: 2, Points: 1 + 2 + 2})
+
+	// Total row = column-wise Started-with + Added.
+	assertTally(t, "total/open", wc.Total.Open, SizeTally{S: 1, M: 1, Points: 3})
+	assertTally(t, "total/finished", wc.Total.Finished, SizeTally{S: 1, M: 1, Points: 3})
+	assertTally(t, "total/removed", wc.Total.Removed, SizeTally{S: 1, M: 1, L: 1, Points: 1 + 2 + 3})
+	assertTally(t, "total/total", wc.Total.Total, SizeTally{S: 3, M: 3, L: 1, Points: 12})
 }
 
 // TestSprintCategoriesGraceWindow pins the one-hour grace window (#65): the
@@ -171,9 +208,12 @@ func TestSprintCategoriesGraceWindow(t *testing.T) {
 		t.Fatalf("SprintCategoriesInWindow: %v", err)
 	}
 
-	// Started with = INGRACE(S) + BOUNDARY(M) + NOHIST(S).
-	assertTally(t, "started-with", wc.StartedWith, SizeTally{S: 2, M: 1, Points: 1 + 2 + 1})
+	// All four are still open members → they land in each cohort's Open (and so
+	// its Total) column. Started with = INGRACE(S) + BOUNDARY(M) + NOHIST(S).
+	assertTally(t, "started/open", wc.StartedWith.Open, SizeTally{S: 2, M: 1, Points: 1 + 2 + 1})
+	assertTally(t, "started/total", wc.StartedWith.Total, SizeTally{S: 2, M: 1, Points: 1 + 2 + 1})
 	// Added = AFTER(L) only.
-	assertTally(t, "added", wc.Added, SizeTally{L: 1, Points: 3})
-	assertTally(t, "total", wc.Total, SizeTally{S: 2, M: 1, L: 1, Points: 7})
+	assertTally(t, "added/open", wc.Added.Open, SizeTally{L: 1, Points: 3})
+	assertTally(t, "added/total", wc.Added.Total, SizeTally{L: 1, Points: 3})
+	assertTally(t, "total/total", wc.Total.Total, SizeTally{S: 2, M: 1, L: 1, Points: 7})
 }

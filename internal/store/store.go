@@ -821,35 +821,51 @@ func doneCrossingClause() (query string, args []any) {
 	return query, args
 }
 
-// SprintCategories is the Sprint view's three-category breakdown for a sprint
-// over a window [from, to): the Started-with and Added tallies, the Finished
-// tally split by which category the finished ticket belongs to (Added takes
-// precedence, since the two sets are disjoint), and the two derived totals. Each
-// tally is at the ticket's CURRENT size.
-type SprintCategories struct {
-	// StartedWith is the active-sprint members at the grace-window end (sprint
-	// start + sprintGraceWindow), regardless of status — a snapshot (later
-	// removal/status change does not rewrite it).
-	StartedWith SizeTally
-	// Added is tickets whose first membership entry falls after the grace window
-	// (scope creep), regardless of status.
-	Added SizeTally
-	// FinishedFromStarted / FinishedFromAdded are the started-with / added tickets
-	// that also crossed into the Done set within the window.
-	FinishedFromStarted SizeTally
-	FinishedFromAdded   SizeTally
-	// FinishedTotal is FinishedFromStarted + FinishedFromAdded.
-	FinishedTotal SizeTally
-	// Total is StartedWith + Added (the Total row).
+// SprintCohort is one cohort row of the Sprint table (Started with, Added, or
+// their Total) broken into the outcome columns Open / Finished / Removed, plus
+// the derived Total = Open + Finished + Removed. Each is a size tally at the
+// ticket's CURRENT size.
+type SprintCohort struct {
+	// Open is cohort members still in the sprint, not cancelled, and not finished
+	// within the window — the remainder after Finished and Removed.
+	Open SizeTally
+	// Finished is cohort members that crossed into the Done set within the window.
+	Finished SizeTally
+	// Removed is cohort members that did NOT finish and are cancelled or no longer
+	// a member. The two cohorts differ (see SprintCategoriesInWindow): a
+	// Started-with ticket reprioritised out counts here; an Added ticket
+	// reprioritised out is dropped entirely, so only a cancelled Added ticket lands
+	// here.
+	Removed SizeTally
+	// Total is Open + Finished + Removed.
 	Total SizeTally
 }
 
-// sprintCategory selects which category-membership predicate categoryTally builds.
+// SprintCategories is the Sprint view's cohort × outcome breakdown for a sprint
+// over a window [from, to): the Started-with and Added cohorts and their
+// column-wise Total (the Total row).
+type SprintCategories struct {
+	StartedWith SprintCohort
+	Added       SprintCohort
+	// Total is the column-wise sum of StartedWith and Added (the Total row).
+	Total SprintCohort
+}
+
+// sprintCategory selects which cohort-membership predicate categoryTally builds.
 type sprintCategory int
 
 const (
 	catStartedWith sprintCategory = iota
 	catAdded
+)
+
+// sprintOutcome selects which outcome-column predicate categoryTally builds.
+type sprintOutcome int
+
+const (
+	outOpen sprintOutcome = iota
+	outFinished
+	outRemoved
 )
 
 // sprintGraceWindow is how long after a sprint's start a ticket may still join
@@ -871,55 +887,97 @@ const firstEntryAfterSubquery = `
 		GROUP BY issue_key
 		HAVING MIN(transitioned_at) > ?`
 
-// SprintCategoriesInWindow computes the Sprint view's Started-with / Added /
-// Finished breakdown for the sprint with the given id over [from, to).
+// finishedInWindowSubquery selects the issues that crossed into the Done set
+// within [from, to) — the "Finished" predicate, shared by the Finished column
+// (as a JOIN) and by the Open/Removed columns (as NOT IN, i.e. "not finished").
+// It wraps doneCrossingClause and filters its crossing instant to the window.
+// Binds, in order: the Done-crossing args (doneCrossingClause), then the fromStr
+// and toStr window bounds. A fresh copy per call so each use site gets its own
+// args slice.
+func finishedInWindowSubquery(fromStr, toStr string) (query string, args []any) {
+	crossSQL, crossArgs := doneCrossingClause()
+	query = `
+			SELECT issue_key FROM (` + crossSQL + `) crossing
+			WHERE crossing.completed_at >= ? AND crossing.completed_at < ?`
+	args = append(crossArgs, fromStr, toStr)
+	return query, args
+}
+
+// SprintCategoriesInWindow computes the Sprint view's cohort × outcome breakdown
+// for the sprint with the given id over [from, to): rows Started with / Added and
+// their Total, each split into Open / Finished / Removed / Total columns.
 //
-// Started-with = the active-sprint members at the grace-window end (from +
-// sprintGraceWindow), regardless of status, reconstructed from membership history
-// (membersAtSubquery). Added = tickets whose first membership entry falls after
-// the grace window (firstEntryAfterSubquery). The grace window absorbs rollover
-// churn (carry-overs re-added, tickets created into the sprint, planning pull-ins)
-// so only genuine later scope creep is Added. The two sets are disjoint by
-// construction, so a ticket both added and finished lands only under Added.
-// Finished reuses the shared Done-crossing detection (doneCrossingClause) over the
-// full [from, to) window; the per-category and combined totals follow.
+// Cohorts. Started-with = the active-sprint members at the grace-window end (from
+// + sprintGraceWindow), regardless of status (membersAtSubquery). Added = tickets
+// whose first membership entry falls after the grace window (firstEntryAfterSubquery).
+// The two cohorts are disjoint by construction.
+//
+// Outcomes, over the full [from, to) window (now = to). Finished = crossed into
+// the Done set within the window (finishedInWindowSubquery). Removed = NOT finished
+// and (cancelled OR no longer a member at now). Open = NOT finished, NOT cancelled,
+// and still a member at now — the remainder. Total = Open + Finished + Removed.
+//
+// The removal asymmetry (#70): for the Added cohort, Removed counts ONLY
+// cancellation — an added-then-reprioritised-out ticket (gone from the sprint, not
+// cancelled, not finished) is dropped entirely, so it appears in no column and the
+// Added Total is less than the raw cohort membership. For Started-with, a
+// reprioritised-out ticket is kept under Removed. The Total row is the column-wise
+// sum of the two cohorts.
 func (s *Store) SprintCategoriesInWindow(sprintID int, from, to time.Time) (SprintCategories, error) {
 	var wc SprintCategories
 	var err error
-	if wc.StartedWith, err = s.categoryTally(catStartedWith, sprintID, from, to, false); err != nil {
+	if wc.StartedWith, err = s.cohortTally(catStartedWith, sprintID, from, to); err != nil {
 		return SprintCategories{}, err
 	}
-	if wc.Added, err = s.categoryTally(catAdded, sprintID, from, to, false); err != nil {
+	if wc.Added, err = s.cohortTally(catAdded, sprintID, from, to); err != nil {
 		return SprintCategories{}, err
 	}
-	if wc.FinishedFromStarted, err = s.categoryTally(catStartedWith, sprintID, from, to, true); err != nil {
-		return SprintCategories{}, err
+	wc.Total = SprintCohort{
+		Open:     addTally(wc.StartedWith.Open, wc.Added.Open),
+		Finished: addTally(wc.StartedWith.Finished, wc.Added.Finished),
+		Removed:  addTally(wc.StartedWith.Removed, wc.Added.Removed),
+		Total:    addTally(wc.StartedWith.Total, wc.Added.Total),
 	}
-	if wc.FinishedFromAdded, err = s.categoryTally(catAdded, sprintID, from, to, true); err != nil {
-		return SprintCategories{}, err
-	}
-	wc.FinishedTotal = addTally(wc.FinishedFromStarted, wc.FinishedFromAdded)
-	wc.Total = addTally(wc.StartedWith, wc.Added)
 	return wc, nil
 }
 
-// categoryTally tallies the rollup issues in one Sprint category (at current
-// size), optionally restricted to those that also crossed into the Done set
-// within the window (finishedOnly). It assembles the category-membership joins
-// and the optional finished-crossing join from the shared SQL fragments so the
-// membership reconstruction, open bucket and Done-crossing logic live in one
-// place each. Join-side and where-side args are collected separately and then
-// concatenated, matching the order the placeholders appear in the assembled
-// query.
-func (s *Store) categoryTally(cat sprintCategory, sprintID int, from, to time.Time, finishedOnly bool) (SizeTally, error) {
+// cohortTally computes one cohort's Open / Finished / Removed / Total columns by
+// tallying each outcome bucket (categoryTally) and summing the three into Total.
+func (s *Store) cohortTally(cohort sprintCategory, sprintID int, from, to time.Time) (SprintCohort, error) {
+	var c SprintCohort
+	var err error
+	if c.Open, err = s.categoryTally(cohort, outOpen, sprintID, from, to); err != nil {
+		return SprintCohort{}, err
+	}
+	if c.Finished, err = s.categoryTally(cohort, outFinished, sprintID, from, to); err != nil {
+		return SprintCohort{}, err
+	}
+	if c.Removed, err = s.categoryTally(cohort, outRemoved, sprintID, from, to); err != nil {
+		return SprintCohort{}, err
+	}
+	c.Total = addTally(addTally(c.Open, c.Finished), c.Removed)
+	return c, nil
+}
+
+// categoryTally tallies the rollup issues in one cohort × outcome cell (at
+// current size): the cohort-membership join (Started-with / Added) plus the
+// outcome predicate (Open / Finished / Removed), assembled from the shared SQL
+// fragments so the membership reconstruction, Done-crossing and cancelled/member
+// tests each live in one place. "Cancelled" and "no longer a member" read the
+// ticket's current state — its snapshot status and its membership at `to` (now).
+// Join-side and where-side args are collected separately and then concatenated,
+// matching the order the placeholders appear in the assembled query.
+func (s *Store) categoryTally(cohort sprintCategory, outcome sprintOutcome, sprintID int, from, to time.Time) (SizeTally, error) {
 	fromStr := from.UTC().Format(time.RFC3339)
 	toStr := to.UTC().Format(time.RFC3339)
 	graceEndStr := from.Add(sprintGraceWindow).UTC().Format(time.RFC3339)
+	canceled := normalizeStatus("Canceled")
 
 	var joinSQL, whereSQL strings.Builder
 	var joinArgs, whereArgs []any
 
-	switch cat {
+	// Cohort membership.
+	switch cohort {
 	case catStartedWith:
 		// Every active-sprint member at the grace-window end (sprint start +
 		// sprintGraceWindow), regardless of status — the capacity baseline. A
@@ -930,17 +988,42 @@ func (s *Store) categoryTally(cat sprintCategory, sprintID int, from, to time.Ti
 	case catAdded:
 		// A ticket whose FIRST membership entry falls after the grace window
 		// (genuine scope creep). Re-entry of a ticket already present within the
-		// grace window stays out of Added, so the two categories are disjoint.
+		// grace window stays out of Added, so the two cohorts are disjoint.
 		joinSQL.WriteString(` JOIN (` + firstEntryAfterSubquery + `) added_m ON added_m.issue_key = issue.key`)
 		joinArgs = append(joinArgs, sprintID, graceEndStr)
 	}
 
-	if finishedOnly {
-		crossSQL, crossArgs := doneCrossingClause()
-		joinSQL.WriteString(` JOIN (` + crossSQL + `) crossing ON crossing.issue_key = issue.key`)
-		joinArgs = append(joinArgs, crossArgs...)
-		whereSQL.WriteString(` AND crossing.completed_at >= ? AND crossing.completed_at < ?`)
-		whereArgs = append(whereArgs, fromStr, toStr)
+	// Outcome predicate over the [from, to) window (now = to).
+	switch outcome {
+	case outFinished:
+		// Crossed into the Done set within the window.
+		finSQL, finArgs := finishedInWindowSubquery(fromStr, toStr)
+		joinSQL.WriteString(` JOIN (` + finSQL + `) fin ON fin.issue_key = issue.key`)
+		joinArgs = append(joinArgs, finArgs...)
+	case outOpen:
+		// Not finished, not cancelled, still a member at now — the remainder.
+		finSQL, finArgs := finishedInWindowSubquery(fromStr, toStr)
+		whereSQL.WriteString(` AND issue.key NOT IN (` + finSQL + `)`)
+		whereArgs = append(whereArgs, finArgs...)
+		whereSQL.WriteString(` AND LOWER(issue.status) <> ?`)
+		whereArgs = append(whereArgs, canceled)
+		whereSQL.WriteString(` AND issue.key IN (` + membersAtSubquery + `)`)
+		whereArgs = append(whereArgs, sprintID, toStr)
+	case outRemoved:
+		// Not finished, and cancelled or no longer a member — with the asymmetry:
+		// Started-with keeps reprioritised-out tickets (the "no longer a member"
+		// arm); Added counts ONLY cancellation, so a reprioritised-out add drops
+		// out of every cell.
+		finSQL, finArgs := finishedInWindowSubquery(fromStr, toStr)
+		whereSQL.WriteString(` AND issue.key NOT IN (` + finSQL + `)`)
+		whereArgs = append(whereArgs, finArgs...)
+		if cohort == catStartedWith {
+			whereSQL.WriteString(` AND (LOWER(issue.status) = ? OR issue.key NOT IN (` + membersAtSubquery + `))`)
+			whereArgs = append(whereArgs, canceled, sprintID, toStr)
+		} else {
+			whereSQL.WriteString(` AND LOWER(issue.status) = ?`)
+			whereArgs = append(whereArgs, canceled)
+		}
 	}
 
 	query := `SELECT ` + sizeTallyColumns + `
@@ -955,8 +1038,8 @@ func (s *Store) categoryTally(cat sprintCategory, sprintID int, from, to time.Ti
 	return tally, nil
 }
 
-// addTally sums two size tallies field-by-field — the Sprint Total and
-// finished-total rows.
+// addTally sums two size tallies field-by-field — the Sprint cohort Total and
+// Total-row cells.
 func addTally(a, b SizeTally) SizeTally {
 	return SizeTally{
 		S:          a.S + b.S,

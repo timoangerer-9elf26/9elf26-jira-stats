@@ -23,6 +23,18 @@ status: accepted
 > scope creep is Added. The old requirement that a Started-with ticket be *open* at
 > the start is **removed**: a member with no status history still counts. The grace
 > length lives in one named constant (`sprintGraceWindow`).
+>
+> **Amended by #70 (2026-07):** the view becomes a **cohort × outcome** table —
+> rows Started with / Added / Total, columns **Open · Finished · Removed · Total**,
+> each a size tally with `Total = Open + Finished + Removed`. **Finished** is the
+> Done-crossing within `[sprint start, now)` (unchanged); **Removed** is not-finished
+> and (cancelled or no longer a member); **Open** is the remainder. Removal is
+> **asymmetric**: a Started-with ticket cancelled *or* reprioritised out counts under
+> Removed, but an Added ticket only reaches Removed when *cancelled* — one merely
+> reprioritised out is dropped from every cell. The asymmetry keeps the baseline
+> honest (what we committed to and later lost) while stopping the Added row from
+> counting scope creep that never stuck. Each column header and the Started-with /
+> Added row labels carry a `?` with a native `title`/`aria-label` tooltip.
 
 We repurpose the "Completed" view into a **Weekly** sprint-planning overview.
 For the active sprint over a selectable week window, it reports three
