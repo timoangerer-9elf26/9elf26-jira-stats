@@ -29,8 +29,8 @@ func createdIssue(key, typ, creator string, active bool, createdAt time.Time) ji
 	return iss
 }
 
-// dailyCreatedFixture pins now = Thu 2026-07-16 10:00 Berlin, so Last 24h =
-// [2026-07-15 10:00, 2026-07-16 10:00).
+// dailyCreatedFixture pins now = Thu 2026-07-16 10:00 Berlin, so the default
+// Today preset window is [2026-07-16 00:00, 2026-07-17 00:00).
 func dailyCreatedFixture(t *testing.T) (*jira.FakeClient, time.Time) {
 	loc := berlin(t)
 	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, loc)
@@ -39,7 +39,7 @@ func dailyCreatedFixture(t *testing.T) (*jira.FakeClient, time.Time) {
 		// Created by Ada in window, in the active sprint.
 		createdIssue("DCAI-1", "Story", "Ada", true, at(16, 8)),
 		// Created by Ada in window, NOT in the active sprint — must still count.
-		createdIssue("DCAI-2", "Task", "Ada", false, at(15, 12)),
+		createdIssue("DCAI-2", "Task", "Ada", false, at(16, 7)),
 		// Created by Grace in window — excluded when me is Ada.
 		createdIssue("DCAI-3", "Bug", "Grace", true, at(16, 9)),
 		// Created by Ada BEFORE the window — excluded.
@@ -87,7 +87,7 @@ func TestDailyCreatedPinnedToMeNotSelectedAssignee(t *testing.T) {
 
 	// Explicitly view Grace's Daily; the created section must still list Ada's
 	// authored tickets, not Grace's.
-	body := get(t, app.URL+"/daily/results?assignee=Grace&window=last-24h")
+	body := get(t, app.URL+"/daily/results?assignee=Grace&preset=today")
 
 	for _, key := range []string{"DCAI-1", "DCAI-2"} {
 		if !strings.Contains(body, `data-testid="created-ticket:`+key+`"`) {

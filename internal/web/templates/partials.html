@@ -480,11 +480,15 @@
      dailyView. */}}
 {{define "daily-panel"}}
   {{template "daily-controls" .}}
+  {{if .RangeError}}
+  <p data-testid="daily-range-error" class="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 shadow-sm">{{.RangeError}}</p>
+  {{else}}
   {{template "daily-digest" .Digest}}
   {{template "daily-created" .Created}}
   <div id="daily-results" class="mt-6">
     {{template "daily-results" .}}
   </div>
+  {{end}}
 {{end}}
 
 {{/* daily-created is the "tickets I created" section: the tickets the configured
@@ -548,35 +552,66 @@
 {{end}}
 {{end}}
 
-{{/* daily-controls is the Daily selector: an assignee dropdown plus the two
-     window options. It is one <form> whose every change fires an HTMX GET that
-     swaps the whole #daily-panel, so both controls always reflect the current
-     selection. Takes a dailyView (needs .Assignees and .Windows). */}}
+{{/* daily-controls is the Daily selector: an assignee dropdown, three
+     working-day preset buttons (Today / Yesterday / day-before-yesterday) and a
+     custom From/Until datetime pair. It is one <form>; each control fires its own
+     HTMX GET that swaps the whole #daily-panel, so the controls always reflect the
+     current selection.
+
+     Mode disambiguation is by which params the trigger sends. A preset button
+     GETs ?preset=<key> (no from/to) → preset mode. Editing From/Until GETs
+     ?assignee&from&to (no preset) → custom mode; both inputs are pre-filled with
+     the resolved bounds so editing one keeps the other. A hidden "preset" input
+     carries the current preset key ("" in custom mode) so an assignee change
+     round-trips whichever mode is active (the server prefers preset when present).
+
+     Takes a dailyView (needs .Assignees, .Presets, .CustomFrom, .CustomTo). */}}
 {{define "daily-controls"}}
 <form data-testid="daily-controls"
-      hx-get="/daily/results"
       hx-target="#daily-panel"
       hx-swap="innerHTML"
-      hx-trigger="change"
       class="mt-8 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+  <input type="hidden" name="preset" value="{{range .Presets}}{{if .Selected}}{{.Key}}{{end}}{{end}}">
   <label class="text-xs font-medium text-slate-500">
     Assignee
     <select name="assignee" data-testid="daily-assignee"
+            hx-get="/daily/results" hx-trigger="change"
+            hx-include="[name='preset'],[name='from'],[name='to']"
             class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
       {{range .Assignees}}
       <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
       {{end}}
     </select>
   </label>
-  <fieldset class="flex flex-wrap gap-2">
-    {{range .Windows}}
-    <label class="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
-                  {{if .Selected}}border-slate-900 bg-slate-900 text-white{{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
-      <input type="radio" name="window" value="{{.Key}}" data-testid="daily-window:{{.Key}}"{{if .Selected}} checked{{end}} class="sr-only">
+  <fieldset data-testid="daily-presets" class="flex flex-wrap gap-2">
+    {{range .Presets}}
+    <button type="button" data-testid="daily-preset:{{.Key}}" title="{{.Title}}"
+            {{if .Disabled}}disabled aria-disabled="true"{{else}}hx-get="/daily/results?preset={{.Key}}" hx-include="[name='assignee']"{{end}}
+            {{if .Selected}}aria-pressed="true"{{end}}
+            class="inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
+                   {{if .Disabled}}cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300
+                   {{else if .Selected}}cursor-pointer border-slate-900 bg-slate-900 text-white
+                   {{else}}cursor-pointer border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
       {{.Label}}
-    </label>
+    </button>
     {{end}}
   </fieldset>
+  <div class="flex flex-wrap items-end gap-3">
+    <label class="text-xs font-medium text-slate-500">
+      From
+      <input type="datetime-local" name="from" data-testid="daily-from" value="{{.CustomFrom}}"
+             hx-get="/daily/results" hx-trigger="change"
+             hx-include="[name='assignee'],[name='from'],[name='to']"
+             class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
+    </label>
+    <label class="text-xs font-medium text-slate-500">
+      Until
+      <input type="datetime-local" name="to" data-testid="daily-to" value="{{.CustomTo}}"
+             hx-get="/daily/results" hx-trigger="change"
+             hx-include="[name='assignee'],[name='from'],[name='to']"
+             class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
+    </label>
+  </div>
 </form>
 {{end}}
 
