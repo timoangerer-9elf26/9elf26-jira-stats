@@ -428,15 +428,15 @@ func (s *Server) dailyRangeSelection(q url.Values, now time.Time) dailyRangeResu
 		res.customTo = res.to.Format(dailyInputFormat)
 	}
 
-	// Build the three preset buttons in display order. The day-before button is
-	// labelled with its full weekday name; each carries its concrete date as a
-	// hover title.
+	// Build the three preset buttons in chronological display order: the
+	// weekday-named day-before button first, then Yesterday, then Today. The
+	// day-before button is labelled with its full weekday name; each carries its
+	// concrete date as a hover title.
 	res.presets = []dailyPresetView{
 		{
-			Key: dailyPresetToday, Label: "Today",
-			Title:    todayStart.Format(dailyTitleFormat),
-			Selected: selectedKey == dailyPresetToday,
-			Disabled: todayDisabled,
+			Key: dailyPresetDayBefore, Label: dayBeforeStart.Format("Monday"),
+			Title:    dayBeforeStart.Format(dailyTitleFormat),
+			Selected: selectedKey == dailyPresetDayBefore,
 		},
 		{
 			Key: dailyPresetYesterday, Label: "Yesterday",
@@ -444,9 +444,10 @@ func (s *Server) dailyRangeSelection(q url.Values, now time.Time) dailyRangeResu
 			Selected: selectedKey == dailyPresetYesterday,
 		},
 		{
-			Key: dailyPresetDayBefore, Label: dayBeforeStart.Format("Monday"),
-			Title:    dayBeforeStart.Format(dailyTitleFormat),
-			Selected: selectedKey == dailyPresetDayBefore,
+			Key: dailyPresetToday, Label: "Today",
+			Title:    todayStart.Format(dailyTitleFormat),
+			Selected: selectedKey == dailyPresetToday,
+			Disabled: todayDisabled,
 		},
 	}
 	return res
