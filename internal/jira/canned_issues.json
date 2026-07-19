@@ -9,6 +9,7 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Ada",
+    "AssigneeAvatarURL": "/static/avatars/ada.svg",
     "Creator": "Ada",
     "CreatedAt": "2026-07-09T09:00:00Z",
     "Changelog": [
@@ -29,6 +30,7 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Grace",
+    "AssigneeAvatarURL": "/static/avatars/grace.svg",
     "Creator": "Grace",
     "CreatedAt": "2026-07-09T09:00:00Z",
     "Changelog": [
@@ -48,6 +50,7 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Alan",
+    "AssigneeAvatarURL": "/static/avatars/alan.svg",
     "Creator": "Alan",
     "CreatedAt": "2026-07-09T09:00:00Z",
     "Changelog": [

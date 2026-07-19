@@ -147,11 +147,44 @@
     {{template "type-badge" (dict "Type" .Type "Testid" (printf "card:%s:type" .Key))}}
   </div>
   <p class="mt-1.5 text-sm text-slate-800" data-testid="card:{{.Key}}:title">{{.Summary}}</p>
-  <div class="mt-2">
+  <div class="mt-2 flex items-center justify-between gap-2">
     {{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}
+    {{template "card-avatar" .}}
   </div>
 {{if .Href}}</a>{{else}}</div>{{end}}
 {{end}}
+
+{{/* card-avatar renders the assignee at a card's bottom-right (#68): the public
+     Jira avatar image when one is captured, otherwise the computed initials in a
+     tinted circle, otherwise a neutral empty circle when the ticket is
+     unassigned. When an image is present it is paired with a hidden initials
+     circle that its onerror handler reveals, so a broken/expired avatar URL
+     still degrades to initials rather than a broken-image icon. The circle
+     geometry (fixed size, round shape, image cropping) is set inline because
+     those Tailwind utilities are not in the committed stylesheet; the colours
+     and flex centring reuse compiled classes. Takes a boardCard (needs .Key,
+     .Assignee, .AvatarURL, .Initials). */}}
+{{define "card-avatar"}}
+{{if .AvatarURL}}<img data-testid="card:{{.Key}}:avatar-img" src="{{.AvatarURL}}" alt="{{.Assignee}}" title="{{.Assignee}}"
+   loading="lazy" referrerpolicy="no-referrer"
+   onerror="this.style.display='none';this.nextElementSibling.style.display='inline-flex'"
+   class="shrink-0 overflow-hidden bg-slate-100"
+   style="height:1.75rem;width:1.75rem;border-radius:9999px;object-fit:cover">{{template "avatar-initials" .}}
+{{- else if .Assignee}}{{template "avatar-initials" .}}
+{{- else}}<span data-testid="card:{{.Key}}:avatar-empty" aria-label="Unassigned" title="Unassigned"
+   class="inline-flex shrink-0 bg-slate-100"
+   style="height:1.75rem;width:1.75rem;border-radius:9999px"></span>{{end}}
+{{end}}
+
+{{/* avatar-initials is the tinted initials circle used as a card's assignee
+     avatar: on its own when there is no image, or hidden alongside an image as
+     its onerror fallback (revealed by card-avatar's handler). The initial
+     display is left to the caller — a lone circle is visible, the image's
+     fallback is hidden until the image errors. Takes a boardCard. */}}
+{{define "avatar-initials"}}<span title="{{.Assignee}}"
+   class="inline-flex shrink-0 items-center justify-center bg-slate-100 text-xs font-semibold text-slate-600"
+   style="height:1.75rem;width:1.75rem;border-radius:9999px{{if .AvatarURL}};display:none{{end}}"
+   data-testid="card:{{.Key}}:avatar-initials">{{.Initials}}</span>{{end}}
 
 {{/* board-column is one workflow-status column of the sprint board: a header
      with the status name and its card count, then the cards. Takes a

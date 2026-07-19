@@ -39,7 +39,12 @@ type Issue struct {
 	// history (see #55).
 	ActiveSprintID int
 	Assignee       string
-	Changelog      []ChangelogEntry
+	// AssigneeAvatarURL is the public Jira avatar image URL of the current
+	// assignee (from the assignee's avatarUrls), "" when unassigned or Jira
+	// reported no avatar. The Board card renders it, falling back to computed
+	// initials when empty.
+	AssigneeAvatarURL string
+	Changelog         []ChangelogEntry
 	// SprintChanges is the issue's sprint-membership history: each entering or
 	// leaving of a single sprint, derived from the "Sprint" changelog field. It
 	// lets the store reconstruct which sprint(s) the issue belonged to at any past

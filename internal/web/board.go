@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 )
@@ -15,6 +16,13 @@ type boardCard struct {
 	Size    string // "S"/"M"/"L" or "no estimate"
 	Type    string // Task, Bug or Story
 	Href    string // "<base>/browse/<KEY>", or "" when unconfigured
+	// Assignee is the assignee's display name ("" when unassigned); AvatarURL is
+	// their public Jira avatar image URL ("" when none). Initials is the computed
+	// fallback shown when there is an assignee but no image. The template renders
+	// the image, else the initials, else a neutral empty circle when unassigned.
+	Assignee  string
+	AvatarURL string
+	Initials  string
 }
 
 // boardColumn is one workflow-status column and its cards.
@@ -57,11 +65,14 @@ func (s *Server) boardView() (boardView, error) {
 		cards := make([]boardCard, 0, len(col.Cards))
 		for _, c := range col.Cards {
 			cards = append(cards, boardCard{
-				Key:     c.Key,
-				Summary: c.Summary,
-				Size:    sizeDisplay(c.Size),
-				Type:    c.Type,
-				Href:    s.jiraIssueURL(c.Key),
+				Key:       c.Key,
+				Summary:   c.Summary,
+				Size:      sizeDisplay(c.Size),
+				Type:      c.Type,
+				Href:      s.jiraIssueURL(c.Key),
+				Assignee:  c.Assignee,
+				AvatarURL: c.AssigneeAvatarURL,
+				Initials:  avatarInitials(c.Assignee),
 			})
 		}
 		view.Columns = append(view.Columns, boardColumn{Status: col.Status, Cards: cards})
@@ -84,6 +95,29 @@ func sizeDisplay(size string) string {
 		return "no estimate"
 	}
 	return size
+}
+
+// avatarInitials computes the initials shown when an assignee has no avatar
+// image: the first letter of the first name plus the first letter of the last
+// name, a single-word name's first two letters, and "" for an unassigned issue
+// (whose card renders a neutral empty circle). Output is upper-cased; leading,
+// trailing and repeated whitespace is ignored.
+func avatarInitials(name string) string {
+	parts := strings.Fields(name)
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		r := []rune(parts[0])
+		if len(r) == 1 {
+			return strings.ToUpper(string(r))
+		}
+		return strings.ToUpper(string(r[:2]))
+	default:
+		first := []rune(parts[0])
+		last := []rune(parts[len(parts)-1])
+		return strings.ToUpper(string(first[0]) + string(last[0]))
+	}
 }
 
 // jiraIssueURL builds the Jira detail link for an issue key, or "" when no base

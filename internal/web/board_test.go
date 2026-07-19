@@ -119,6 +119,65 @@ func TestBoardShowsActiveSprintCardsInColumns(t *testing.T) {
 	}
 }
 
+// avatarFixture is an active-sprint (KW29) mix exercising the three assignee
+// states a Board card renders (#68): assigned with a Jira avatar image,
+// assigned without one (initials fallback), and unassigned (neutral circle).
+func avatarFixture() *jira.FakeClient {
+	active := func(iss jira.Issue) jira.Issue {
+		iss.Type, iss.Status, iss.StatusCategory, iss.ActiveSprint = "Task", "In Progress", "In Progress", "KW29"
+		return iss
+	}
+	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
+		active(jira.Issue{Key: "DCAI-10", Summary: "Has an avatar", Assignee: "Ada Lovelace", AssigneeAvatarURL: "https://avatar.example/ada/48.png"}),
+		active(jira.Issue{Key: "DCAI-11", Summary: "Initials fallback", Assignee: "Grace Hopper"}),
+		active(jira.Issue{Key: "DCAI-12", Summary: "Unassigned"}),
+	}}
+}
+
+// TestBoardCardShowsAssigneeAvatar asserts each Board card renders its assignee
+// as a Jira avatar image, falling back to computed initials when no image is
+// present, and a neutral (empty) circle when unassigned.
+func TestBoardCardShowsAssigneeAvatar(t *testing.T) {
+	app := newBoardApp(t, avatarFixture())
+	body := get(t, app.URL+"/board")
+
+	// Assigned with an avatar: the Jira image renders, labelled with the assignee,
+	// and carries an onerror handler plus a hidden initials fallback so a broken
+	// image (404 / expired avatar) still degrades to initials, not a broken icon.
+	for _, want := range []string{
+		`data-testid="card:DCAI-10:avatar-img"`,
+		`src="https://avatar.example/ada/48.png"`,
+		`alt="Ada Lovelace"`,
+		`onerror=`,
+		`data-testid="card:DCAI-10:avatar-initials">AL<`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("board card DCAI-10 missing %q\n%s", want, body)
+		}
+	}
+
+	// Assigned without an avatar: initials render (first + last initial).
+	if !strings.Contains(body, `data-testid="card:DCAI-11:avatar-initials">GH<`) {
+		t.Errorf("board card DCAI-11 missing initials fallback\n%s", body)
+	}
+	if strings.Contains(body, `data-testid="card:DCAI-11:avatar-img"`) {
+		t.Errorf("board card DCAI-11 must not render an image without an avatar URL")
+	}
+
+	// Unassigned: a neutral empty circle, no initials and no image.
+	if !strings.Contains(body, `data-testid="card:DCAI-12:avatar-empty"`) {
+		t.Errorf("board card DCAI-12 missing neutral empty circle\n%s", body)
+	}
+	for _, absent := range []string{
+		`data-testid="card:DCAI-12:avatar-img"`,
+		`data-testid="card:DCAI-12:avatar-initials"`,
+	} {
+		if strings.Contains(body, absent) {
+			t.Errorf("unassigned board card DCAI-12 must not render %q", absent)
+		}
+	}
+}
+
 // TestBoardColumnHeaderShowsCount asserts each column header carries its card
 // count.
 func TestBoardColumnHeaderShowsCount(t *testing.T) {

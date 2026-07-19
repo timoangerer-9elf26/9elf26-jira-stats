@@ -87,16 +87,21 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 	if iss.Creator != "" {
 		creator = iss.Creator
 	}
+	var assigneeAvatarURL any
+	if iss.AssigneeAvatarURL != "" {
+		assigneeAvatarURL = iss.AssigneeAvatarURL
+	}
 	if _, err := tx.Exec(
-		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, created_at, creator, synced_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, assignee_avatar_url, created_at, creator, synced_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
 		     type=excluded.type, summary=excluded.summary, status=excluded.status,
 		     status_category=excluded.status_category, size=excluded.size,
 		     sprint=excluded.sprint, active_sprint=excluded.active_sprint,
-		     assignee=excluded.assignee, created_at=excluded.created_at,
+		     assignee=excluded.assignee, assignee_avatar_url=excluded.assignee_avatar_url,
+		     created_at=excluded.created_at,
 		     creator=excluded.creator, synced_at=excluded.synced_at`,
-		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, createdAt, creator, syncedAt,
+		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, assigneeAvatarURL, createdAt, creator, syncedAt,
 	); err != nil {
 		return fmt.Errorf("upsert issue %s: %w", iss.Key, err)
 	}
@@ -1022,6 +1027,12 @@ type BoardCard struct {
 	Summary string
 	Size    string // T-shirt label 'S'/'M'/'L', or "" for no estimate
 	Type    string // Task, Bug or Story
+	// Assignee is the current assignee's display name ("" when unassigned);
+	// AssigneeAvatarURL is that assignee's public Jira avatar image URL ("" when
+	// unassigned or Jira reported none). The card renders the image, falling back
+	// to initials computed from Assignee, or a neutral circle when unassigned.
+	Assignee          string
+	AssigneeAvatarURL string
 }
 
 // BoardColumn is one workflow-status column of the sprint board and the
@@ -1063,7 +1074,7 @@ func (s *Store) ActiveSprintBoard() (Board, error) {
 	}
 
 	const query = `
-		SELECT status, key, summary, size, type
+		SELECT status, key, summary, size, type, assignee, assignee_avatar_url
 		FROM issue
 		WHERE active_sprint IS NOT NULL
 		  AND type IN (` + rollupTypes + `)
@@ -1093,11 +1104,13 @@ func (s *Store) ActiveSprintBoard() (Board, error) {
 	for rows.Next() {
 		var status string
 		var card BoardCard
-		var size sql.NullString
-		if err := rows.Scan(&status, &card.Key, &card.Summary, &size, &card.Type); err != nil {
+		var size, assignee, avatarURL sql.NullString
+		if err := rows.Scan(&status, &card.Key, &card.Summary, &size, &card.Type, &assignee, &avatarURL); err != nil {
 			return Board{}, fmt.Errorf("scan board card: %w", err)
 		}
-		card.Size = size.String // "" when NULL (no estimate)
+		card.Size = size.String                   // "" when NULL (no estimate)
+		card.Assignee = assignee.String           // "" when NULL (unassigned)
+		card.AssigneeAvatarURL = avatarURL.String // "" when NULL (no avatar)
 		norm := normalizeStatus(status)
 		switch i, seededHere := seededIndex[norm]; {
 		case boardExcludedStatuses[norm]:
