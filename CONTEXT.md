@@ -91,20 +91,32 @@ finished must come from the explicit buckets above.
 
 ## Sprint view metrics
 
-For the active sprint over its window `[sprint start, now)`, reported as three
-categories. Each is a size tally (S/M/L/no-estimate counts + a points sum,
-S=1/M=2/L=3, at the ticket's *current* size):
+For the active sprint over its window `[sprint start, now)`, reported as a
+**cohort × outcome** table: rows **Started with / Added / Total**, columns
+**Open · Finished · Removed · Total**. Every cell is a size tally (S/M/L/no-estimate
+counts + a points sum, S=1/M=2/L=3, at the ticket's *current* size), and
+`Total = Open + Finished + Removed`.
+
+The **cohorts** (rows):
 
 - **Started with** — the active-sprint members at the end of the **grace window**
   (`sprint start + 1h`), regardless of status. The capacity baseline, including
   carry-overs (tickets pulled from the previous sprint at rollover), tickets
-  created directly into the sprint, and tickets moved in during the first hour. A
-  snapshot: later removal from the sprint does not rewrite it. There is no
-  open-at-start gate — a member with no status history still counts.
+  created directly into the sprint, and tickets moved in during the first hour.
+  There is no open-at-start gate — a member with no status history still counts.
 - **Added** — tickets whose **first** membership entry falls **after** the grace
   window (genuine scope creep), regardless of status.
-- **Total** — Started with + Added.
-- **Finished** — tickets that *crossed into* the finished bucket within the
-  window, attributed to whichever category (Started with / Added) the ticket
-  belongs to, plus a total across both. A ticket both added and finished in the
-  window counts under Added.
+- **Total** — the column-wise sum of Started with + Added.
+
+The **outcomes** (columns), over the window `[sprint start, now)`:
+
+- **Finished** — crossed into the finished bucket within the window.
+- **Removed** — *not* finished and (cancelled **or** no longer a member).
+- **Open** — the remainder (still a member, not cancelled, not finished).
+- **Total** — Open + Finished + Removed.
+
+Removal is **asymmetric**. A **Started-with** ticket that is cancelled *or*
+reprioritised out of the sprint counts under **Removed** — the baseline keeps it.
+An **Added** ticket only reaches Removed when **cancelled**; one merely
+reprioritised out again is **dropped entirely** (it appears in no cell), so the
+Added row counts only scope creep that actually stuck or was explicitly killed.

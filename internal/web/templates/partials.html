@@ -254,13 +254,16 @@
       <thead>
         <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400">
           <th class="px-4 py-3 font-medium">Category</th>
-          <th class="px-4 py-3 font-medium">Tickets · Points</th>
-          <th class="px-4 py-3 font-medium">Finished</th>
+          {{range .Columns}}
+          <th class="px-4 py-3 font-medium">{{.Label}}
+            <span data-testid="sprint-col:{{.Key}}:help" class="text-slate-400" title="{{.Tooltip}}" aria-label="{{.Tooltip}}">?</span>
+          </th>
+          {{end}}
         </tr>
       </thead>
       <tbody>
         {{range .Rows}}
-        {{template "sprint-category-row" .}}
+        {{template "sprint-cohort-row" .}}
         {{end}}
       </tbody>
     </table>
@@ -269,30 +272,31 @@
 </div>
 {{end}}
 
-{{/* sprint-category-row is one row of the Sprint table: the category label, a
-     tickets+points headline with the S/M/L/no-estimate split as detail, and the
-     finished figure attributed to that category. The Total row (Key "total") is
-     emphasized. Takes a sprintCategoryRow. */}}
-{{define "sprint-category-row"}}
+{{/* sprint-cohort-row is one row of the Sprint cohort × outcome table: the cohort
+     label (with a `?` help tooltip for Started with / Added, whose Tooltip is set)
+     and its four outcome cells in column order. Each cell is a tickets·points
+     headline with the S/M/L/no-estimate split. The Total row (Key "total") is
+     emphasized. Takes a sprintCohortRow. */}}
+{{define "sprint-cohort-row"}}
 <tr data-testid="sprint-row:{{.Key}}"
     class="border-b border-slate-100 last:border-0 {{if eq .Key "total"}}bg-slate-50 font-semibold text-slate-900{{else}}text-slate-700{{end}}">
-  <td class="px-4 py-3">{{.Label}}</td>
-  <td class="px-4 py-3">
+  <td class="px-4 py-3">{{.Label}}{{if .Tooltip}}
+    <span data-testid="sprint-row:{{.Key}}:help" class="text-slate-400" title="{{.Tooltip}}" aria-label="{{.Tooltip}}">?</span>{{end}}
+  </td>
+  {{range .Cells}}
+  <td class="px-4 py-3" data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}">
     <div class="tabular-nums">
-      <span data-testid="sprint-{{.Key}}:tickets">{{.Tickets}}</span> tickets ·
-      <span data-testid="sprint-{{.Key}}:points">{{.Points}}</span> pts
+      <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:tickets">{{.Tickets}}</span> tickets ·
+      <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:points">{{.Points}}</span> pts
     </div>
     <div class="mt-0.5 text-xs font-normal text-slate-400 tabular-nums">
-      S <span data-testid="sprint-{{.Key}}:s">{{.S}}</span> ·
-      M <span data-testid="sprint-{{.Key}}:m">{{.M}}</span> ·
-      L <span data-testid="sprint-{{.Key}}:l">{{.L}}</span> ·
-      none <span data-testid="sprint-{{.Key}}:none">{{.NoEstimate}}</span>
+      S <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:s">{{.S}}</span> ·
+      M <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:m">{{.M}}</span> ·
+      L <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:l">{{.L}}</span> ·
+      none <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:none">{{.NoEstimate}}</span>
     </div>
   </td>
-  <td class="px-4 py-3 tabular-nums">
-    <span data-testid="sprint-{{.Key}}:finished-tickets">{{.FinishedTickets}}</span> tickets ·
-    <span data-testid="sprint-{{.Key}}:finished-points">{{.FinishedPoints}}</span> pts
-  </td>
+  {{end}}
 </tr>
 {{end}}
 

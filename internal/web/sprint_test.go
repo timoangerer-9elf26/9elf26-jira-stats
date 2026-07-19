@@ -186,24 +186,26 @@ func TestSprintTableCoversAllCategories(t *testing.T) {
 
 	body := get(t, app.URL+"/sprint/results")
 	wants := []string{
-		// Started with = DCAI-1 (M) + DCAI-2 (L): 2 tickets, 5 pts.
-		`data-testid="sprint-started:tickets">2<`,
-		`data-testid="sprint-started:points">5<`,
-		// Added = DCAI-3 (S) + DCAI-4 (M): 2 tickets, 3 pts.
-		`data-testid="sprint-added:tickets">2<`,
-		`data-testid="sprint-added:points">3<`,
-		// Total row = Started-with + Added: 4 tickets, 8 pts.
-		`data-testid="sprint-total:tickets">4<`,
-		`data-testid="sprint-total:points">8<`,
-		// Finished-from-started = DCAI-1.
-		`data-testid="sprint-started:finished-tickets">1<`,
-		`data-testid="sprint-started:finished-points">2<`,
-		// Finished-from-added = DCAI-4.
-		`data-testid="sprint-added:finished-tickets">1<`,
-		`data-testid="sprint-added:finished-points">2<`,
-		// Finished total = 2 tickets, 4 pts.
-		`data-testid="sprint-total:finished-tickets">2<`,
-		`data-testid="sprint-total:finished-points">4<`,
+		// Started-with cohort: DCAI-1 finished (M), DCAI-2 still open (L).
+		`data-testid="sprint-cell:started:finished:tickets">1<`,
+		`data-testid="sprint-cell:started:finished:points">2<`,
+		`data-testid="sprint-cell:started:open:tickets">1<`,
+		`data-testid="sprint-cell:started:open:points">3<`,
+		`data-testid="sprint-cell:started:removed:tickets">0<`,
+		`data-testid="sprint-cell:started:total:tickets">2<`,
+		`data-testid="sprint-cell:started:total:points">5<`,
+		// Added cohort: DCAI-3 still open (S), DCAI-4 finished (M).
+		`data-testid="sprint-cell:added:open:tickets">1<`,
+		`data-testid="sprint-cell:added:open:points">1<`,
+		`data-testid="sprint-cell:added:finished:tickets">1<`,
+		`data-testid="sprint-cell:added:finished:points">2<`,
+		`data-testid="sprint-cell:added:total:tickets">2<`,
+		`data-testid="sprint-cell:added:total:points">3<`,
+		// Total row = column-wise Started-with + Added.
+		`data-testid="sprint-cell:total:finished:tickets">2<`,
+		`data-testid="sprint-cell:total:finished:points">4<`,
+		`data-testid="sprint-cell:total:total:tickets">4<`,
+		`data-testid="sprint-cell:total:total:points">8<`,
 	}
 	for _, w := range wants {
 		if !strings.Contains(body, w) {
@@ -253,17 +255,100 @@ func TestSprintCarryOverLandsInStartedWithNotAdded(t *testing.T) {
 	wants := []string{
 		`data-testid="sprint-name">KW30<`,
 		// Started with = the carry-over DCAI-CO (M) only: 1 ticket, 2 pts.
-		`data-testid="sprint-started:tickets">1<`,
-		`data-testid="sprint-started:points">2<`,
+		`data-testid="sprint-cell:started:total:tickets">1<`,
+		`data-testid="sprint-cell:started:total:points">2<`,
 		// Added = the genuine mid-sprint add DCAI-ADD (S) only: 1 ticket, 1 pt.
-		`data-testid="sprint-added:tickets">1<`,
-		`data-testid="sprint-added:points">1<`,
-		`data-testid="sprint-total:tickets">2<`,
+		`data-testid="sprint-cell:added:total:tickets">1<`,
+		`data-testid="sprint-cell:added:total:points">1<`,
+		`data-testid="sprint-cell:total:total:tickets">2<`,
 	}
 	for _, w := range wants {
 		if !strings.Contains(body, w) {
 			t.Errorf("carry-over not anchored on the sprint start; missing %q\n%s", w, body)
 		}
+	}
+}
+
+// TestSprintCohortOutcomeAsymmetryAndTooltips drives the #70 removal asymmetry
+// end-to-end and asserts the help tooltips. In KW29:
+//   - SW-CANCEL: started, cancelled → Started-with Removed.
+//   - SW-LEFT: started, reprioritised out → Started-with Removed (kept).
+//   - AD-CANCEL: added, cancelled → Added Removed (cancellation reaches Removed).
+//   - AD-LEFT: added, reprioritised out → dropped entirely (in NO cell).
+//
+// It also checks the `?` help tooltips on the four column headers and the
+// Started-with / Added row labels (native title/aria-label), and that the Total
+// row carries no help marker.
+func TestSprintCohortOutcomeAsymmetryAndTooltips(t *testing.T) {
+	loc := berlin(t)
+	now := time.Date(2026, time.July, 20, 12, 0, 0, 0, loc)
+	atStart := time.Date(2026, time.July, 13, 8, 0, 0, 0, loc)    // before/at start → Started-with
+	afterGrace := time.Date(2026, time.July, 14, 9, 0, 0, 0, loc) // after grace → Added
+	mid := time.Date(2026, time.July, 16, 9, 0, 0, 0, loc)        // a leave / cancel, in-window
+
+	app := newTestAppAt(t, &jira.FakeClient{
+		Sprints: activeSprintKW29(),
+		Issues: []jira.Issue{
+			sprintIssue("SW-CANCEL", "L", "Canceled", "KW29",
+				[]jira.ChangelogEntry{
+					sprintStatus("swc1", "Ready To Do", "In Progress", atStart),
+					sprintStatus("swc2", "In Progress", "Canceled", mid),
+				},
+				[]jira.SprintMembershipChange{enteredSprintID("sw-c", 29, "KW29", atStart)}),
+			sprintIssue("SW-LEFT", "S", "In Progress", "KW29",
+				[]jira.ChangelogEntry{sprintStatus("swl", "Ready To Do", "In Progress", atStart)},
+				[]jira.SprintMembershipChange{
+					enteredSprintID("sw-l", 29, "KW29", atStart),
+					leftSprintID("sw-l2", 29, "KW29", mid),
+				}),
+			sprintIssue("AD-CANCEL", "M", "Canceled", "KW29",
+				[]jira.ChangelogEntry{
+					sprintStatus("adc1", "Ready To Do", "In Progress", afterGrace),
+					sprintStatus("adc2", "In Progress", "Canceled", mid),
+				},
+				[]jira.SprintMembershipChange{enteredSprintID("ad-c", 29, "KW29", afterGrace)}),
+			sprintIssue("AD-LEFT", "L", "In Progress", "KW29",
+				[]jira.ChangelogEntry{sprintStatus("adl", "Ready To Do", "In Progress", afterGrace)},
+				[]jira.SprintMembershipChange{
+					enteredSprintID("ad-l", 29, "KW29", afterGrace),
+					leftSprintID("ad-l2", 29, "KW29", mid),
+				}),
+		},
+	}, now)
+
+	body := get(t, app.URL+"/sprint/results")
+	wants := []string{
+		// Started-with keeps BOTH the cancelled and the reprioritised-out ticket.
+		`data-testid="sprint-cell:started:removed:tickets">2<`,
+		`data-testid="sprint-cell:started:removed:points">4<`,
+		`data-testid="sprint-cell:started:total:tickets">2<`,
+		`data-testid="sprint-cell:started:open:tickets">0<`,
+		// Added counts ONLY the cancelled one; AD-LEFT is dropped entirely.
+		`data-testid="sprint-cell:added:removed:tickets">1<`,
+		`data-testid="sprint-cell:added:removed:points">2<`,
+		`data-testid="sprint-cell:added:total:tickets">1<`,
+		`data-testid="sprint-cell:added:open:tickets">0<`,
+		// Column-header help tooltips.
+		`data-testid="sprint-col:open:help"`,
+		`data-testid="sprint-col:finished:help"`,
+		`data-testid="sprint-col:removed:help"`,
+		`data-testid="sprint-col:total:help"`,
+		// Row-label help tooltips on the two cohorts.
+		`data-testid="sprint-row:started:help"`,
+		`data-testid="sprint-row:added:help"`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(body, w) {
+			t.Errorf("cohort/outcome table wrong; missing %q\n%s", w, body)
+		}
+	}
+	// The Total row needs no explanation — no help marker.
+	if strings.Contains(body, `data-testid="sprint-row:total:help"`) {
+		t.Errorf("Total row should carry no help tooltip\n%s", body)
+	}
+	// The Removed tooltip must spell out the asymmetry.
+	if !strings.Contains(body, "reprioritised-out adds are dropped") {
+		t.Errorf("Removed column tooltip should explain the asymmetry\n%s", body)
 	}
 }
 
@@ -314,13 +399,13 @@ func TestSprintGraceWindowAcrossTwoSprints(t *testing.T) {
 	body := get(t, app.URL+"/sprint/results")
 	wants := []string{
 		`data-testid="sprint-name">KW30<`,
-		// Started with = DCAI-CO (M) + DCAI-BORN (S): 2 tickets, 3 pts.
-		`data-testid="sprint-started:tickets">2<`,
-		`data-testid="sprint-started:points">3<`,
+		// Started with = DCAI-CO (M) + DCAI-BORN (S): 2 tickets, 3 pts (all open).
+		`data-testid="sprint-cell:started:total:tickets">2<`,
+		`data-testid="sprint-cell:started:total:points">3<`,
 		// Added = DCAI-LATE (L) only: 1 ticket, 3 pts.
-		`data-testid="sprint-added:tickets">1<`,
-		`data-testid="sprint-added:points">3<`,
-		`data-testid="sprint-total:tickets">3<`,
+		`data-testid="sprint-cell:added:total:tickets">1<`,
+		`data-testid="sprint-cell:added:total:points">3<`,
+		`data-testid="sprint-cell:total:total:tickets">3<`,
 	}
 	for _, w := range wants {
 		if !strings.Contains(body, w) {
@@ -364,11 +449,11 @@ func TestSprintIncludesTicketCreatedDirectlyIntoSprint(t *testing.T) {
 	body := get(t, app.URL+"/sprint/results")
 	wants := []string{
 		// Added = the created-into-sprint DCAI-BORN (M) only: 1 ticket, 2 pts.
-		`data-testid="sprint-added:tickets">1<`,
-		`data-testid="sprint-added:points">2<`,
+		`data-testid="sprint-cell:added:total:tickets">1<`,
+		`data-testid="sprint-cell:added:total:points">2<`,
 		// Started with = the normal DCAI-STD (L).
-		`data-testid="sprint-started:tickets">1<`,
-		`data-testid="sprint-total:tickets">2<`,
+		`data-testid="sprint-cell:started:total:tickets">1<`,
+		`data-testid="sprint-cell:total:total:tickets">2<`,
 	}
 	for _, w := range wants {
 		if !strings.Contains(body, w) {
@@ -422,22 +507,27 @@ func TestSprintCannedDatasetPopulatesTable(t *testing.T) {
 	wants := []string{
 		`data-testid="sprint-table"`,
 		`data-testid="sprint-window-label">13 Jul – 14 Jul 2026<`,
-		// Started with = DCAI-1(L)+DCAI-2(M)+DCAI-3(S)+DCAI-8(S)+DCAI-9(M): 5 / 9pts.
-		`data-testid="sprint-started:tickets">5<`,
-		`data-testid="sprint-started:points">9<`,
-		// Added = DCAI-4(none)+DCAI-5(M): 2 tickets, 2 pts.
-		`data-testid="sprint-added:tickets">2<`,
-		`data-testid="sprint-added:points">2<`,
-		`data-testid="sprint-total:tickets">7<`,
-		`data-testid="sprint-total:points">11<`,
-		// Finished-from-started = DCAI-1 only; DCAI-3 crosses Thu, AFTER now.
-		`data-testid="sprint-started:finished-tickets">1<`,
-		`data-testid="sprint-started:finished-points">3<`,
-		// Finished-from-added = DCAI-5.
-		`data-testid="sprint-added:finished-tickets">1<`,
-		`data-testid="sprint-added:finished-points">2<`,
-		`data-testid="sprint-total:finished-tickets">2<`,
-		`data-testid="sprint-total:finished-points">5<`,
+		// Started-with cohort = DCAI-1(L)+DCAI-2(M)+DCAI-3(S)+DCAI-8(S)+DCAI-9(M):
+		// Total 5 / 9pts. DCAI-1 finished; the rest still open (DCAI-3 crosses Thu,
+		// AFTER now). Nothing cancelled or removed.
+		`data-testid="sprint-cell:started:total:tickets">5<`,
+		`data-testid="sprint-cell:started:total:points">9<`,
+		`data-testid="sprint-cell:started:finished:tickets">1<`,
+		`data-testid="sprint-cell:started:finished:points">3<`,
+		`data-testid="sprint-cell:started:open:tickets">4<`,
+		`data-testid="sprint-cell:started:open:points">6<`,
+		`data-testid="sprint-cell:started:removed:tickets">0<`,
+		// Added cohort = DCAI-4(none, open) + DCAI-5(M, finished): Total 2 / 2pts.
+		`data-testid="sprint-cell:added:total:tickets">2<`,
+		`data-testid="sprint-cell:added:total:points">2<`,
+		`data-testid="sprint-cell:added:finished:tickets">1<`,
+		`data-testid="sprint-cell:added:finished:points">2<`,
+		`data-testid="sprint-cell:added:open:tickets">1<`,
+		// Total row.
+		`data-testid="sprint-cell:total:total:tickets">7<`,
+		`data-testid="sprint-cell:total:total:points">11<`,
+		`data-testid="sprint-cell:total:finished:tickets">2<`,
+		`data-testid="sprint-cell:total:finished:points">5<`,
 	}
 	for _, w := range wants {
 		if !strings.Contains(body, w) {
