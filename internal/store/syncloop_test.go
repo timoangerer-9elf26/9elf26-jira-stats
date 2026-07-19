@@ -62,6 +62,13 @@ func TestSyncerBackfillsThenIncrementallyPicksUpChanges(t *testing.T) {
 	if _, ok, err := st.LastSync(); err != nil || !ok {
 		t.Fatalf("last_sync not persisted after backfill (ok=%v err=%v)", ok, err)
 	}
+	// The cold-start backfill is NOT a full resync: it must not set last_full_resync
+	// (that stamp stays "never" until a user-triggered full resync).
+	if _, ok, err := st.LastFullResync(); err != nil {
+		t.Fatalf("last_full_resync read after backfill: %v", err)
+	} else if ok {
+		t.Errorf("cold-start backfill set last_full_resync; want it left unset")
+	}
 
 	// --- A newly-changed issue: DCAI-2 advances to In Progress, adding a new
 	// changelog entry. The incremental fetch also re-reports the existing t2

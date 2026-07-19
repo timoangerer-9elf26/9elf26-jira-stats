@@ -112,15 +112,21 @@ func TestResyncTriggersRebuildAtHTTPSeam(t *testing.T) {
 		t.Errorf("projection not rebuilt: count %d did not grow past the single stale row", count)
 	}
 
-	// Once settled, the status endpoint reports the idle (synced) state.
-	if statusBody := get(t, ts.URL+"/resync/status"); !strings.Contains(statusBody, `data-testid="resync-idle"`) {
-		t.Errorf("GET /resync/status not idle after completion:\n%s", statusBody)
+	// Once settled, the status endpoint no longer reports the running state and the
+	// tooltip's last-full-resync flips from "never" to a relative time.
+	statusBody := get(t, ts.URL+"/resync/status")
+	if strings.Contains(statusBody, `data-testid="resync-running"`) {
+		t.Errorf("GET /resync/status still running after completion:\n%s", statusBody)
+	}
+	if strings.Contains(statusBody, `<span data-testid="resync-last-full">never</span>`) {
+		t.Errorf("last full resync still \"never\" after a successful resync:\n%s", statusBody)
 	}
 }
 
 // TestResyncButtonIsIconWithTooltip asserts the resync control renders as an
-// inline-SVG refresh icon (no text label) carrying the "Resync full database"
-// tooltip as a native title plus a matching accessible name (#67).
+// inline-SVG refresh icon (no text label) with an accessible name, and that the
+// old native "Resync full database" title tooltip is gone (replaced by the
+// CSS hover/focus tooltip fragment) (#82).
 func TestResyncButtonIsIconWithTooltip(t *testing.T) {
 	app := newTestApp(t, jira.NewFakeClient())
 	body := get(t, app.URL+"/sprint")
@@ -132,10 +138,7 @@ func TestResyncButtonIsIconWithTooltip(t *testing.T) {
 	if strings.Contains(button, ">Resync</button>") {
 		t.Errorf("resync button still renders the text label instead of an icon:\n%s", button)
 	}
-	if !strings.Contains(button, `title="Resync full database"`) {
-		t.Errorf("resync button missing the native title tooltip:\n%s", button)
-	}
-	if !strings.Contains(button, `aria-label="Resync full database"`) {
+	if !strings.Contains(button, `aria-label=`) {
 		t.Errorf("resync button missing an accessible name:\n%s", button)
 	}
 	// No CDN/icon-font dependency — the icon must be inline SVG.
@@ -144,13 +147,80 @@ func TestResyncButtonIsIconWithTooltip(t *testing.T) {
 	}
 }
 
-// TestResyncControlKeepsFreshnessLabel asserts the "Synced …" data-freshness
-// label still renders next to the icon once the projection has been synced (#67).
-func TestResyncControlKeepsFreshnessLabel(t *testing.T) {
+// TestResyncNoFreshnessLabel asserts the old "Synced … ago" data-freshness label
+// (MAX(synced_at)) is gone from the resync control fragment, replaced by the
+// tooltip with the two dedicated timestamps and the button explanation (#82).
+func TestResyncNoFreshnessLabel(t *testing.T) {
 	app := newTestApp(t, jira.NewFakeClient())
 	status := get(t, app.URL+"/resync/status")
-	if !strings.Contains(status, `data-testid="resync-idle"`) || !strings.Contains(status, "Synced ") {
-		t.Errorf("freshness label missing after a sync:\n%s", status)
+
+	if strings.Contains(status, "Synced ") || strings.Contains(status, "Not synced yet") {
+		t.Errorf("data-freshness label still present; want it removed:\n%s", status)
+	}
+	for _, want := range []string{
+		`data-testid="resync-tooltip"`,
+		`data-testid="resync-last-full"`,
+		`data-testid="resync-last-incremental"`,
+		`data-testid="resync-explain"`,
+	} {
+		if !strings.Contains(status, want) {
+			t.Errorf("resync tooltip missing %q:\n%s", want, status)
+		}
+	}
+}
+
+// TestResyncTooltipNeverThenRelativeTimes asserts the tooltip reads "never" for
+// the last full resync before any has run and shows the two relative times once
+// both timestamps are recorded — rendered against a pinned clock so the labels
+// are deterministic (#82).
+func TestResyncTooltipNeverThenRelativeTimes(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	now := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	srv, err := web.NewServer(st, web.WithClock(func() time.Time { return now }))
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	// Before any full resync: last full resync reads "never".
+	before := get(t, ts.URL+"/resync/status")
+	if !strings.Contains(before, `<span data-testid="resync-last-full">never</span>`) {
+		t.Errorf("last full resync should read \"never\" before the first one:\n%s", before)
+	}
+
+	// Record both heartbeats and re-read: relative times appear.
+	if err := st.SetLastFullResync(now.Add(-3 * time.Hour)); err != nil {
+		t.Fatalf("set last full resync: %v", err)
+	}
+	if err := st.SetLastSync(now.Add(-45 * time.Second)); err != nil {
+		t.Fatalf("set last sync: %v", err)
+	}
+	after := get(t, ts.URL+"/resync/status")
+	if !strings.Contains(after, `<span data-testid="resync-last-full">3h ago</span>`) {
+		t.Errorf("last full resync should read \"3h ago\":\n%s", after)
+	}
+	if !strings.Contains(after, `<span data-testid="resync-last-incremental">45s ago</span>`) {
+		t.Errorf("last incremental sync should read \"45s ago\":\n%s", after)
+	}
+}
+
+// TestResyncControlAlwaysPolls asserts the control fragment self-refreshes even
+// when idle (always-on poll ~30s), not only while a resync runs (#82).
+func TestResyncControlAlwaysPolls(t *testing.T) {
+	app := newTestApp(t, jira.NewFakeClient())
+	status := get(t, app.URL+"/resync/status")
+	if !strings.Contains(status, `data-testid="resync-poll"`) {
+		t.Errorf("idle fragment missing the always-on poller:\n%s", status)
+	}
+	if !strings.Contains(status, "hx-get=\"/resync/status\"") {
+		t.Errorf("idle poller does not target /resync/status:\n%s", status)
 	}
 }
 

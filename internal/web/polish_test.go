@@ -115,7 +115,10 @@ func (failingRollups) SprintCategoriesInWindow(_ int, _, _ time.Time) (store.Spr
 func (failingRollups) SprintCellIssues(_ int, _, _ time.Time, _ store.SprintCohortSel, _ store.SprintOutcomeSel) ([]store.SprintCellIssue, error) {
 	return nil, errBoom
 }
-func (failingRollups) LastSyncedAt() (time.Time, bool, error) {
+func (failingRollups) LastFullResync() (time.Time, bool, error) {
+	return time.Time{}, false, errBoom
+}
+func (failingRollups) LastSync() (time.Time, bool, error) {
 	return time.Time{}, false, errBoom
 }
 func (failingRollups) ActiveSprintWindow() (store.ActiveSprint, bool, error) {

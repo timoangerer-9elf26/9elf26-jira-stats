@@ -26,27 +26,81 @@
 </nav>
 {{end}}
 
-{{/* resync-control is the shared full-resync widget in the nav: a status label
-     that lazy-loads its state (and self-polls while a resync runs) plus the
-     button that POSTs /resync to trigger a background rebuild of the projection.
-     A resync already running is a safe no-op. The button posts via HTMX and
-     swaps the status label with the returned "resync running…" fragment, which
-     then polls itself to completion. */}}
+{{/* resync-control is the shared full-resync widget in the nav: the button that
+     POSTs /resync to trigger a full resync (a background wipe-and-rebuild of the
+     projection from Jira) plus a hover/focus TOOLTIP on it showing the sync
+     state (last full resync / last incremental sync / an in-progress line). A
+     resync already running is a safe no-op. The tooltip and running/idle state
+     live in the #resync-status fragment, which lazy-loads on page load and then
+     self-refreshes on an always-on poll (~30s idle, ~1.5s running) WITHOUT a
+     full page reload, so the timestamps stay fresh and the spinner clears on its
+     own once a resync finishes. There is no text status label anymore — the old
+     "Synced … ago" data-freshness label (MAX(synced_at)) is gone (#82).
+
+     The tooltip uses the same CSS-only ~200ms hover/focus reveal as the Sprint
+     info icons (#78), no JS and no Tailwind rebuild. The control sits at the top
+     RIGHT of the nav, so the tip is right-aligned to the button and opens
+     leftward+downward (right: 0) to avoid clipping off the viewport's right edge
+     (the #83 lesson). */}}
 {{define "resync-control"}}
 <style>
   @keyframes resync-spin { to { transform: rotate(360deg); } }
-  /* While the polled status reports a resync in flight, spin the icon. */
+  [data-resync-control] { position: relative; }
+  /* While the polled status reports a resync in flight, spin the icon and
+     disable the button (no JS: pointer-events off + a dimmed, not-allowed look).
+     Keyed off the running hook the poll swaps in. */
   [data-resync-control]:has([data-testid="resync-running"]) [data-testid="resync-button"] svg {
     animation: resync-spin 1s linear infinite;
   }
+  [data-resync-control]:has([data-testid="resync-running"]) [data-testid="resync-button"] {
+    pointer-events: none;
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  /* resync-tip: the button's hover/focus tooltip (same mechanism as sprint-help).
+     Right-aligned to the control and opening downward so it never clips the
+     viewport's right edge. */
+  .resync-tip {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    left: auto;
+    z-index: 20;
+    width: max-content;
+    max-width: 18rem;
+    padding: 0.5rem 0.625rem;
+    border-radius: 0.375rem;
+    background: #0f172a; /* slate-900 */
+    color: #f8fafc;      /* slate-50 */
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.35;
+    text-align: left;
+    white-space: normal;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.12s ease, visibility 0.12s ease;
+    transition-delay: 0s; /* hide immediately */
+  }
+  .resync-tip__label { color: #94a3b8; } /* slate-400 */
+  .resync-tip__explain { margin-top: 0.375rem; color: #cbd5e1; } /* slate-300 */
+  [data-resync-control]:hover .resync-tip,
+  [data-resync-control]:focus-within .resync-tip {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: 200ms; /* reveal after ~200ms, matching the Sprint icons */
+  }
 </style>
-<div data-resync-control class="flex items-center gap-3">
+<div data-resync-control class="flex items-center">
+  {{/* #resync-status carries the tooltip content and the always-on poller. It
+       lazy-loads once on page load, then each swapped-in fragment re-arms the
+       poll (idle ~30s / running ~1.5s), so the tooltip refreshes without a page
+       reload. */}}
   <span id="resync-status" data-testid="resync-status"
-        hx-get="/resync/status" hx-trigger="load" hx-swap="innerHTML"
-        class="text-xs text-slate-400"></span>
+        hx-get="/resync/status" hx-trigger="load" hx-swap="innerHTML"></span>
   <form hx-post="/resync" hx-target="#resync-status" hx-swap="innerHTML" hx-disabled-elt="find button">
-    <button type="submit" data-testid="resync-button"
-            title="Resync full database" aria-label="Resync full database"
+    <button type="submit" data-testid="resync-button" aria-label="Run a full resync"
             class="inline-flex items-center rounded-md border border-slate-200 px-3 py-1.5 text-slate-600 transition-colors hover:bg-slate-50">
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -58,19 +112,25 @@
 </div>
 {{end}}
 
-{{/* resync-status is the resync progress label. While a resync runs it shows a
-     "Resyncing…" note and self-polls GET /resync/status until it finishes; when
-     idle it shows how fresh the projection is (last synced), or a "not synced
-     yet" note on a cold store. Takes a resyncStatusView. */}}
+{{/* resync-status is the resync control fragment: the button's tooltip plus the
+     always-on poller (and, while a resync runs, the running hook the spin/disable
+     CSS keys off). The tooltip shows the last full resync ("never" until the
+     first user-triggered one), the last incremental-sync heartbeat, an
+     in-progress line while a resync runs, and what the button does. The poller
+     re-arms every swap: ~1.5s while running (so the spinner clears promptly once
+     it finishes) and ~30s when idle (so the relative times stay current) — all
+     without a full page reload. Takes a resyncStatusView. */}}
 {{define "resync-status"}}
-{{if .Running}}
-<span data-testid="resync-running" class="text-amber-800"
-      hx-get="/resync/status" hx-trigger="load delay:1500ms" hx-target="#resync-status" hx-swap="innerHTML">Resyncing…</span>
-{{else if .HasSynced}}
-<span data-testid="resync-idle">Synced {{.SyncedAgo}}</span>
-{{else}}
-<span data-testid="resync-idle">Not synced yet</span>
-{{end}}
+{{if .Running}}<span data-testid="resync-running" hidden></span>{{end}}
+<span data-testid="resync-poll"
+      hx-get="/resync/status" hx-trigger="load delay:{{if .Running}}1500ms{{else}}30s{{end}}"
+      hx-target="#resync-status" hx-swap="innerHTML" hidden></span>
+<span class="resync-tip" data-testid="resync-tooltip" role="tooltip">
+  {{if .Running}}<div data-testid="resync-inprogress" style="color:#fcd34d">Full resync in progress…</div>{{end}}
+  <div><span class="resync-tip__label">Last full resync:</span> <span data-testid="resync-last-full">{{.FullResyncAgo}}</span></div>
+  <div><span class="resync-tip__label">Last incremental sync:</span> <span data-testid="resync-last-incremental">{{.IncrementalAgo}}</span></div>
+  <div class="resync-tip__explain" data-testid="resync-explain">Runs a full resync: clears and rebuilds the database from Jira.</div>
+</span>
 {{end}}
 
 {{/* nav-link is one tab of the shared nav. Takes a dict of Href, Label, Key and

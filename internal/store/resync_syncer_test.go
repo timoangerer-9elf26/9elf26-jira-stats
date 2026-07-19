@@ -108,4 +108,8 @@ func TestTriggerResyncRebuildsProjectionAndGuardsOverlap(t *testing.T) {
 	if _, ok, err := st.LastSync(); err != nil || !ok {
 		t.Fatalf("last_sync not recorded after resync (ok=%v err=%v)", ok, err)
 	}
+	// A successful full resync records the dedicated last_full_resync stamp.
+	if _, ok, err := st.LastFullResync(); err != nil || !ok {
+		t.Fatalf("last_full_resync not recorded after resync (ok=%v err=%v)", ok, err)
+	}
 }

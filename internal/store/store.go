@@ -255,8 +255,17 @@ func sprintActivatedTx(tx *sql.Tx, sprintID int) (time.Time, bool, error) {
 }
 
 // lastSyncKey is the meta row holding the RFC3339 UTC timestamp of the most
-// recent successful sync cycle.
+// recent successful sync cycle — the incremental-sync heartbeat (CONTEXT.md →
+// Sync). It bounds the incremental query and is surfaced as the "last
+// incremental sync" time.
 const lastSyncKey = "last_sync"
+
+// lastFullResyncKey is the meta row holding the RFC3339 UTC timestamp of the
+// most recent successful, user-triggered FULL RESYNC (CONTEXT.md → Sync). It is
+// written only by Syncer.resync on success — never by the cold-start backfill —
+// so it reads "never" until the first manual full resync, and it deliberately
+// SURVIVES Reset (a full resync is Reset then re-backfill then set this).
+const lastFullResyncKey = "last_full_resync"
 
 // Sprint is a stored board sprint entity: its identity, state, and lifecycle
 // instants. ActivatedAt is the window-start instant (Jira has no activatedDate,
@@ -527,6 +536,38 @@ func (s *Store) SetLastSync(t time.Time) error {
 	return nil
 }
 
+// LastFullResync returns the timestamp of the last successful full resync. ok is
+// false until the first user-triggered full resync completes (the cold-start
+// backfill does not set it), so a fresh — or never-fully-resynced — store reads
+// "never". Mirrors LastSync.
+func (s *Store) LastFullResync() (t time.Time, ok bool, err error) {
+	var v string
+	switch err = s.db.QueryRow(`SELECT value FROM meta WHERE key = ?`, lastFullResyncKey).Scan(&v); {
+	case errors.Is(err, sql.ErrNoRows):
+		return time.Time{}, false, nil
+	case err != nil:
+		return time.Time{}, false, fmt.Errorf("read last_full_resync: %w", err)
+	}
+	t, err = time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("parse last_full_resync %q: %w", v, err)
+	}
+	return t, true, nil
+}
+
+// SetLastFullResync records the completion instant of a successful full resync
+// (stored UTC). Called only by Syncer.resync on success. Mirrors SetLastSync.
+func (s *Store) SetLastFullResync(t time.Time) error {
+	if _, err := s.db.Exec(
+		`INSERT INTO meta (key, value) VALUES (?, ?)
+		 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+		lastFullResyncKey, t.UTC().Format(time.RFC3339),
+	); err != nil {
+		return fmt.Errorf("set last_full_resync: %w", err)
+	}
+	return nil
+}
+
 // Reset empties the whole rebuildable projection: every issue snapshot, the
 // status- and sprint-membership transition logs, the sprint entities, and the
 // last_sync bookkeeping row. It backs the full-resync button (#52): after Reset
@@ -534,8 +575,10 @@ func (s *Store) SetLastSync(t time.Time) error {
 // changelog history and sprints from Jira. Child tables are deleted before the
 // issue table they reference (foreign keys are not enforced on the connection),
 // and the whole wipe runs in one transaction so a resync never observes a
-// half-cleared projection. Other meta rows (none today) are preserved; only
-// last_sync is removed so the cold-store re-backfill path is taken.
+// half-cleared projection. Only last_sync is removed so the cold-store
+// re-backfill path is taken; every other meta row is preserved — crucially the
+// last_full_resync stamp, which MUST survive Reset since a full resync is Reset
+// then re-backfill then record last_full_resync.
 func (s *Store) Reset() error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -557,7 +600,7 @@ func (s *Store) Reset() error {
 	}
 	// Only last_sync is cleared (parameterized, matching the other meta queries)
 	// so the next cycle takes the cold-store re-backfill path; any other meta rows
-	// are preserved.
+	// — notably last_full_resync — are preserved.
 	if _, err := tx.Exec(`DELETE FROM meta WHERE key = ?`, lastSyncKey); err != nil {
 		return fmt.Errorf("reset last_sync: %w", err)
 	}
@@ -735,23 +778,6 @@ func workflowLess(a, b string) bool {
 	default:
 		return a < b
 	}
-}
-
-// LastSyncedAt returns the most recent synced_at stamp across stored issue
-// snapshots — how fresh the projected data is. ok is false on an empty store.
-func (s *Store) LastSyncedAt() (t time.Time, ok bool, err error) {
-	var v sql.NullString
-	if err = s.db.QueryRow(`SELECT MAX(synced_at) FROM issue`).Scan(&v); err != nil {
-		return time.Time{}, false, fmt.Errorf("read last synced_at: %w", err)
-	}
-	if !v.Valid {
-		return time.Time{}, false, nil
-	}
-	t, err = time.Parse(time.RFC3339, v.String)
-	if err != nil {
-		return time.Time{}, false, fmt.Errorf("parse synced_at %q: %w", v.String, err)
-	}
-	return t, true, nil
 }
 
 // CompletedInRange tallies the work items whose completion falls in [from, to).

@@ -37,6 +37,12 @@ func TestResetClearsProjectionAndLastSync(t *testing.T) {
 	if err := st.SetLastSync(time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("set last sync: %v", err)
 	}
+	// A prior full resync stamp must SURVIVE Reset (a full resync is Reset then
+	// re-backfill then record last_full_resync — clearing it here would lose it).
+	fullResyncAt := time.Date(2026, 7, 12, 8, 0, 0, 0, time.UTC)
+	if err := st.SetLastFullResync(fullResyncAt); err != nil {
+		t.Fatalf("set last full resync: %v", err)
+	}
 
 	if err := st.Reset(); err != nil {
 		t.Fatalf("reset: %v", err)
@@ -51,5 +57,10 @@ func TestResetClearsProjectionAndLastSync(t *testing.T) {
 		t.Fatalf("last sync after reset: %v", err)
 	} else if ok {
 		t.Errorf("last_sync still present after Reset; want cleared")
+	}
+	if got, ok, err := st.LastFullResync(); err != nil {
+		t.Fatalf("last full resync after reset: %v", err)
+	} else if !ok || !got.Equal(fullResyncAt) {
+		t.Errorf("last_full_resync = (%v, ok=%v) after Reset; want it preserved as %v", got, ok, fullResyncAt)
 	}
 }
