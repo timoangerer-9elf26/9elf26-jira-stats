@@ -11,9 +11,8 @@ silently removes it from the counts.
 
 ## Views
 
-- **Now** (`/`) — a live board of open work by workflow status, each column
-  showing S / M / L / no-estimate counts and total points, plus a grand total.
-  Self-refreshes every ~30s.
+The root path `/` redirects to the **Sprint** view.
+
 - **Sprint** (`/sprint`) — the sprint-planning view: for the current active
   sprint over its own window **`[sprint start, now)`**, a three-category
   breakdown — **Started with** (open and in the sprint at its start, carry-overs
@@ -133,9 +132,8 @@ make dev                                      # watches + rebuilds on save
 
 Because the templates and CSS are **embedded** into the binary (`//go:embed`),
 they are parsed once at startup — so a template edit only appears after a
-rebuild, which is exactly what `make dev` triggers. Combined with the Now
-board's 30s browser poll, changes show up shortly after you save; other views
-update on the next reload. (A Tailwind class change still needs `make css` to
+rebuild, which is exactly what `make dev` triggers. Once air has rebuilt,
+changes show up on the next reload. (A Tailwind class change still needs `make css` to
 regenerate the committed `output.css`; air then rebuilds with it.)
 
 ## Testing

@@ -585,8 +585,8 @@ func scanTally(row interface{ Scan(...any) error }) (SizeTally, error) {
 const rollupTypes = `'Task', 'Bug', 'Story'`
 
 // openStatuses and doneStatuses are the authoritative DCAI status buckets — the
-// SINGLE source of truth for open/finished across every view (Now board,
-// Sprint, Velocity, Completed). They come straight from CONTEXT.md's "Ticket
+// SINGLE source of truth for open/finished across every view (Board, Sprint,
+// Velocity). They come straight from CONTEXT.md's "Ticket
 // status buckets", NOT from Jira's status_category, which does not match the
 // DCAI buckets: Jira categorizes Canceled as "Done" and Triage as "To Do", so a
 // category-based test would wrongly count Canceled as finished and Triage as
@@ -642,21 +642,6 @@ func statusInClause(statuses []string) (placeholders string, args []any) {
 		args[i] = normalizeStatus(st)
 	}
 	return placeholders, args
-}
-
-// StatusColumn is the tally of open work in a single workflow status — one
-// column of the "Now" board.
-type StatusColumn struct {
-	Status string
-	SizeTally
-}
-
-// OpenBoard is the "Now" view projection: open work tallied per open workflow
-// status (ordered by the workflow, unknown statuses last) plus a grand total
-// across every open status.
-type OpenBoard struct {
-	Columns []StatusColumn
-	Total   SizeTally
 }
 
 // workflowOrder is the FULL DCAI workflow left-to-right, the single source of
@@ -736,61 +721,6 @@ func workflowLess(a, b string) bool {
 	default:
 		return a < b
 	}
-}
-
-// OpenByStatus tallies open work items in the ACTIVE sprint per workflow
-// status. Open is a POSITIVE membership test against the authoritative
-// openStatuses bucket (case-insensitive) — NOT "status_category != 'Done'" —
-// so Triage (which Jira categorizes as "To Do"), Canceled, the Done statuses
-// and any unknown status are all excluded. It is restricted to the rollup issue
-// types Task/Bug/Story (Epics and Sub-tasks are stored but excluded) and to
-// issues in the active sprint (active_sprint IS NOT NULL); whole-project open
-// work outside the sprint is not shown. Columns are ordered by the known
-// workflow with unknown statuses last, and a grand total aggregates every open
-// status.
-func (s *Store) OpenByStatus() (OpenBoard, error) {
-	openIn, openArgs := statusInClause(openStatuses)
-	query := `
-		SELECT status, ` + sizeTallyColumns + `
-		FROM issue
-		WHERE LOWER(status) IN (` + openIn + `)
-		  AND type IN (` + rollupTypes + `)
-		  AND active_sprint IS NOT NULL
-		GROUP BY status`
-
-	rows, err := s.db.Query(query, openArgs...)
-	if err != nil {
-		return OpenBoard{}, fmt.Errorf("open by status: %w", err)
-	}
-	defer rows.Close()
-
-	var board OpenBoard
-	for rows.Next() {
-		var c StatusColumn
-		if err := rows.Scan(&c.Status, &c.S, &c.M, &c.L, &c.NoEstimate, &c.Points); err != nil {
-			return OpenBoard{}, fmt.Errorf("scan open status: %w", err)
-		}
-		board.Columns = append(board.Columns, c)
-		board.Total.S += c.S
-		board.Total.M += c.M
-		board.Total.L += c.L
-		board.Total.NoEstimate += c.NoEstimate
-		board.Total.Points += c.Points
-	}
-	if err := rows.Err(); err != nil {
-		return OpenBoard{}, fmt.Errorf("iterate open statuses: %w", err)
-	}
-
-	sortColumnsByWorkflow(board.Columns)
-	return board, nil
-}
-
-// sortColumnsByWorkflow orders columns by the known workflow; any status not in
-// the workflow sorts after the known ones, alphabetically among themselves.
-func sortColumnsByWorkflow(cols []StatusColumn) {
-	sort.SliceStable(cols, func(i, j int) bool {
-		return workflowLess(cols[i].Status, cols[j].Status)
-	})
 }
 
 // LastSyncedAt returns the most recent synced_at stamp across stored issue

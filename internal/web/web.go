@@ -34,7 +34,6 @@ var assetsFS embed.FS
 // synced store plus the data-freshness stamp. Keeping it an interface keeps the
 // HTTP seam testable and decoupled from the concrete store.
 type Rollups interface {
-	OpenByStatus() (store.OpenBoard, error)
 	CompletedInRange(from, to time.Time) (store.SizeTally, error)
 	// SprintCategoriesInWindow is the Sprint view's Started-with / Added / Finished
 	// breakdown for a sprint over [from, to), reconstructed from status and
@@ -173,7 +172,6 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.handleIndex)
-	s.mux.HandleFunc("GET /now/board", s.handleNowBoard)
 	s.mux.HandleFunc("GET /board", s.handleBoard)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
@@ -190,36 +188,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-// nowView is the "Now" page/fragment model: the open board scoped to the active
-// sprint, the active sprint's name (empty when none is known), plus a
-// human-readable data-freshness label.
-type nowView struct {
-	Board      store.OpenBoard
-	SprintName string
-	UpdatedAgo string
-}
-
-// handleIndex renders the full "Now" page.
+// handleIndex redirects the root path to the Sprint view. The Now view was
+// removed (#66); Sprint is the default landing page.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	s.renderNow(w, "index.html")
-}
-
-// handleNowBoard renders just the self-polling board fragment (the HTMX
-// refresh target).
-func (s *Server) handleNowBoard(w http.ResponseWriter, r *http.Request) {
-	s.renderNow(w, "now-board")
-}
-
-func (s *Server) renderNow(w http.ResponseWriter, name string) {
-	view, err := s.nowView()
-	if err != nil {
-		s.renderError(w)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, name, view); err != nil {
-		http.Error(w, "failed to render page", http.StatusInternalServerError)
-	}
+	http.Redirect(w, r, "/sprint", http.StatusFound)
 }
 
 // renderError renders the shared friendly error page for a failed rollup query,
@@ -233,32 +205,9 @@ func (s *Server) renderError(w http.ResponseWriter) {
 	}
 }
 
-func (s *Server) nowView() (nowView, error) {
-	board, err := s.rollups.OpenByStatus()
-	if err != nil {
-		return nowView{}, err
-	}
-	sprintName := ""
-	switch sprint, ok, err := s.rollups.ActiveSprintWindow(); {
-	case err != nil:
-		return nowView{}, err
-	case ok:
-		sprintName = sprint.Name
-	}
-	updated := "just now"
-	switch ago, ok, err := s.syncedAgo(); {
-	case err != nil:
-		return nowView{}, err
-	case ok:
-		updated = ago
-	}
-	return nowView{Board: board, SprintName: sprintName, UpdatedAgo: updated}, nil
-}
-
 // syncedAgo reports how long ago the projection was last synced as a compact
 // "Ns ago" label. ok is false on a never-synced (empty) store. It is the single
-// source of the data-freshness label shared by the Now heading and the resync
-// status widget.
+// source of the data-freshness label shown by the resync status widget.
 func (s *Server) syncedAgo() (string, bool, error) {
 	t, ok, err := s.rollups.LastSyncedAt()
 	if err != nil || !ok {
