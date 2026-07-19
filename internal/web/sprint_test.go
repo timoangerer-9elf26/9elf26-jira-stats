@@ -350,6 +350,25 @@ func TestSprintCohortOutcomeAsymmetryAndTooltips(t *testing.T) {
 	if !strings.Contains(body, "reprioritised-out adds are dropped") {
 		t.Errorf("Removed column tooltip should explain the asymmetry\n%s", body)
 	}
+	// Help markers render as an info icon (an inline SVG), not a plain `?`.
+	if !strings.Contains(body, `class="sprint-help"`) {
+		t.Errorf("help markers should use the sprint-help info-icon component\n%s", body)
+	}
+	if !strings.Contains(body, "<svg") {
+		t.Errorf("help markers should render an SVG info icon\n%s", body)
+	}
+	// The old bare-`?` marker must be gone.
+	if strings.Contains(body, `class="text-slate-400" title=`) || strings.Contains(body, `>?</span>`) {
+		t.Errorf("help markers should no longer be a plain `?` with a native title\n%s", body)
+	}
+	// The CSS tooltip reveals after ~200ms (clearly faster than the native delay).
+	if !strings.Contains(body, "200ms") {
+		t.Errorf("help tooltip should reveal on a ~200ms delay\n%s", body)
+	}
+	// The tooltip copy stays reachable for assistive tech via aria-label.
+	if !strings.Contains(body, `aria-label="Crossed into Done`) {
+		t.Errorf("help marker should keep an aria-label carrying the tooltip copy\n%s", body)
+	}
 }
 
 // TestSprintGraceWindowAcrossTwoSprints exercises the one-hour grace window (#65)
