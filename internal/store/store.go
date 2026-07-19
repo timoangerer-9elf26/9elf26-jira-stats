@@ -827,11 +827,12 @@ func doneCrossingClause() (query string, args []any) {
 // precedence, since the two sets are disjoint), and the two derived totals. Each
 // tally is at the ticket's CURRENT size.
 type SprintCategories struct {
-	// StartedWith is tickets open AND in the sprint at the window start — a
-	// snapshot (later removal/status change does not rewrite it).
+	// StartedWith is the active-sprint members at the grace-window end (sprint
+	// start + sprintGraceWindow), regardless of status — a snapshot (later
+	// removal/status change does not rewrite it).
 	StartedWith SizeTally
-	// Added is tickets that entered the sprint during the window (scope creep),
-	// regardless of status.
+	// Added is tickets whose first membership entry falls after the grace window
+	// (scope creep), regardless of status.
 	Added SizeTally
 	// FinishedFromStarted / FinishedFromAdded are the started-with / added tickets
 	// that also crossed into the Done set within the window.
@@ -851,16 +852,37 @@ const (
 	catAdded
 )
 
+// sprintGraceWindow is how long after a sprint's start a ticket may still join
+// and count as "Started with" rather than "Added" (#65). It absorbs the natural
+// rollover churn — carry-overs re-added, tickets created directly into the
+// sprint, last-minute pull-ins during planning — so only genuine later scope
+// creep lands in Added. The single source of the grace length; the Started-with
+// / Added anchor is `sprint start + sprintGraceWindow`.
+const sprintGraceWindow = time.Hour
+
+// firstEntryAfterSubquery selects the issues whose FIRST membership entry into a
+// sprint falls strictly after an instant — the "Added" predicate. Binds two args
+// in order: the sprint id and the RFC3339 instant (the grace-window end). A
+// ticket present at/before the instant (even one that later left and re-entered)
+// is excluded, since its earliest entering transition is not after the instant.
+const firstEntryAfterSubquery = `
+		SELECT issue_key FROM sprint_membership_transition
+		WHERE sprint_id = ? AND entered = 1
+		GROUP BY issue_key
+		HAVING MIN(transitioned_at) > ?`
+
 // SprintCategoriesInWindow computes the Sprint view's Started-with / Added /
 // Finished breakdown for the sprint with the given id over [from, to).
 //
-// Started-with = open (status ∈ openStatuses) AND in the sprint at the window
-// start, both reconstructed from history (statusAtSubquery / membersAtSubquery).
-// Added = in the sprint at the window end but NOT at the window start (entered
-// during the window; re-entry of a ticket already present at the start stays out
-// of Added). The two sets are disjoint by construction, so a ticket both added
-// and finished lands only under Added. Finished reuses the shared Done-crossing
-// detection (doneCrossingClause); the per-category and combined totals follow.
+// Started-with = the active-sprint members at the grace-window end (from +
+// sprintGraceWindow), regardless of status, reconstructed from membership history
+// (membersAtSubquery). Added = tickets whose first membership entry falls after
+// the grace window (firstEntryAfterSubquery). The grace window absorbs rollover
+// churn (carry-overs re-added, tickets created into the sprint, planning pull-ins)
+// so only genuine later scope creep is Added. The two sets are disjoint by
+// construction, so a ticket both added and finished lands only under Added.
+// Finished reuses the shared Done-crossing detection (doneCrossingClause) over the
+// full [from, to) window; the per-category and combined totals follow.
 func (s *Store) SprintCategoriesInWindow(sprintID int, from, to time.Time) (SprintCategories, error) {
 	var wc SprintCategories
 	var err error
@@ -892,26 +914,25 @@ func (s *Store) SprintCategoriesInWindow(sprintID int, from, to time.Time) (Spri
 func (s *Store) categoryTally(cat sprintCategory, sprintID int, from, to time.Time, finishedOnly bool) (SizeTally, error) {
 	fromStr := from.UTC().Format(time.RFC3339)
 	toStr := to.UTC().Format(time.RFC3339)
+	graceEndStr := from.Add(sprintGraceWindow).UTC().Format(time.RFC3339)
 
 	var joinSQL, whereSQL strings.Builder
 	var joinArgs, whereArgs []any
 
 	switch cat {
 	case catStartedWith:
-		// Open AND a member at the window start.
-		openIn, openArgs := statusInClause(openStatuses)
+		// Every active-sprint member at the grace-window end (sprint start +
+		// sprintGraceWindow), regardless of status — the capacity baseline. A
+		// snapshot: later removal or status change does not rewrite it, and there
+		// is no open-at-start gate, so a member with no status history still counts.
 		joinSQL.WriteString(` JOIN (` + membersAtSubquery + `) started_m ON started_m.issue_key = issue.key`)
-		joinArgs = append(joinArgs, sprintID, fromStr)
-		joinSQL.WriteString(` JOIN (` + statusAtSubquery + `) started_s ON started_s.issue_key = issue.key`)
-		joinArgs = append(joinArgs, fromStr)
-		whereSQL.WriteString(` AND LOWER(started_s.to_status) IN (` + openIn + `)`)
-		whereArgs = append(whereArgs, openArgs...)
+		joinArgs = append(joinArgs, sprintID, graceEndStr)
 	case catAdded:
-		// A member at the window end that was NOT a member at the window start.
-		joinSQL.WriteString(` JOIN (` + membersAtSubquery + `) added_m ON added_m.issue_key = issue.key`)
-		joinArgs = append(joinArgs, sprintID, toStr)
-		whereSQL.WriteString(` AND issue.key NOT IN (` + membersAtSubquery + `)`)
-		whereArgs = append(whereArgs, sprintID, fromStr)
+		// A ticket whose FIRST membership entry falls after the grace window
+		// (genuine scope creep). Re-entry of a ticket already present within the
+		// grace window stays out of Added, so the two categories are disjoint.
+		joinSQL.WriteString(` JOIN (` + firstEntryAfterSubquery + `) added_m ON added_m.issue_key = issue.key`)
+		joinArgs = append(joinArgs, sprintID, graceEndStr)
 	}
 
 	if finishedOnly {

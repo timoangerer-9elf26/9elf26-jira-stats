@@ -267,6 +267,68 @@ func TestSprintCarryOverLandsInStartedWithNotAdded(t *testing.T) {
 	}
 }
 
+// TestSprintGraceWindowAcrossTwoSprints exercises the one-hour grace window (#65)
+// in the two-consecutive-sprint (rollover) setting: KW29 is closed and KW30 is
+// the active sprint. Anchored on KW30's own start + 1h:
+//   - DCAI-CO carried over from KW29, re-joining KW30 within the grace hour →
+//     Started with (rollover churn absorbed, not scope creep).
+//   - DCAI-BORN created directly into KW30 at its start (no Sprint changelog) →
+//     Started with (synthetic membership at the start instant).
+//   - DCAI-LATE joins KW30 just AFTER the grace window → Added.
+func TestSprintGraceWindowAcrossTwoSprints(t *testing.T) {
+	loc := berlin(t)
+	start := time.Date(2026, time.July, 20, 9, 0, 0, 0, loc) // KW30 start
+	now := time.Date(2026, time.July, 22, 12, 0, 0, 0, loc)
+	inKW29 := time.Date(2026, time.July, 14, 9, 0, 0, 0, loc)
+	inGrace := start.Add(20 * time.Minute) // within KW30's first hour
+	afterGrace := start.Add(70 * time.Minute)
+
+	fake := &jira.FakeClient{
+		Sprints: []jira.Sprint{
+			{ID: 29, Name: "KW29", State: "closed", ActivatedAt: time.Date(2026, time.July, 13, 7, 0, 0, 0, time.UTC)},
+			{ID: 30, Name: "KW30", State: "active", ActivatedAt: start.UTC()},
+		},
+		Issues: []jira.Issue{
+			// Carry-over re-added inside the grace hour → Started with.
+			sprintIssue("DCAI-CO", "M", "In Progress", "KW30",
+				[]jira.ChangelogEntry{sprintStatus("co-s", "Ready To Do", "In Progress", inKW29)},
+				[]jira.SprintMembershipChange{
+					enteredSprintID("co-29", 29, "KW29", inKW29),
+					leftSprintID("co-29b", 29, "KW29", start),
+					enteredSprintID("co-30", 30, "KW30", inGrace),
+				}),
+			// Created directly into KW30 at its start → Started with (synthetic entry).
+			{
+				Key: "DCAI-BORN", Type: "Task", Summary: "born at start", Status: "In Progress",
+				StatusCategory: "In Progress", Size: "S",
+				ActiveSprint: "KW30", ActiveSprintID: 30, CreatedAt: start.UTC(),
+			},
+			// Joined just after the grace window → Added.
+			sprintIssue("DCAI-LATE", "L", "Ready To Do", "KW30",
+				nil,
+				[]jira.SprintMembershipChange{enteredSprintID("late-30", 30, "KW30", afterGrace)}),
+		},
+	}
+	app := newTestAppAt(t, fake, now)
+
+	body := get(t, app.URL+"/sprint/results")
+	wants := []string{
+		`data-testid="sprint-name">KW30<`,
+		// Started with = DCAI-CO (M) + DCAI-BORN (S): 2 tickets, 3 pts.
+		`data-testid="sprint-started:tickets">2<`,
+		`data-testid="sprint-started:points">3<`,
+		// Added = DCAI-LATE (L) only: 1 ticket, 3 pts.
+		`data-testid="sprint-added:tickets">1<`,
+		`data-testid="sprint-added:points">3<`,
+		`data-testid="sprint-total:tickets">3<`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(body, w) {
+			t.Errorf("grace window across two sprints wrong; missing %q\n%s", w, body)
+		}
+	}
+}
+
 // TestSprintIncludesTicketCreatedDirectlyIntoSprint is the #55 impact at the
 // view: a ticket created directly into the active sprint (its Sprint field set at
 // creation, so no "Sprint" changelog item and no SprintChanges) must still be
