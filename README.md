@@ -32,16 +32,17 @@ a re-sync, not real data.
 
 ## Full resync
 
-Every view carries a **Resync** button (top-right of the nav) that rebuilds the
-SQLite projection from Jira on demand: it clears the projection and re-runs the
-full backfill (all issues, complete changelog history, and sprints). Use it to
-heal data gaps or pick up past capture/schema fixes **without shell access** —
-it supersedes the old "stop the server, `rm jira-stats.db`, restart" step.
+Every view carries a **refresh-icon button** (top-right of the nav, tooltip
+"Resync full database") that rebuilds the SQLite projection from Jira on demand:
+it clears the projection and re-runs the full backfill (all issues, complete
+changelog history, and sprints). Use it to heal data gaps or pick up past
+capture/schema fixes **without shell access** — it supersedes the old "stop the
+server, `rm jira-stats.db`, restart" step.
 
-The rebuild runs in the background: clicking Resync returns immediately, the
-label shows **Resyncing…** while it runs (a full backfill takes ~15–30s against
-live Jira), and the views refresh on their own once it completes (the label then
-shows how fresh the data is). A resync already in progress is a safe no-op, and
+The rebuild runs in the background: clicking the icon returns immediately, the
+icon spins and the label shows **Resyncing…** while it runs (a full backfill
+takes ~15–30s against live Jira), and the views refresh on their own once it
+completes (the label then shows how fresh the data is). A resync already in progress is a safe no-op, and
 it never overlaps the periodic incremental sync. No confirmation is required —
 the data is fully rebuildable.
 

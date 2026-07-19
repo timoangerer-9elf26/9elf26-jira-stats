@@ -118,6 +118,83 @@ func TestResyncTriggersRebuildAtHTTPSeam(t *testing.T) {
 	}
 }
 
+// TestResyncButtonIsIconWithTooltip asserts the resync control renders as an
+// inline-SVG refresh icon (no text label) carrying the "Resync full database"
+// tooltip as a native title plus a matching accessible name (#67).
+func TestResyncButtonIsIconWithTooltip(t *testing.T) {
+	app := newTestApp(t, jira.NewFakeClient())
+	body := get(t, app.URL+"/sprint")
+
+	button := resyncButtonMarkup(t, body)
+	if !strings.Contains(button, "<svg") {
+		t.Errorf("resync button is not an inline SVG icon:\n%s", button)
+	}
+	if strings.Contains(button, ">Resync</button>") {
+		t.Errorf("resync button still renders the text label instead of an icon:\n%s", button)
+	}
+	if !strings.Contains(button, `title="Resync full database"`) {
+		t.Errorf("resync button missing the native title tooltip:\n%s", button)
+	}
+	if !strings.Contains(button, `aria-label="Resync full database"`) {
+		t.Errorf("resync button missing an accessible name:\n%s", button)
+	}
+	// No CDN/icon-font dependency — the icon must be inline SVG.
+	if strings.Contains(body, "font-awesome") || strings.Contains(body, "cdn.") {
+		t.Errorf("resync icon must be inline SVG, not a CDN/icon-font:\n%s", body)
+	}
+}
+
+// TestResyncControlKeepsFreshnessLabel asserts the "Synced …" data-freshness
+// label still renders next to the icon once the projection has been synced (#67).
+func TestResyncControlKeepsFreshnessLabel(t *testing.T) {
+	app := newTestApp(t, jira.NewFakeClient())
+	status := get(t, app.URL+"/resync/status")
+	if !strings.Contains(status, `data-testid="resync-idle"`) || !strings.Contains(status, "Synced ") {
+		t.Errorf("freshness label missing after a sync:\n%s", status)
+	}
+}
+
+// TestResyncIconSpinWiredToRunningState guards the static CSS wiring that makes
+// the icon spin while a resync runs: a rotate keyframe, plus a single rule that
+// ties the running fragment (data-testid="resync-running") to the button's svg
+// via an animation. It cannot observe the runtime spin itself (CSS applied to a
+// swapped-in DOM state) — that is verified live in acceptance-review; this only
+// asserts the wiring ships and stays keyed off the running state (#67).
+func TestResyncIconSpinWiredToRunningState(t *testing.T) {
+	app := newTestApp(t, jira.NewFakeClient())
+	body := get(t, app.URL+"/sprint")
+
+	if !strings.Contains(body, "@keyframes") {
+		t.Errorf("no spin keyframes shipped with the resync control:\n%s", body)
+	}
+	// One rule must connect the running-state hook to the button icon's animation;
+	// assert the whole selector→animation shape, not three incidental substrings.
+	style := body
+	if i := strings.Index(style, "<style>"); i >= 0 {
+		style = style[i:]
+	}
+	rule := `[data-resync-control]:has([data-testid="resync-running"]) [data-testid="resync-button"] svg {
+    animation: resync-spin`
+	if !strings.Contains(style, rule) {
+		t.Errorf("icon spin is not wired from the running state to the button svg animation:\n%s", style)
+	}
+}
+
+// resyncButtonMarkup returns the <button data-testid="resync-button" …>…</button>
+// substring of body, failing the test if it is absent.
+func resyncButtonMarkup(t *testing.T, body string) string {
+	t.Helper()
+	start := strings.Index(body, `<button type="submit" data-testid="resync-button"`)
+	if start < 0 {
+		t.Fatalf("resync button not found in body:\n%s", body)
+	}
+	end := strings.Index(body[start:], "</button>")
+	if end < 0 {
+		t.Fatalf("resync button not closed in body:\n%s", body)
+	}
+	return body[start : start+end+len("</button>")]
+}
+
 func readAll(t *testing.T, resp *http.Response) string {
 	t.Helper()
 	defer resp.Body.Close()
