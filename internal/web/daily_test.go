@@ -455,6 +455,32 @@ func TestDailyDigestAbsentWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestDailyControlsLayout: the controls bar renders the presets in chronological
+// display order (weekday-named day-before → Yesterday → Today), followed by the
+// From/Until inputs, with the Assignee dropdown pushed to the far right (it comes
+// last in the DOM and carries an auto left-margin).
+func TestDailyControlsLayout(t *testing.T) {
+	client, now := dailyFixture(t)
+	app := newTestAppAt(t, client, now)
+
+	body := get(t, app.URL+"/daily")
+
+	// day-before (Tue 14 -> "Tuesday") then Yesterday then Today, left to right.
+	assertOrder(t,
+		body,
+		`data-testid="daily-preset:day-before-yesterday"`,
+		`data-testid="daily-preset:yesterday"`,
+		`data-testid="daily-preset:today"`,
+		`data-testid="daily-from"`,
+		`data-testid="daily-to"`,
+		`data-testid="daily-assignee"`,
+	)
+	// The Assignee control is right-aligned via an auto left-margin.
+	if !strings.Contains(body, `margin-left:auto`) {
+		t.Errorf("Assignee control should be pushed right with an auto left-margin:\n%s", body)
+	}
+}
+
 func TestDailyNavActive(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)

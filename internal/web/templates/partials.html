@@ -553,11 +553,17 @@
 {{end}}
 {{end}}
 
-{{/* daily-controls is the Daily selector: an assignee dropdown, three
-     working-day preset buttons (Today / Yesterday / day-before-yesterday) and a
-     custom From/Until datetime pair. It is one <form>; each control fires its own
+{{/* daily-controls is the Daily selector: a left group of three working-day
+     preset buttons (in chronological order: the weekday-named first day →
+     Yesterday → Today) and a custom From/Until datetime pair, plus an assignee
+     dropdown pushed to the far right. It is one <form>; each control fires its own
      HTMX GET that swaps the whole #daily-panel, so the controls always reflect the
      current selection.
+
+     The right-align (margin-left:auto) and the wider From/Until gap use inline
+     styles rather than Tailwind utilities: output.css is a precompiled build with
+     no ml-auto / gap-6 rule and can't be regenerated in the workspace. Keep them
+     inline unless the compiled CSS gains those utilities.
 
      Mode disambiguation is by which params the trigger sends. A preset button
      GETs ?preset=<key> (no from/to) → preset mode. Editing From/Until GETs
@@ -573,17 +579,6 @@
       hx-swap="innerHTML"
       class="mt-8 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
   <input type="hidden" name="preset" value="{{range .Presets}}{{if .Selected}}{{.Key}}{{end}}{{end}}">
-  <label class="text-xs font-medium text-slate-500">
-    Assignee
-    <select name="assignee" data-testid="daily-assignee"
-            hx-get="/daily/results" hx-trigger="change"
-            hx-include="[name='preset'],[name='from'],[name='to']"
-            class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
-      {{range .Assignees}}
-      <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
-      {{end}}
-    </select>
-  </label>
   <fieldset data-testid="daily-presets" class="flex flex-wrap gap-2">
     {{range .Presets}}
     <button type="button" data-testid="daily-preset:{{.Key}}" title="{{.Title}}"
@@ -597,7 +592,7 @@
     </button>
     {{end}}
   </fieldset>
-  <div class="flex flex-wrap items-end gap-3">
+  <div class="flex flex-wrap items-end" style="gap:1.5rem">
     <label class="text-xs font-medium text-slate-500">
       From
       <input type="datetime-local" name="from" data-testid="daily-from" value="{{.CustomFrom}}"
@@ -613,6 +608,17 @@
              class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
     </label>
   </div>
+  <label class="text-xs font-medium text-slate-500" style="margin-left:auto">
+    Assignee
+    <select name="assignee" data-testid="daily-assignee"
+            hx-get="/daily/results" hx-trigger="change"
+            hx-include="[name='preset'],[name='from'],[name='to']"
+            class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
+      {{range .Assignees}}
+      <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+      {{end}}
+    </select>
+  </label>
 </form>
 {{end}}
 
