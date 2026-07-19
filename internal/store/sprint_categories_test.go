@@ -164,9 +164,10 @@ func TestSprintCategoriesCohortOutcome(t *testing.T) {
 // whole cohort × outcome table and from every cell drill-down. The test is by
 // CURRENT state, so a carry-over reopened this sprint re-enters the counts (Open,
 // or Finished if re-finished within the window). Covers three cases:
-//   (a) lingering carry-over still done at entry → in NO cell / drill-down
-//   (b) reopened carry-over → Open
-//   (c) reopened-and-re-finished carry-over → Finished
+//
+//	(a) lingering carry-over still done at entry → in NO cell / drill-down
+//	(b) reopened carry-over → Open
+//	(c) reopened-and-re-finished carry-over → Finished
 func TestSprintCategoriesPreFinishedCarryOver(t *testing.T) {
 	st := openTempStore(t)
 
