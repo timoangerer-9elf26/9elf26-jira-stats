@@ -180,7 +180,7 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		Assignee:          assigneeName(dto.Fields.Assignee),
 		AssigneeAvatarURL: assigneeAvatarURL(dto.Fields.Assignee),
 		ParentKey:         parentKey(dto.Fields.Parent),
-		EpicColor:         selectValue(dto.Fields.EpicColor),
+		EpicColor:         dto.Fields.EpicColor,
 		CreatedAt:         createdAt,
 		Creator:           assigneeName(dto.Fields.Creator),
 		Changelog:         entries,
@@ -275,7 +275,7 @@ type fieldsDTO struct {
 	Parent    *parentDTO   `json:"parent"`            // parent issue (the Epic for a Task/Bug/Story)
 	Size      *selectDTO   `json:"customfield_10040"` // "Estimated Time"
 	Sprint    []sprintDTO  `json:"customfield_10020"` // Sprint
-	EpicColor *selectDTO   `json:"customfield_10017"` // Epic "Issue color" (only on epics)
+	EpicColor string       `json:"customfield_10017"` // Epic "Issue color" — a plain string, e.g. "purple" (only on epics; empty/null otherwise)
 }
 
 type issueTypeDTO struct {
@@ -470,15 +470,6 @@ func parentKey(p *parentDTO) string {
 		return ""
 	}
 	return p.Key
-}
-
-// selectValue returns a single-select field's value, or "" when the field is
-// absent or explicitly null (Jira sends {"value": null} for an unset colour).
-func selectValue(sel *selectDTO) string {
-	if sel == nil {
-		return ""
-	}
-	return sel.Value
 }
 
 // toChangelog flattens history entries into the status- and Estimated-Time

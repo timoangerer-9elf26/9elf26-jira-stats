@@ -51,7 +51,7 @@ func TestToIssueParsesEpicColor(t *testing.T) {
         "issuetype": {"name": "Epic"},
         "status": {"name": "In Progress", "statusCategory": {"name": "In Progress"}},
         "assignee": null,
-        "customfield_10017": {"value": "dark_teal"},
+        "customfield_10017": "dark_teal",
         "customfield_10040": null,
         "customfield_10020": []
       },
