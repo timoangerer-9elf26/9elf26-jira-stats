@@ -555,12 +555,13 @@
 
 {{/* daily-controls is the Daily selector: a left group of three working-day
      preset buttons (in chronological order: the weekday-named first day →
-     Yesterday → Today) and a custom From/Until datetime pair, plus an assignee
-     dropdown pushed to the far right. It is one <form>; each control fires its own
-     HTMX GET that swaps the whole #daily-panel, so the controls always reflect the
-     current selection.
+     Yesterday → Today), then a right-aligned group holding the custom From/Until
+     datetime pair and the assignee dropdown, in the order From · Until · Assignee
+     (Assignee rightmost). It is one <form>; each control fires its own HTMX GET
+     that swaps the whole #daily-panel, so the controls always reflect the current
+     selection.
 
-     The right-align (margin-left:auto) and the wider From/Until gap use inline
+     The right-align (margin-left:auto) and the wider inter-control gap use inline
      styles rather than Tailwind utilities: output.css is a precompiled build with
      no ml-auto / gap-6 rule and can't be regenerated in the workspace. Keep them
      inline unless the compiled CSS gains those utilities.
@@ -592,7 +593,7 @@
     </button>
     {{end}}
   </fieldset>
-  <div class="flex flex-wrap items-end" style="gap:1.5rem">
+  <div class="flex flex-wrap items-end" style="margin-left:auto;gap:1.5rem">
     <label class="text-xs font-medium text-slate-500">
       From
       <input type="datetime-local" name="from" data-testid="daily-from" value="{{.CustomFrom}}"
@@ -607,18 +608,18 @@
              hx-include="[name='assignee'],[name='from'],[name='to']"
              class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
     </label>
+    <label class="text-xs font-medium text-slate-500">
+      Assignee
+      <select name="assignee" data-testid="daily-assignee"
+              hx-get="/daily/results" hx-trigger="change"
+              hx-include="[name='preset'],[name='from'],[name='to']"
+              class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
+        {{range .Assignees}}
+        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </label>
   </div>
-  <label class="text-xs font-medium text-slate-500" style="margin-left:auto">
-    Assignee
-    <select name="assignee" data-testid="daily-assignee"
-            hx-get="/daily/results" hx-trigger="change"
-            hx-include="[name='preset'],[name='from'],[name='to']"
-            class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
-      {{range .Assignees}}
-      <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
-      {{end}}
-    </select>
-  </label>
 </form>
 {{end}}
 
