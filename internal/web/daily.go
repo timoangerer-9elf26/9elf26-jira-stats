@@ -14,6 +14,14 @@ import (
 // timezone, e.g. "16 Jul 08:00".
 const dailyTimeFormat = "2 Jan 15:04"
 
+// dailyTitleFormat renders a preset button's concrete date for its hover title,
+// e.g. "Fri 17 Jul" — since "Yesterday" can actually resolve to Friday.
+const dailyTitleFormat = "Mon 2 Jan"
+
+// dailyInputFormat is the value layout of an HTML datetime-local input (minute
+// granularity, no timezone), used to parse and render the custom From/Until.
+const dailyInputFormat = "2006-01-02T15:04"
+
 // The Daily assignee-filter query values. "" is treated as "all". These are the
 // dropdown option values; a specific name is passed through verbatim.
 const (
@@ -21,23 +29,15 @@ const (
 	dailyAssigneeUnassigned = "unassigned"
 )
 
-// The two Daily window keys. "last-24h" is the default.
+// The three working-day preset keys. Each spans one whole calendar day
+// [00:00, next 00:00). Yesterday and day-before-yesterday walk back over
+// weekends to the most recent working days; Today is literal (disabled on a
+// weekend). See CONTEXT.md → Daily view and docs/adr/0003.
 const (
-	dailyWindowLast24h        = "last-24h"
-	dailyWindowSinceYesterday = "since-yesterday"
+	dailyPresetToday     = "today"
+	dailyPresetYesterday = "yesterday"
+	dailyPresetDayBefore = "day-before-yesterday"
 )
-
-// dailyWindowDef is one selectable window in the Daily controls.
-type dailyWindowDef struct {
-	Key   string
-	Label string
-}
-
-// dailyWindowDefs are the Daily window options, in display order.
-var dailyWindowDefs = []dailyWindowDef{
-	{dailyWindowLast24h, "Last 24h"},
-	{dailyWindowSinceYesterday, "Since yesterday"},
-}
 
 // dailyChangeView is one in-window status change on a card: "From → To" at a
 // display-timezone timestamp.
@@ -67,12 +67,30 @@ type dailyAssigneeOption struct {
 	Selected bool
 }
 
-// dailyWindowView is one window control, with Selected reflecting the current
-// choice.
-type dailyWindowView struct {
+// dailyPresetView is one working-day preset button: a stable Key for the URL and
+// testids, a display Label (the day-before button's is its full weekday name), a
+// Title showing the concrete date it maps to (hover disambiguation), plus
+// Selected (highlighted) and Disabled (Today on a weekend) flags.
+type dailyPresetView struct {
 	Key      string
 	Label    string
+	Title    string
 	Selected bool
+	Disabled bool
+}
+
+// dailyRangeResult is the resolved outcome of the Daily range controls: the
+// preset buttons (with the active one marked), the custom From/Until input
+// values (always pre-filled with the resolved bounds so editing one keeps the
+// other), the absolute [from, to) window, and an inline errMsg. When errMsg is
+// non-empty the range is invalid: from/to stay zero and no results are rendered.
+type dailyRangeResult struct {
+	presets    []dailyPresetView
+	customFrom string
+	customTo   string
+	from       time.Time
+	to         time.Time
+	errMsg     string
 }
 
 // dailyDigestTicketView is one ticket in a digest bucket: its key, resolved Jira
@@ -134,7 +152,10 @@ type dailyView struct {
 	SprintName string
 	HasSprint  bool
 	Assignees  []dailyAssigneeOption
-	Windows    []dailyWindowView
+	Presets    []dailyPresetView
+	CustomFrom string
+	CustomTo   string
+	RangeError string
 	Digest     dailyDigestView
 	Created    dailyCreatedView
 	Cards      []dailyCardView
@@ -147,8 +168,8 @@ func (s *Server) handleDaily(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDailyResults renders just the controls+results panel (the HTMX swap
-// target), so the selected assignee and window re-render to match the choice —
-// not only the results (cf. the Completed picker fix).
+// target), so the selected assignee and range controls re-render to match the
+// choice — not only the results (cf. the Completed picker fix).
 func (s *Server) handleDailyResults(w http.ResponseWriter, r *http.Request) {
 	s.renderDaily(w, r, "daily-panel")
 }
@@ -166,9 +187,8 @@ func (s *Server) renderDaily(w http.ResponseWriter, r *http.Request, name string
 }
 
 // dailyView resolves the request query into the page model: the assignee and
-// window controls (with the current selection marked) plus the matching cards.
+// range controls (with the current selection marked) plus the matching cards.
 func (s *Server) dailyView(q url.Values) (dailyView, error) {
-	windowKey := dailyWindowKey(q.Get("window"))
 	assigneeParam := q.Get("assignee")
 	if assigneeParam == "" {
 		// No explicit choice: default to the configured "me" (a display name), or
@@ -184,11 +204,11 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 	if hasSprint {
 		view.SprintName = sprint.Name
 	}
-	for _, wdef := range dailyWindowDefs {
-		view.Windows = append(view.Windows, dailyWindowView{
-			Key: wdef.Key, Label: wdef.Label, Selected: wdef.Key == windowKey,
-		})
-	}
+	rng := s.dailyRangeSelection(q, s.now())
+	view.Presets = rng.presets
+	view.CustomFrom = rng.customFrom
+	view.CustomTo = rng.customTo
+	view.RangeError = rng.errMsg
 
 	names, err := s.rollups.ActiveSprintAssignees()
 	if err != nil {
@@ -223,7 +243,14 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 		return view, nil
 	}
 
-	from, to := s.dailyRange(windowKey, s.now())
+	// An invalid custom range renders no results, no silent fallback: the inline
+	// error is shown and the digest / created / cards stay empty.
+	if rng.errMsg != "" {
+		view.Empty = true
+		return view, nil
+	}
+
+	from, to := rng.from, rng.to
 	tickets, err := s.rollups.DailyStatusChanges(dailyStoreAssignee(assigneeParam), from, to)
 	if err != nil {
 		return dailyView{}, err
@@ -350,38 +377,146 @@ func (s *Server) defaultAssignee() string {
 	return dailyAssigneeAll
 }
 
-// dailyRange resolves a window key to its absolute [from, to) bounds, computed
-// in the display timezone. "Last 24h" rolls back 24h from now; "Since yesterday"
-// runs from 00:00 of the last *working* day to now — walking back over weekends
-// so a Monday morning (and Sat/Sun) reaches Friday, not the prior calendar day.
-func (s *Server) dailyRange(windowKey string, now time.Time) (from, to time.Time) {
+// dailyRangeSelection resolves the Daily range controls from the request query,
+// computed in the display timezone. Precedence: a custom range (from/to present
+// with no preset param) is honoured verbatim, parsed and validated — an invalid
+// range yields an inline error and no window. Otherwise a working-day preset
+// drives the range; an absent/unknown preset falls back to the default (Today,
+// or Yesterday when Today is disabled on a weekend). The preset buttons are
+// always built (labels, concrete-date titles, disabled/selected flags) so the
+// controls render identically in either mode.
+func (s *Server) dailyRangeSelection(q url.Values, now time.Time) dailyRangeResult {
 	now = now.In(s.loc)
-	switch windowKey {
-	case dailyWindowSinceYesterday:
-		y, m, d := now.Date()
-		startToday := time.Date(y, m, d, 0, 0, 0, 0, s.loc)
-		from = startToday.AddDate(0, 0, -1)
-		for isWeekend(from.Weekday()) {
-			from = from.AddDate(0, 0, -1)
-		}
-		return from, now
-	default: // last-24h
-		return now.Add(-24 * time.Hour), now
+	y, m, d := now.Date()
+	todayStart := time.Date(y, m, d, 0, 0, 0, 0, s.loc)
+	yesterdayStart := mostRecentWorkingDayBefore(todayStart)
+	dayBeforeStart := mostRecentWorkingDayBefore(yesterdayStart)
+	todayDisabled := isWeekend(now.Weekday())
+
+	days := map[string]time.Time{
+		dailyPresetToday:     todayStart,
+		dailyPresetYesterday: yesterdayStart,
+		dailyPresetDayBefore: dayBeforeStart,
 	}
+
+	var res dailyRangeResult
+	selectedKey := ""
+
+	presetParam := q.Get("preset")
+	fromParam := q.Get("from")
+	toParam := q.Get("to")
+
+	// Custom mode only when no preset is requested and a From/Until was supplied.
+	if presetParam == "" && (fromParam != "" || toParam != "") {
+		from, to, errMsg := parseDailyRange(fromParam, toParam, s.loc)
+		if errMsg != "" {
+			// Echo the raw inputs so the invalid values stay visible to correct.
+			res.customFrom = fromParam
+			res.customTo = toParam
+			res.errMsg = errMsg
+		} else {
+			res.from, res.to = from, to
+			res.customFrom = from.Format(dailyInputFormat)
+			res.customTo = to.Format(dailyInputFormat)
+		}
+	} else {
+		selectedKey = normalizeDailyPreset(presetParam, todayDisabled)
+		day := days[selectedKey]
+		res.from = day
+		res.to = day.AddDate(0, 0, 1)
+		res.customFrom = res.from.Format(dailyInputFormat)
+		res.customTo = res.to.Format(dailyInputFormat)
+	}
+
+	// Build the three preset buttons in display order. The day-before button is
+	// labelled with its full weekday name; each carries its concrete date as a
+	// hover title.
+	res.presets = []dailyPresetView{
+		{
+			Key: dailyPresetToday, Label: "Today",
+			Title:    todayStart.Format(dailyTitleFormat),
+			Selected: selectedKey == dailyPresetToday,
+			Disabled: todayDisabled,
+		},
+		{
+			Key: dailyPresetYesterday, Label: "Yesterday",
+			Title:    yesterdayStart.Format(dailyTitleFormat),
+			Selected: selectedKey == dailyPresetYesterday,
+		},
+		{
+			Key: dailyPresetDayBefore, Label: dayBeforeStart.Format("Monday"),
+			Title:    dayBeforeStart.Format(dailyTitleFormat),
+			Selected: selectedKey == dailyPresetDayBefore,
+		},
+	}
+	return res
+}
+
+// normalizeDailyPreset resolves a requested preset key to a concrete selection.
+// An absent or unrecognised key defaults to Today; because Today is disabled on
+// a weekend, a Today selection (default or explicit) then falls back to
+// Yesterday — the most recent enabled preset — so a disabled Today is never the
+// active selection.
+func normalizeDailyPreset(param string, todayDisabled bool) string {
+	switch param {
+	case dailyPresetYesterday:
+		return dailyPresetYesterday
+	case dailyPresetDayBefore:
+		return dailyPresetDayBefore
+	default: // "today", "" or unknown
+		if todayDisabled {
+			return dailyPresetYesterday
+		}
+		return dailyPresetToday
+	}
+}
+
+// parseDailyRange parses and validates a custom From/Until pair in the display
+// timezone. Both must be present and parseable (datetime-local, or an ISO
+// variant with seconds/offset), and From must be strictly before Until;
+// otherwise it returns an inline error message and zero times (no fallback).
+func parseDailyRange(fromParam, toParam string, loc *time.Location) (from, to time.Time, errMsg string) {
+	from, okFrom := parseDailyInstant(fromParam, loc)
+	to, okTo := parseDailyInstant(toParam, loc)
+	if !okFrom || !okTo {
+		return time.Time{}, time.Time{}, "Enter both a valid From and Until date-time."
+	}
+	if !from.Before(to) {
+		return time.Time{}, time.Time{}, "From must be before Until."
+	}
+	return from, to, ""
+}
+
+// parseDailyInstant parses one custom range endpoint, accepting the
+// datetime-local input layout plus the common ISO variants the URL may carry.
+func parseDailyInstant(v string, loc *time.Location) (time.Time, bool) {
+	if v == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{dailyInputFormat, "2006-01-02T15:04:05", time.RFC3339} {
+		if t, err := time.ParseInLocation(layout, v, loc); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// mostRecentWorkingDayBefore returns the midnight of the most recent working day
+// strictly before dayStart, walking back over weekends (Sat/Sun) so the day
+// before a Monday is the preceding Friday.
+func mostRecentWorkingDayBefore(dayStart time.Time) time.Time {
+	d := dayStart.AddDate(0, 0, -1)
+	for isWeekend(d.Weekday()) {
+		d = d.AddDate(0, 0, -1)
+	}
+	return d
 }
 
 // isWeekend reports whether a weekday falls on the weekend (Sat/Sun), which the
-// "Since yesterday" window skips when reaching back to the last working day.
+// Yesterday / day-before presets skip when reaching back to a working day, and
+// which disables the literal Today preset.
 func isWeekend(d time.Weekday) bool {
 	return d == time.Saturday || d == time.Sunday
-}
-
-// dailyWindowKey normalizes a requested window, defaulting to Last 24h.
-func dailyWindowKey(v string) string {
-	if v == dailyWindowSinceYesterday {
-		return dailyWindowSinceYesterday
-	}
-	return dailyWindowLast24h
 }
 
 // dailyStoreAssignee maps a dropdown value to the store filter argument: "all"
