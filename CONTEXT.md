@@ -111,15 +111,23 @@ For the active sprint over its window `[sprint start, now)`, reported as a
 counts + a points sum, S=1/M=2/L=3, at the ticket's *current* size), and
 `Total = Open + Finished + Removed`.
 
+**Pre-finished carry-overs are excluded from the whole table** (every cohort,
+every outcome, every Total) and from every cell drill-down — see
+[Pre-finished carry-over](#pre-finished-carry-over). They were finished in a
+prior sprint and only linger because they are not yet Released; they are not this
+sprint's work (see `docs/adr/0002`).
+
 The **cohorts** (rows):
 
 - **Started with** — the active-sprint members at the end of the **grace window**
-  (`sprint start + 1h`), regardless of status. The capacity baseline, including
-  carry-overs (tickets pulled from the previous sprint at rollover), tickets
-  created directly into the sprint, and tickets moved in during the first hour.
-  There is no open-at-start gate — a member with no status history still counts.
+  (`sprint start + 1h`), regardless of status, **except pre-finished carry-overs**
+  (excluded). The capacity baseline, including still-unfinished carry-overs
+  (tickets pulled from the previous sprint at rollover), tickets created directly
+  into the sprint, and tickets moved in during the first hour. There is no
+  open-at-start gate — a member with no status history still counts.
 - **Added** — tickets whose **first** membership entry falls **after** the grace
-  window (genuine scope creep), regardless of status.
+  window (genuine scope creep), regardless of status, **except pre-finished
+  carry-overs** (excluded).
 - **Total** — the column-wise sum of Started with + Added.
 
 The **outcomes** (columns), over the window `[sprint start, now)`:
@@ -134,3 +142,17 @@ reprioritised out of the sprint counts under **Removed** — the baseline keeps 
 An **Added** ticket only reaches Removed when **cancelled**; one merely
 reprioritised out again is **dropped entirely** (it appears in no cell), so the
 Added row counts only scope creep that actually stuck or was explicitly killed.
+
+## Pre-finished carry-over
+
+A sprint member that is **currently in the finished bucket** yet **did not cross
+into it within this sprint's window** — i.e. its completion happened in a *prior*
+sprint and it lingers in the active sprint only because it isn't `Released /
+Deployed` yet. It is **not** this sprint's work, so it is excluded from the whole
+[Sprint view metrics](#sprint-view-metrics) table and every cell drill-down.
+
+The test is by *current* state, not status-at-start: a carry-over that is
+**reopened** and worked this sprint leaves the finished bucket and correctly
+re-enters the counts (as Open, or as Finished if it is re-finished within the
+window). Scope is the Sprint view only — the Board still shows these tickets in
+their status columns, and Velocity attributes their completion to the prior week.

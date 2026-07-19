@@ -35,6 +35,28 @@ status: accepted
 > honest (what we committed to and later lost) while stopping the Added row from
 > counting scope creep that never stuck. Each column header and the Started-with /
 > Added row labels carry a `?` with a native `title`/`aria-label` tooltip.
+>
+> **Amended by #87 (2026-07):** **pre-finished carry-overs** are excluded from the
+> whole cohort × outcome table (every cohort, every outcome, every Total) and from
+> every cell drill-down. A pre-finished carry-over is a sprint member that is
+> *currently* in the finished bucket yet *did not cross into it within the window* —
+> its completion happened in a prior sprint and it lingers in the active sprint only
+> because it isn't `Released / Deployed` yet. Previously such a ticket fell into
+> **Open** (the Open predicate excluded only in-window completions and
+> cancellations, not tickets that entered already done), inflating the baseline with
+> work that wasn't this sprint's. The exclusion is one predicate added to the shared
+> `sprintCellPredicate`, so the tally and the drill-down stay in lock-step.
+>
+> Two alternatives were rejected. **(a) Test by status *at sprint start*** rather
+> than current state would wrongly swallow a carry-over that is *reopened and
+> re-finished* this sprint (a real in-window completion) and needs status-at-instant
+> reconstruction; testing by *current* state keeps a reopened carry-over in the
+> counts (Open, or Finished if re-finished) — the truer picture. **(b) Dropping them
+> only from Open/Finished** but keeping them in the Totals breaks
+> `Total = Open + Finished + Removed` and still shows them in the Total drill-down;
+> full exclusion everywhere is the consistent choice. Scope is the Sprint view only
+> — the Board still lists these tickets in their status columns and Velocity
+> attributes their completion to the prior week.
 
 We repurpose the "Completed" view into a **Weekly** sprint-planning overview.
 For the active sprint over a selectable week window, it reports three
