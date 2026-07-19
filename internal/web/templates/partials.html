@@ -272,9 +272,14 @@
 {{define "sprint-results"}}
 <style>
   /* sprint-help styling — see the sprint-help define below for the marker markup
-     and rationale. The tip opens downward (top: 100%) on purpose: the table
-     wrapper is overflow-hidden for its rounded corners, so an upward tip on the
-     <thead> markers would be clipped. */
+     and rationale. The tip opens downward (top: 100%) on purpose: it keeps the
+     copy below the <thead> markers and away from the page chrome above the table.
+     The table wrapper is intentionally NOT overflow-hidden (its Total-row bottom
+     corners are rounded directly via inline radius instead), so tips are free to
+     extend past any table edge without being clipped by the wrapper. Markers in
+     the leftmost column (row labels) and rightmost column (the Total header) sit
+     close to the viewport edge, so a centred tip would overflow the window there;
+     those get an --start / --end modifier that anchors the tip to open inward. */
   .sprint-help {
     position: relative;
     display: inline-flex;
@@ -312,6 +317,11 @@
     transition: opacity 0.12s ease, visibility 0.12s ease;
     transition-delay: 0s; /* hide immediately */
   }
+  /* Edge markers: anchor the tip's inner edge to the marker so it opens inward
+     (rightward for the leftmost column, leftward for the rightmost) instead of
+     centring and overflowing the viewport. */
+  .sprint-help--start .sprint-help__tip { left: 0; right: auto; transform: none; }
+  .sprint-help--end .sprint-help__tip { left: auto; right: 0; transform: none; }
   .sprint-help:hover .sprint-help__tip,
   .sprint-help:focus-visible .sprint-help__tip {
     opacity: 1;
@@ -327,14 +337,15 @@
   {{if .Empty}}
   <p data-testid="sprint-empty" class="mt-4 text-sm text-slate-500">No work started or added in this sprint yet.</p>
   {{else}}
-  <div class="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+  <div class="mt-4 rounded-xl border border-slate-200 bg-white shadow-sm">
     <table class="w-full text-left text-sm" data-testid="sprint-table">
       <thead>
         <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400">
           <th class="px-4 py-3 font-medium">Category</th>
           {{range .Columns}}
           <th class="px-4 py-3 font-medium">{{.Label}}
-            {{template "sprint-help" (dict "Testid" (printf "sprint-col:%s:help" .Key) "Tooltip" .Tooltip)}}
+            {{$anchor := ""}}{{if eq .Key "total"}}{{$anchor = "end"}}{{end}}
+            {{template "sprint-help" (dict "Testid" (printf "sprint-col:%s:help" .Key) "Tooltip" .Tooltip "Anchor" $anchor)}}
           </th>
           {{end}}
         </tr>
@@ -358,11 +369,11 @@
 {{define "sprint-cohort-row"}}
 <tr data-testid="sprint-row:{{.Key}}"
     class="border-b border-slate-100 last:border-0 {{if eq .Key "total"}}bg-slate-50 font-semibold text-slate-900{{else}}text-slate-700{{end}}">
-  <td class="px-4 py-3">{{.Label}}{{if .Tooltip}}
-    {{template "sprint-help" (dict "Testid" (printf "sprint-row:%s:help" .Key) "Tooltip" .Tooltip)}}{{end}}
+  <td class="px-4 py-3"{{if eq .Key "total"}} style="border-bottom-left-radius:0.6875rem"{{end}}>{{.Label}}{{if .Tooltip}}
+    {{template "sprint-help" (dict "Testid" (printf "sprint-row:%s:help" .Key) "Tooltip" .Tooltip "Anchor" "start")}}{{end}}
   </td>
   {{range .Cells}}
-  <td class="px-4 py-3" data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}">
+  <td class="px-4 py-3" data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}"{{if and (eq $.Key "total") (eq .ColKey "total")}} style="border-bottom-right-radius:0.6875rem"{{end}}>
     <div class="tabular-nums">
       {{if .Tickets}}<a href="/sprint/cell?row={{.RowKey}}&amp;col={{.ColKey}}"
          data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:link"
@@ -388,7 +399,7 @@
      the visible tip is aria-hidden to avoid a double read. Takes a dict with
      "Testid" (the data-testid) and "Tooltip" (the copy). */}}
 {{define "sprint-help"}}
-<span data-testid="{{.Testid}}" class="sprint-help" tabindex="0" role="img" aria-label="{{.Tooltip}}">
+<span data-testid="{{.Testid}}" class="sprint-help{{if eq .Anchor "start"}} sprint-help--start{{else if eq .Anchor "end"}} sprint-help--end{{end}}" tabindex="0" role="img" aria-label="{{.Tooltip}}">
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <circle cx="12" cy="12" r="10"/>

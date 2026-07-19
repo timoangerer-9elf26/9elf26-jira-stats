@@ -369,6 +369,26 @@ func TestSprintCohortOutcomeAsymmetryAndTooltips(t *testing.T) {
 	if !strings.Contains(body, `aria-label="Crossed into Done`) {
 		t.Errorf("help marker should keep an aria-label carrying the tooltip copy\n%s", body)
 	}
+	// #83: markers at the table edges anchor their tip inward so it can't be
+	// clipped by the viewport. Row labels live in the leftmost column (open
+	// rightward); the Total header is the rightmost column (open leftward).
+	for _, w := range []string{
+		`data-testid="sprint-row:started:help" class="sprint-help sprint-help--start"`,
+		`data-testid="sprint-row:added:help" class="sprint-help sprint-help--start"`,
+		`data-testid="sprint-col:total:help" class="sprint-help sprint-help--end"`,
+	} {
+		if !strings.Contains(body, w) {
+			t.Errorf("edge help marker should anchor its tip inward; missing %q\n%s", w, body)
+		}
+	}
+	// The wrapper is no longer overflow-hidden (so tips escape it); the Total
+	// row instead rounds its own bottom corners so the fill keeps rounded corners.
+	if strings.Contains(body, `overflow-hidden rounded-xl`) {
+		t.Errorf("sprint table wrapper should not clip tips with overflow-hidden\n%s", body)
+	}
+	if !strings.Contains(body, "border-bottom-left-radius") || !strings.Contains(body, "border-bottom-right-radius") {
+		t.Errorf("Total row should round its own bottom corners once the wrapper stops clipping\n%s", body)
+	}
 }
 
 // TestSprintGraceWindowAcrossTwoSprints exercises the one-hour grace window (#65)
