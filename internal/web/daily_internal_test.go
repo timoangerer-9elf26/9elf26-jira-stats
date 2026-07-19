@@ -57,63 +57,71 @@ func TestDailyPresetResolutionEveryWeekday(t *testing.T) {
 	loc := s.loc
 
 	cases := []struct {
-		name          string
-		now           time.Time
-		wantToday     time.Time
-		wantYesterday time.Time
-		wantDayBefore time.Time
-		todayDisabled bool
+		name               string
+		now                time.Time
+		wantToday          time.Time
+		wantYesterday      time.Time
+		wantDayBefore      time.Time
+		wantYesterdayLabel string
+		todayDisabled      bool
 	}{
 		{
-			name:          "Monday walks back over the weekend",
-			now:           berlinDay(loc, 2026, time.July, 13).Add(8 * time.Hour), // Mon
-			wantToday:     berlinDay(loc, 2026, time.July, 13),                    // Mon
-			wantYesterday: berlinDay(loc, 2026, time.July, 10),                    // Fri
-			wantDayBefore: berlinDay(loc, 2026, time.July, 9),                     // Thu
+			name:               "Monday walks back over the weekend",
+			now:                berlinDay(loc, 2026, time.July, 13).Add(8 * time.Hour), // Mon
+			wantToday:          berlinDay(loc, 2026, time.July, 13),                    // Mon
+			wantYesterday:      berlinDay(loc, 2026, time.July, 10),                    // Fri
+			wantDayBefore:      berlinDay(loc, 2026, time.July, 9),                     // Thu
+			wantYesterdayLabel: "Friday",                                               // walk-back, not calendar yesterday
 		},
 		{
-			name:          "Tuesday",
-			now:           berlinDay(loc, 2026, time.July, 14).Add(9 * time.Hour), // Tue
-			wantToday:     berlinDay(loc, 2026, time.July, 14),                    // Tue
-			wantYesterday: berlinDay(loc, 2026, time.July, 13),                    // Mon
-			wantDayBefore: berlinDay(loc, 2026, time.July, 10),                    // Fri
+			name:               "Tuesday",
+			now:                berlinDay(loc, 2026, time.July, 14).Add(9 * time.Hour), // Tue
+			wantToday:          berlinDay(loc, 2026, time.July, 14),                    // Tue
+			wantYesterday:      berlinDay(loc, 2026, time.July, 13),                    // Mon
+			wantDayBefore:      berlinDay(loc, 2026, time.July, 10),                    // Fri
+			wantYesterdayLabel: "Yesterday",                                            // actual calendar yesterday
 		},
 		{
-			name:          "Wednesday",
-			now:           berlinDay(loc, 2026, time.July, 15).Add(9 * time.Hour), // Wed
-			wantToday:     berlinDay(loc, 2026, time.July, 15),                    // Wed
-			wantYesterday: berlinDay(loc, 2026, time.July, 14),                    // Tue
-			wantDayBefore: berlinDay(loc, 2026, time.July, 13),                    // Mon
+			name:               "Wednesday",
+			now:                berlinDay(loc, 2026, time.July, 15).Add(9 * time.Hour), // Wed
+			wantToday:          berlinDay(loc, 2026, time.July, 15),                    // Wed
+			wantYesterday:      berlinDay(loc, 2026, time.July, 14),                    // Tue
+			wantDayBefore:      berlinDay(loc, 2026, time.July, 13),                    // Mon
+			wantYesterdayLabel: "Yesterday",
 		},
 		{
-			name:          "Thursday",
-			now:           berlinDay(loc, 2026, time.July, 16).Add(9 * time.Hour), // Thu
-			wantToday:     berlinDay(loc, 2026, time.July, 16),                    // Thu
-			wantYesterday: berlinDay(loc, 2026, time.July, 15),                    // Wed
-			wantDayBefore: berlinDay(loc, 2026, time.July, 14),                    // Tue
+			name:               "Thursday",
+			now:                berlinDay(loc, 2026, time.July, 16).Add(9 * time.Hour), // Thu
+			wantToday:          berlinDay(loc, 2026, time.July, 16),                    // Thu
+			wantYesterday:      berlinDay(loc, 2026, time.July, 15),                    // Wed
+			wantDayBefore:      berlinDay(loc, 2026, time.July, 14),                    // Tue
+			wantYesterdayLabel: "Yesterday",
 		},
 		{
-			name:          "Friday",
-			now:           berlinDay(loc, 2026, time.July, 17).Add(9 * time.Hour), // Fri
-			wantToday:     berlinDay(loc, 2026, time.July, 17),                    // Fri
-			wantYesterday: berlinDay(loc, 2026, time.July, 16),                    // Thu
-			wantDayBefore: berlinDay(loc, 2026, time.July, 15),                    // Wed
+			name:               "Friday",
+			now:                berlinDay(loc, 2026, time.July, 17).Add(9 * time.Hour), // Fri
+			wantToday:          berlinDay(loc, 2026, time.July, 17),                    // Fri
+			wantYesterday:      berlinDay(loc, 2026, time.July, 16),                    // Thu
+			wantDayBefore:      berlinDay(loc, 2026, time.July, 15),                    // Wed
+			wantYesterdayLabel: "Yesterday",
 		},
 		{
-			name:          "Saturday disables Today, walks back to Friday",
-			now:           berlinDay(loc, 2026, time.July, 18).Add(9 * time.Hour), // Sat
-			wantToday:     berlinDay(loc, 2026, time.July, 18),                    // Sat
-			wantYesterday: berlinDay(loc, 2026, time.July, 17),                    // Fri
-			wantDayBefore: berlinDay(loc, 2026, time.July, 16),                    // Thu
-			todayDisabled: true,
+			name:               "Saturday disables Today, walks back to Friday",
+			now:                berlinDay(loc, 2026, time.July, 18).Add(9 * time.Hour), // Sat
+			wantToday:          berlinDay(loc, 2026, time.July, 18),                    // Sat
+			wantYesterday:      berlinDay(loc, 2026, time.July, 17),                    // Fri
+			wantDayBefore:      berlinDay(loc, 2026, time.July, 16),                    // Thu
+			wantYesterdayLabel: "Yesterday",                                            // Fri IS Sat's calendar yesterday
+			todayDisabled:      true,
 		},
 		{
-			name:          "Sunday disables Today, walks back to Friday",
-			now:           berlinDay(loc, 2026, time.July, 19).Add(9 * time.Hour), // Sun
-			wantToday:     berlinDay(loc, 2026, time.July, 19),                    // Sun
-			wantYesterday: berlinDay(loc, 2026, time.July, 17),                    // Fri
-			wantDayBefore: berlinDay(loc, 2026, time.July, 16),                    // Thu
-			todayDisabled: true,
+			name:               "Sunday disables Today, walks back to Friday",
+			now:                berlinDay(loc, 2026, time.July, 19).Add(9 * time.Hour), // Sun
+			wantToday:          berlinDay(loc, 2026, time.July, 19),                    // Sun
+			wantYesterday:      berlinDay(loc, 2026, time.July, 17),                    // Fri
+			wantDayBefore:      berlinDay(loc, 2026, time.July, 16),                    // Thu
+			wantYesterdayLabel: "Friday",                                               // walk-back over Sat, not calendar yesterday
+			todayDisabled:      true,
 		},
 	}
 
@@ -176,6 +184,12 @@ func TestDailyPresetResolutionEveryWeekday(t *testing.T) {
 			yest, _ := presetByKey(res, dailyPresetYesterday)
 			if want := tc.wantYesterday.Format(dailyTitleFormat); yest.Title != want {
 				t.Errorf("Yesterday title = %q, want %q", yest.Title, want)
+			}
+			// The Yesterday button reads "Yesterday" only when it resolves to the
+			// actual calendar yesterday; on a weekend walk-back it reads the full
+			// weekday name of the day it maps to (e.g. "Friday" on a Mon/Sun).
+			if yest.Label != tc.wantYesterdayLabel {
+				t.Errorf("Yesterday label = %q, want %q", yest.Label, tc.wantYesterdayLabel)
 			}
 		})
 	}

@@ -25,6 +25,15 @@ status: accepted
 > day) is what a standup wants. **Only the Today preset can be disabled** — walking
 > Yesterday/day-before back over weekends keeps them always-valid, so a Monday still
 > offers three useful days rather than greying two out.
+>
+> **Amended by #95 (2026-07):** the first label choice above is **reversed**. The
+> Yesterday button reads **"Yesterday"** only when the preset resolves to the actual
+> calendar yesterday; when it walks back over a weekend (Monday and Sunday) it reads
+> the **full weekday name** of the day it maps to (e.g. "Friday"), matching how the
+> day-before button is already labelled. So Tuesday–Friday and Saturday show
+> "Yesterday", while Monday and Sunday show "Friday". The concrete-date hover title
+> stays in both cases, and the range each preset drives plus its selected/disabled
+> behaviour are unchanged — only the visible label differs.
 
 We reshape the Daily view from a neutral per-assignee status-change browser into
 a personal morning overview centred on **me** (a single configured Jira display

@@ -428,6 +428,15 @@ func (s *Server) dailyRangeSelection(q url.Values, now time.Time) dailyRangeResu
 		res.customTo = res.to.Format(dailyInputFormat)
 	}
 
+	// The Yesterday button reads "Yesterday" only when the preset resolves to the
+	// actual calendar yesterday; when it walks back over a weekend (Mon/Sun) it
+	// reads the full weekday name of the day it maps to (e.g. "Friday"), matching
+	// how the day-before button is labelled. See docs/adr/0003 (amended by #95).
+	yesterdayLabel := "Yesterday"
+	if !yesterdayStart.Equal(todayStart.AddDate(0, 0, -1)) {
+		yesterdayLabel = yesterdayStart.Format("Monday")
+	}
+
 	// Build the three preset buttons in chronological display order: the
 	// weekday-named day-before button first, then Yesterday, then Today. The
 	// day-before button is labelled with its full weekday name; each carries its
@@ -439,7 +448,7 @@ func (s *Server) dailyRangeSelection(q url.Values, now time.Time) dailyRangeResu
 			Selected: selectedKey == dailyPresetDayBefore,
 		},
 		{
-			Key: dailyPresetYesterday, Label: "Yesterday",
+			Key: dailyPresetYesterday, Label: yesterdayLabel,
 			Title:    yesterdayStart.Format(dailyTitleFormat),
 			Selected: selectedKey == dailyPresetYesterday,
 		},
