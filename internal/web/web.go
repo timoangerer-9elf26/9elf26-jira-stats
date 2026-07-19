@@ -39,6 +39,11 @@ type Rollups interface {
 	// breakdown for a sprint over [from, to), reconstructed from status and
 	// membership history.
 	SprintCategoriesInWindow(sprintID int, from, to time.Time) (store.SprintCategories, error)
+	// SprintCellIssues returns the issues behind one Sprint-view cohort × outcome
+	// cell over [from, to) as drill-down cards (board-card fields + current status),
+	// sorted by workflow order — the drill target behind each non-zero cell's
+	// "N tickets" link. The list always matches the cell's count.
+	SprintCellIssues(sprintID int, from, to time.Time, cohort store.SprintCohortSel, outcome store.SprintOutcomeSel) ([]store.SprintCellIssue, error)
 	LastSyncedAt() (t time.Time, ok bool, err error)
 	// ActiveSprintWindow reports the active sprint entity (name and activation
 	// instant). ok is false when no sprint is active.
@@ -177,6 +182,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
 	s.mux.HandleFunc("GET /sprint", s.handleSprint)
 	s.mux.HandleFunc("GET /sprint/results", s.handleSprintResults)
+	s.mux.HandleFunc("GET /sprint/cell", s.handleSprintCell)
 	s.mux.HandleFunc("GET /velocity", s.handleVelocity)
 	s.mux.HandleFunc("POST /resync", s.handleResync)
 	s.mux.HandleFunc("GET /resync/status", s.handleResyncStatus)

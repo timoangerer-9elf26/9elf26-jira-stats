@@ -112,6 +112,9 @@ func (failingRollups) CompletedInRange(_, _ time.Time) (store.SizeTally, error) 
 func (failingRollups) SprintCategoriesInWindow(_ int, _, _ time.Time) (store.SprintCategories, error) {
 	return store.SprintCategories{}, errBoom
 }
+func (failingRollups) SprintCellIssues(_ int, _, _ time.Time, _ store.SprintCohortSel, _ store.SprintOutcomeSel) ([]store.SprintCellIssue, error) {
+	return nil, errBoom
+}
 func (failingRollups) LastSyncedAt() (time.Time, bool, error) {
 	return time.Time{}, false, errBoom
 }
@@ -147,7 +150,7 @@ func TestRollupErrorRendersFriendlyMessage(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	for _, path := range []string{"/board", "/sprint", "/velocity"} {
+	for _, path := range []string{"/board", "/sprint", "/sprint/cell?row=started&col=open", "/velocity"} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)

@@ -143,11 +143,24 @@
   </div>
   <p class="mt-1.5 text-sm text-slate-800" data-testid="card:{{.Key}}:title">{{.Summary}}</p>
   {{template "card-epic" .}}
+  {{template "card-status" .}}
   <div class="mt-2 flex items-center justify-between gap-2">
     {{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}
     {{template "card-avatar" .}}
   </div>
 {{if .Href}}</a>{{else}}</div>{{end}}
+{{end}}
+
+{{/* card-status renders the ticket's current workflow status as a neutral pill
+     under the title (#79). It renders only when .Status is set — the Board leaves
+     it empty, so no status pill appears there; the Sprint cell drill-down sets it
+     so each drilled card shows which status bucket it sits in. The pill reuses
+     compiled classes only (no Tailwind rebuild); it is inline-block so it shrinks
+     to its text. Takes a boardCard (needs .Key, .Status). */}}
+{{define "card-status"}}
+{{- if .Status}}<span
+   class="mt-1.5 inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600"
+   data-testid="card:{{.Key}}:status">{{.Status}}</span>{{end}}
 {{end}}
 
 {{/* card-epic renders the parent epic's name as a coloured pill under the card
@@ -351,7 +364,10 @@
   {{range .Cells}}
   <td class="px-4 py-3" data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}">
     <div class="tabular-nums">
-      <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:tickets">{{.Tickets}}</span> tickets ·
+      {{if .Tickets}}<a href="/sprint/cell?row={{.RowKey}}&amp;col={{.ColKey}}"
+         data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:link"
+         class="text-slate-900 hover:text-slate-900"
+         style="text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:2px"><span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:tickets">{{.Tickets}}</span> tickets</a>{{else}}<span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:tickets">{{.Tickets}}</span> tickets{{end}} ·
       <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:points">{{.Points}}</span> pts
     </div>
     <div class="mt-0.5 text-xs font-normal text-slate-400 tabular-nums">

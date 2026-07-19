@@ -151,6 +151,7 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 		{"/sprint", "Sprint"},
 		{"/velocity", "Velocity"},
 		{"/sprint/results", ""},
+		{"/sprint/cell?row=total&col=total", ""},
 		{"/daily/results", ""},
 		{"/resync/status", ""},
 		{"/static/output.css", ""},
