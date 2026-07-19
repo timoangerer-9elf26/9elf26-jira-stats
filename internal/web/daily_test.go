@@ -456,9 +456,9 @@ func TestDailyDigestAbsentWhenEmpty(t *testing.T) {
 }
 
 // TestDailyControlsLayout: the controls bar renders the presets in chronological
-// display order (weekday-named day-before → Yesterday → Today), followed by the
-// From/Until inputs, with the Assignee dropdown pushed to the far right (it comes
-// last in the DOM and carries an auto left-margin).
+// display order (weekday-named day-before → Yesterday → Today) on the far left,
+// then a right-aligned group holding From, Until and the Assignee dropdown in that
+// order (Assignee last in the DOM). The group carries an auto left-margin.
 func TestDailyControlsLayout(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
