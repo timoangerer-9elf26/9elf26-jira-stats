@@ -16,8 +16,9 @@ import (
 // DCAI field mapping (see spec). These custom-field ids are fixed for the DCAI
 // project; the project key and board are configurable.
 const (
-	sizeFieldID   = "customfield_10040" // "Estimated Time" single-select
-	sprintFieldID = "customfield_10020" // Sprint
+	sizeFieldID      = "customfield_10040" // "Estimated Time" single-select
+	sprintFieldID    = "customfield_10020" // Sprint
+	epicColorFieldID = "customfield_10017" // Epic "Issue color"
 )
 
 // searchPageSize is the JQL search page size; changelogPageSize the per-issue
@@ -114,7 +115,7 @@ func (c *LiveClient) search(ctx context.Context, jql string) ([]Issue, error) {
 		q := url.Values{}
 		q.Set("jql", jql)
 		q.Set("maxResults", strconv.Itoa(searchPageSize))
-		q.Set("fields", "summary,issuetype,status,assignee,created,creator,"+sizeFieldID+","+sprintFieldID)
+		q.Set("fields", "summary,issuetype,status,assignee,created,creator,parent,"+sizeFieldID+","+sprintFieldID+","+epicColorFieldID)
 		q.Set("expand", "changelog")
 		if pageToken != "" {
 			q.Set("nextPageToken", pageToken)
@@ -178,6 +179,8 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		Sprint:            currentSprint(dto.Fields.Sprint),
 		Assignee:          assigneeName(dto.Fields.Assignee),
 		AssigneeAvatarURL: assigneeAvatarURL(dto.Fields.Assignee),
+		ParentKey:         parentKey(dto.Fields.Parent),
+		EpicColor:         selectValue(dto.Fields.EpicColor),
 		CreatedAt:         createdAt,
 		Creator:           assigneeName(dto.Fields.Creator),
 		Changelog:         entries,
@@ -267,14 +270,22 @@ type fieldsDTO struct {
 	IssueType issueTypeDTO `json:"issuetype"`
 	Status    statusDTO    `json:"status"`
 	Assignee  *userDTO     `json:"assignee"`
-	Created   string       `json:"created"` // Jira's immutable creation timestamp
-	Creator   *userDTO     `json:"creator"` // immutable author (NOT the mutable reporter)
-	Size      *selectDTO   `json:"customfield_10040"`
-	Sprint    []sprintDTO  `json:"customfield_10020"`
+	Created   string       `json:"created"`           // Jira's immutable creation timestamp
+	Creator   *userDTO     `json:"creator"`           // immutable author (NOT the mutable reporter)
+	Parent    *parentDTO   `json:"parent"`            // parent issue (the Epic for a Task/Bug/Story)
+	Size      *selectDTO   `json:"customfield_10040"` // "Estimated Time"
+	Sprint    []sprintDTO  `json:"customfield_10020"` // Sprint
+	EpicColor *selectDTO   `json:"customfield_10017"` // Epic "Issue color" (only on epics)
 }
 
 type issueTypeDTO struct {
 	Name string `json:"name"`
+}
+
+// parentDTO is the issue's parent reference; only the key is needed — the epic's
+// name and colour are resolved from the epic's own synced row, not from here.
+type parentDTO struct {
+	Key string `json:"key"`
 }
 
 type statusDTO struct {
@@ -451,6 +462,23 @@ func assigneeAvatarURL(u *userDTO) string {
 		}
 	}
 	return ""
+}
+
+// parentKey returns the issue's parent key, or "" when it has no parent.
+func parentKey(p *parentDTO) string {
+	if p == nil {
+		return ""
+	}
+	return p.Key
+}
+
+// selectValue returns a single-select field's value, or "" when the field is
+// absent or explicitly null (Jira sends {"value": null} for an unset colour).
+func selectValue(sel *selectDTO) string {
+	if sel == nil {
+		return ""
+	}
+	return sel.Value
 }
 
 // toChangelog flattens history entries into the status- and Estimated-Time

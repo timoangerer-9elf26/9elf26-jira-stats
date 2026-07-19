@@ -128,11 +128,27 @@
     {{template "type-badge" (dict "Type" .Type "Testid" (printf "card:%s:type" .Key))}}
   </div>
   <p class="mt-1.5 text-sm text-slate-800" data-testid="card:{{.Key}}:title">{{.Summary}}</p>
+  {{template "card-epic" .}}
   <div class="mt-2 flex items-center justify-between gap-2">
     {{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}
     {{template "card-avatar" .}}
   </div>
 {{if .Href}}</a>{{else}}</div>{{end}}
+{{end}}
+
+{{/* card-epic renders the parent epic's name as a coloured pill under the card
+     title (#69). The background is the epic's Jira Issue color (mapped to a hex,
+     purple by default) set inline because per-epic colours can't be compiled
+     Tailwind utilities; the pill truncates long names (truncate class) and
+     carries the full name as a hover title. Nothing renders when the card has no
+     parent epic. inline-block + max-width are set inline (not in the committed
+     stylesheet) so the pill shrinks to its text yet truncates within the card.
+     Takes a boardCard (needs .Key, .EpicName, .EpicColorHex). */}}
+{{define "card-epic"}}
+{{- if .EpicName}}<span title="{{.EpicName}}"
+   class="mt-1.5 truncate rounded-md px-2 py-0.5 text-xs font-medium text-white"
+   style="display:inline-block;max-width:100%;background-color:{{.EpicColorHex}}"
+   data-testid="card:{{.Key}}:epic">{{.EpicName}}</span>{{end}}
 {{end}}
 
 {{/* card-avatar renders the assignee at a card's bottom-right (#68): the public

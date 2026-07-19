@@ -44,7 +44,16 @@ type Issue struct {
 	// reported no avatar. The Board card renders it, falling back to computed
 	// initials when empty.
 	AssigneeAvatarURL string
-	Changelog         []ChangelogEntry
+	// ParentKey is the key of the issue's parent (in DCAI, a team-managed project,
+	// the parent of a Task/Bug/Story is its Epic), "" when the issue has no parent.
+	// The Board card resolves the parent epic's name and colour through it.
+	ParentKey string
+	// EpicColor is the Jira "Issue color" (customfield_10017) value, e.g. "purple"
+	// or "dark_teal". It is only meaningful on Epic issues (the colour of the epic)
+	// and is "" elsewhere or when unset. The Board card's epic pill is coloured by
+	// the parent epic's value.
+	EpicColor string
+	Changelog []ChangelogEntry
 	// SprintChanges is the issue's sprint-membership history: each entering or
 	// leaving of a single sprint, derived from the "Sprint" changelog field. It
 	// lets the store reconstruct which sprint(s) the issue belonged to at any past

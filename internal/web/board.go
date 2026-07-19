@@ -23,6 +23,11 @@ type boardCard struct {
 	Assignee  string
 	AvatarURL string
 	Initials  string
+	// EpicName is the parent epic's name shown as a pill under the title ("" when
+	// the card has no parent epic, so no pill renders); EpicColorHex is the pill's
+	// background hex resolved from the epic's Jira Issue color (purple by default).
+	EpicName     string
+	EpicColorHex string
 }
 
 // boardColumn is one workflow-status column and its cards.
@@ -65,14 +70,16 @@ func (s *Server) boardView() (boardView, error) {
 		cards := make([]boardCard, 0, len(col.Cards))
 		for _, c := range col.Cards {
 			cards = append(cards, boardCard{
-				Key:       c.Key,
-				Summary:   c.Summary,
-				Size:      sizeDisplay(c.Size),
-				Type:      c.Type,
-				Href:      s.jiraIssueURL(c.Key),
-				Assignee:  c.Assignee,
-				AvatarURL: c.AssigneeAvatarURL,
-				Initials:  avatarInitials(c.Assignee),
+				Key:          c.Key,
+				Summary:      c.Summary,
+				Size:         sizeDisplay(c.Size),
+				Type:         c.Type,
+				Href:         s.jiraIssueURL(c.Key),
+				Assignee:     c.Assignee,
+				AvatarURL:    c.AssigneeAvatarURL,
+				Initials:     avatarInitials(c.Assignee),
+				EpicName:     c.EpicName,
+				EpicColorHex: epicPillColor(c.EpicColor),
 			})
 		}
 		view.Columns = append(view.Columns, boardColumn{Status: col.Status, Cards: cards})
@@ -118,6 +125,37 @@ func avatarInitials(name string) string {
 		last := []rune(parts[len(parts)-1])
 		return strings.ToUpper(string(first[0]) + string(last[0]))
 	}
+}
+
+// epicColorHex maps a Jira "Issue color" (customfield_10017) value to the pill
+// background hex the Board card renders inline. DCAI's epics use the base colours
+// and their dark_ variants; anything unset or unrecognised falls back to purple,
+// Jira's own default epic colour. Keys are lower-cased before lookup. The hexes
+// are medium/dark tones chosen so white pill text stays legible.
+var epicColorHex = map[string]string{
+	"purple":      "#6554C0",
+	"dark_purple": "#403294",
+	"blue":        "#2684FF",
+	"dark_blue":   "#0747A6",
+	"green":       "#36B37E",
+	"dark_green":  "#006644",
+	"teal":        "#00A3BF",
+	"dark_teal":   "#008DA6",
+	"yellow":      "#B7791F",
+	"dark_yellow": "#946C00",
+	"orange":      "#D9730D",
+	"dark_orange": "#B65C02",
+	"grey":        "#6B778C",
+	"dark_grey":   "#42526E",
+}
+
+// epicPillColor resolves an epic's Jira Issue color to its pill background hex,
+// defaulting to purple when the colour is unset or unrecognised.
+func epicPillColor(jiraColor string) string {
+	if hex, ok := epicColorHex[strings.ToLower(jiraColor)]; ok {
+		return hex
+	}
+	return epicColorHex["purple"]
 }
 
 // jiraIssueURL builds the Jira detail link for an issue key, or "" when no base
