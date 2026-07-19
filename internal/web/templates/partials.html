@@ -475,9 +475,10 @@
 {{end}}
 
 {{/* daily-panel is the swappable Daily unit: the controls (so the selected
-     assignee and window re-render to match the choice) plus the results. HTMX
-     swaps the whole panel, keeping the controls in sync with the data. Takes a
-     dailyView. */}}
+     assignee and range controls re-render to match the choice) plus the results,
+     or the inline range error in place of the results when the custom range is
+     invalid. HTMX swaps the whole panel, keeping the controls in sync with the
+     data. Takes a dailyView. */}}
 {{define "daily-panel"}}
   {{template "daily-controls" .}}
   {{if .RangeError}}

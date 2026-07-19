@@ -168,8 +168,8 @@ func (s *Server) handleDaily(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDailyResults renders just the controls+results panel (the HTMX swap
-// target), so the selected assignee and window re-render to match the choice —
-// not only the results (cf. the Completed picker fix).
+// target), so the selected assignee and range controls re-render to match the
+// choice — not only the results (cf. the Completed picker fix).
 func (s *Server) handleDailyResults(w http.ResponseWriter, r *http.Request) {
 	s.renderDaily(w, r, "daily-panel")
 }
@@ -187,7 +187,7 @@ func (s *Server) renderDaily(w http.ResponseWriter, r *http.Request, name string
 }
 
 // dailyView resolves the request query into the page model: the assignee and
-// window controls (with the current selection marked) plus the matching cards.
+// range controls (with the current selection marked) plus the matching cards.
 func (s *Server) dailyView(q url.Values) (dailyView, error) {
 	assigneeParam := q.Get("assignee")
 	if assigneeParam == "" {
