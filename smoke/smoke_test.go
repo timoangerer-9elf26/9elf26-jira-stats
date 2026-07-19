@@ -145,12 +145,11 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 		path   string
 		marker string // substring that must appear in the body ("" = 200 only)
 	}{
-		{"/", "Now"},
+		{"/", "Sprint"}, // root redirects to /sprint (#66)
 		{"/board", "Board"},
 		{"/daily", "Daily"},
 		{"/sprint", "Sprint"},
 		{"/velocity", "Velocity"},
-		{"/now/board", ""},
 		{"/sprint/results", ""},
 		{"/daily/results", ""},
 		{"/resync/status", ""},

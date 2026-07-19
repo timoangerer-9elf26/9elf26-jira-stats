@@ -28,6 +28,15 @@ func berlin(t *testing.T) *time.Location {
 	return loc
 }
 
+// assertTally fails unless got equals want, labelling the failure with what.
+// Shared across the store rollup tests.
+func assertTally(t *testing.T, what string, got, want SizeTally) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("%s tally = %+v, want %+v", what, got, want)
+	}
+}
+
 // mondayWeek returns [Monday 00:00, next Monday 00:00) in Berlin for the ISO
 // week containing the given Berlin-local date.
 func mondayWeek(t *testing.T, loc *time.Location, year int, month time.Month, day int) (from, to time.Time) {

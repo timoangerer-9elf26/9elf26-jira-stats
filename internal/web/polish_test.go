@@ -43,9 +43,9 @@ func TestSharedNavRendersWithActiveItem(t *testing.T) {
 	app := newTestApp(t, jira.NewFakeClient())
 
 	cases := []struct{ path, activeKey string }{
-		{"/", "now"},
-		{"/board", "board"},
 		{"/sprint", "sprint"},
+		{"/daily", "daily"},
+		{"/board", "board"},
 		{"/velocity", "velocity"},
 	}
 	for _, c := range cases {
@@ -54,10 +54,22 @@ func TestSharedNavRendersWithActiveItem(t *testing.T) {
 		if !strings.Contains(body, `data-testid="nav"`) {
 			t.Errorf("%s: missing shared nav\n%s", c.path, body)
 		}
-		for _, link := range []string{`href="/"`, `href="/board"`, `href="/sprint"`, `href="/velocity"`} {
+		for _, link := range []string{`href="/sprint"`, `href="/daily"`, `href="/board"`, `href="/velocity"`} {
 			if !strings.Contains(body, link) {
 				t.Errorf("%s: nav missing link %q", c.path, link)
 			}
+		}
+		// Nav order is Sprint · Daily · Board · Velocity (#66), with the resync
+		// control pinned to the far right.
+		assertOrder(t, body,
+			`data-nav="sprint"`,
+			`data-nav="daily"`,
+			`data-nav="board"`,
+			`data-nav="velocity"`,
+			`data-testid="resync-status"`,
+		)
+		if strings.Contains(body, `data-nav="now"`) {
+			t.Errorf("%s: nav still references the removed Now view\n%s", c.path, body)
 		}
 		// The active tab (and only it) carries aria-current="page".
 		activeMarker := `data-nav="` + c.activeKey + `" aria-current="page"`
@@ -77,8 +89,6 @@ func TestViewsRenderFriendlyEmptyStateBeforeFirstSync(t *testing.T) {
 	app := newEmptyTestApp(t)
 
 	cases := []struct{ path, want string }{
-		{"/", "No open work"},
-		{"/now/board", "No open work"},
 		// A never-synced store has no active sprint, so Sprint shows the no-sprint
 		// empty state (same treatment as the Board), not a finished-work note.
 		{"/sprint", "No active sprint"},
@@ -96,9 +106,6 @@ func TestViewsRenderFriendlyEmptyStateBeforeFirstSync(t *testing.T) {
 // friendly error state at the HTTP seam.
 type failingRollups struct{}
 
-func (failingRollups) OpenByStatus() (store.OpenBoard, error) {
-	return store.OpenBoard{}, errBoom
-}
 func (failingRollups) CompletedInRange(_, _ time.Time) (store.SizeTally, error) {
 	return store.SizeTally{}, errBoom
 }
@@ -140,7 +147,7 @@ func TestRollupErrorRendersFriendlyMessage(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	for _, path := range []string{"/", "/board", "/sprint", "/velocity"} {
+	for _, path := range []string{"/board", "/sprint", "/velocity"} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
