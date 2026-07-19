@@ -120,3 +120,60 @@ func TestSprintCategoriesInWindowSplitsStartedAddedFinished(t *testing.T) {
 	assertTally(t, "finished-total", wc.FinishedTotal, SizeTally{M: 1, L: 1, Points: 2 + 3})
 	assertTally(t, "total", wc.Total, SizeTally{S: 2, M: 2, L: 1, Points: 9})
 }
+
+// TestSprintCategoriesGraceWindow pins the one-hour grace window (#65): the
+// Started-with / Added split anchors on `sprint start + 1h`, not the start
+// instant. A ticket that is a member at the end of the grace window is Started
+// with (including one that joined within the first hour, or was created directly
+// into the sprint); a ticket whose FIRST membership entry falls after the grace
+// window is Added. The old "open at the start" status gate is gone, so a member
+// with no status history still counts as Started with.
+func TestSprintCategoriesGraceWindow(t *testing.T) {
+	st := openTempStore(t)
+
+	// Window [from, to). The sprint starts at `from`; the grace window ends one
+	// hour later.
+	from := time.Date(2026, time.July, 13, 9, 0, 0, 0, time.UTC)
+	to := time.Date(2026, time.July, 18, 0, 0, 0, 0, time.UTC)
+	graceEnd := from.Add(time.Hour)         // 10:00 — the anchor
+	inGrace := from.Add(30 * time.Minute)   // 09:30 — within the first hour
+	afterGrace := graceEnd.Add(time.Second) // 10:00:01 — just past the grace window
+	beforeStart := from.Add(-2 * time.Hour) // present before the start
+
+	if err := st.SaveSprint(jira.Sprint{ID: wcSprintID, Name: "KW29", State: "active", ActivatedAt: from}); err != nil {
+		t.Fatalf("save sprint: %v", err)
+	}
+
+	// Joined within the first hour → Started with.
+	saveCategoryIssue(t, st, "DCAI-INGRACE", "S", "In Progress",
+		[]jira.ChangelogEntry{status("g-ig", "Ready To Do", "In Progress", inGrace)},
+		[]jira.SprintMembershipChange{enteredSprint("m-ig", inGrace)})
+
+	// Member exactly at the grace-window end → Started with (the boundary is
+	// inclusive: member AT sprint start + 1h counts).
+	saveCategoryIssue(t, st, "DCAI-BOUNDARY", "M", "In Progress",
+		[]jira.ChangelogEntry{status("g-b", "Ready To Do", "In Progress", graceEnd)},
+		[]jira.SprintMembershipChange{enteredSprint("m-b", graceEnd)})
+
+	// Member at the grace end but with NO status history → still Started with (the
+	// open-at-start gate is removed).
+	saveCategoryIssue(t, st, "DCAI-NOHIST", "S", "In Progress",
+		nil,
+		[]jira.SprintMembershipChange{enteredSprint("m-nh", beforeStart)})
+
+	// First membership entry after the grace window → Added.
+	saveCategoryIssue(t, st, "DCAI-AFTER", "L", "Ready To Do",
+		nil,
+		[]jira.SprintMembershipChange{enteredSprint("m-af", afterGrace)})
+
+	wc, err := st.SprintCategoriesInWindow(wcSprintID, from, to)
+	if err != nil {
+		t.Fatalf("SprintCategoriesInWindow: %v", err)
+	}
+
+	// Started with = INGRACE(S) + BOUNDARY(M) + NOHIST(S).
+	assertTally(t, "started-with", wc.StartedWith, SizeTally{S: 2, M: 1, Points: 1 + 2 + 1})
+	// Added = AFTER(L) only.
+	assertTally(t, "added", wc.Added, SizeTally{L: 1, Points: 3})
+	assertTally(t, "total", wc.Total, SizeTally{S: 2, M: 1, L: 1, Points: 7})
+}

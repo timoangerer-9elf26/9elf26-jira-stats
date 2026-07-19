@@ -95,12 +95,14 @@ For the active sprint over its window `[sprint start, now)`, reported as three
 categories. Each is a size tally (S/M/L/no-estimate counts + a points sum,
 S=1/M=2/L=3, at the ticket's *current* size):
 
-- **Started with** — tickets that were *open* and in the active sprint at its
-  **start instant**. The capacity baseline, including carry-overs (tickets pulled
-  from the previous sprint at rollover, present at the start). A snapshot: later
-  removal from the sprint does not rewrite it.
-- **Added** — tickets that *entered* the active sprint **after** its start (scope
-  creep), regardless of status.
+- **Started with** — the active-sprint members at the end of the **grace window**
+  (`sprint start + 1h`), regardless of status. The capacity baseline, including
+  carry-overs (tickets pulled from the previous sprint at rollover), tickets
+  created directly into the sprint, and tickets moved in during the first hour. A
+  snapshot: later removal from the sprint does not rewrite it. There is no
+  open-at-start gate — a member with no status history still counts.
+- **Added** — tickets whose **first** membership entry falls **after** the grace
+  window (genuine scope creep), regardless of status.
 - **Total** — Started with + Added.
 - **Finished** — tickets that *crossed into* the finished bucket within the
   window, attributed to whichever category (Started with / Added) the ticket

@@ -13,6 +13,16 @@ status: accepted
 > during the week" is renamed **Added** (entered the sprint after its start). The
 > "work-week" mode below is historical. The membership/lifecycle machinery this ADR
 > introduced is unchanged and still underpins the view.
+>
+> **Amended by #65 (2026-07):** the Started-with / Added split anchors on a
+> one-hour **grace window** rather than the bare start instant. **Started with** is
+> the active-sprint members at `sprint start + 1h`, *regardless of status*;
+> **Added** is tickets whose *first* membership entry falls after that grace
+> window. The grace hour absorbs rollover churn — carry-overs re-added, tickets
+> created directly into the sprint (#55), planning pull-ins — so only genuine later
+> scope creep is Added. The old requirement that a Started-with ticket be *open* at
+> the start is **removed**: a member with no status history still counts. The grace
+> length lives in one named constant (`sprintGraceWindow`).
 
 We repurpose the "Completed" view into a **Weekly** sprint-planning overview.
 For the active sprint over a selectable week window, it reports three
