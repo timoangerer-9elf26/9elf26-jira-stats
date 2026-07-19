@@ -169,18 +169,19 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 	}
 
 	iss := Issue{
-		Key:            dto.Key,
-		Type:           dto.Fields.IssueType.Name,
-		Summary:        dto.Fields.Summary,
-		Status:         dto.Fields.Status.Name,
-		StatusCategory: dto.Fields.Status.Category.Name,
-		Size:           mapSize(dto.Fields.Size),
-		Sprint:         currentSprint(dto.Fields.Sprint),
-		Assignee:       assigneeName(dto.Fields.Assignee),
-		CreatedAt:      createdAt,
-		Creator:        assigneeName(dto.Fields.Creator),
-		Changelog:      entries,
-		SprintChanges:  sprintChanges,
+		Key:               dto.Key,
+		Type:              dto.Fields.IssueType.Name,
+		Summary:           dto.Fields.Summary,
+		Status:            dto.Fields.Status.Name,
+		StatusCategory:    dto.Fields.Status.Category.Name,
+		Size:              mapSize(dto.Fields.Size),
+		Sprint:            currentSprint(dto.Fields.Sprint),
+		Assignee:          assigneeName(dto.Fields.Assignee),
+		AssigneeAvatarURL: assigneeAvatarURL(dto.Fields.Assignee),
+		CreatedAt:         createdAt,
+		Creator:           assigneeName(dto.Fields.Creator),
+		Changelog:         entries,
+		SprintChanges:     sprintChanges,
 	}
 
 	// Record active-sprint MEMBERSHIP (name + id) only; the sprint's window comes
@@ -284,7 +285,17 @@ type statusDTO struct {
 }
 
 type userDTO struct {
-	DisplayName string `json:"displayName"`
+	DisplayName string        `json:"displayName"`
+	AvatarUrls  avatarUrlsDTO `json:"avatarUrls"`
+}
+
+// avatarUrlsDTO is Jira's per-user avatar image set, keyed by pixel size. The
+// board captures the largest for a crisp render in its small circle.
+type avatarUrlsDTO struct {
+	Size48 string `json:"48x48"`
+	Size32 string `json:"32x32"`
+	Size24 string `json:"24x24"`
+	Size16 string `json:"16x16"`
 }
 
 type selectDTO struct {
@@ -425,6 +436,21 @@ func assigneeName(u *userDTO) string {
 		return ""
 	}
 	return u.DisplayName
+}
+
+// assigneeAvatarURL returns the largest available avatar image URL for a user,
+// or "" when there is no user or no avatar. Jira always populates the full size
+// set together, but each is checked so a partial payload still yields a URL.
+func assigneeAvatarURL(u *userDTO) string {
+	if u == nil {
+		return ""
+	}
+	for _, url := range []string{u.AvatarUrls.Size48, u.AvatarUrls.Size32, u.AvatarUrls.Size24, u.AvatarUrls.Size16} {
+		if url != "" {
+			return url
+		}
+	}
+	return ""
 }
 
 // toChangelog flattens history entries into the status- and Estimated-Time

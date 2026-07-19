@@ -342,6 +342,42 @@ func TestWorkflowOrderPlacesReadyForReleaseAfterDone(t *testing.T) {
 	}
 }
 
+// TestActiveSprintBoardCarriesAssigneeAndAvatar asserts the board projection
+// carries each card's assignee display name and captured Jira avatar URL (#68),
+// leaving both empty for an unassigned card.
+func TestActiveSprintBoardCarriesAssigneeAndAvatar(t *testing.T) {
+	st := openTempStore(t)
+	seedActiveSprintKW29(t, st)
+
+	save := func(iss jira.Issue) {
+		t.Helper()
+		iss.Type, iss.Status, iss.StatusCategory, iss.ActiveSprint = "Task", "In Progress", "In Progress", "KW29"
+		if err := st.SaveIssue(iss, "2026-07-15T10:00:00Z"); err != nil {
+			t.Fatalf("save %s: %v", iss.Key, err)
+		}
+	}
+	save(jira.Issue{Key: "DCAI-10", Summary: "assigned with avatar", Assignee: "Ada Lovelace", AssigneeAvatarURL: "https://avatar.example/ada.png"})
+	save(jira.Issue{Key: "DCAI-11", Summary: "unassigned"})
+
+	board, err := st.ActiveSprintBoard()
+	if err != nil {
+		t.Fatalf("ActiveSprintBoard: %v", err)
+	}
+
+	byKey := map[string]BoardCard{}
+	for _, c := range board.Columns {
+		for _, card := range c.Cards {
+			byKey[card.Key] = card
+		}
+	}
+	if got := byKey["DCAI-10"]; got.Assignee != "Ada Lovelace" || got.AssigneeAvatarURL != "https://avatar.example/ada.png" {
+		t.Errorf("DCAI-10 = {assignee %q, avatar %q}, want {%q, %q}", got.Assignee, got.AssigneeAvatarURL, "Ada Lovelace", "https://avatar.example/ada.png")
+	}
+	if got := byKey["DCAI-11"]; got.Assignee != "" || got.AssigneeAvatarURL != "" {
+		t.Errorf("unassigned DCAI-11 = {assignee %q, avatar %q}, want both empty", got.Assignee, got.AssigneeAvatarURL)
+	}
+}
+
 func assertCards(t *testing.T, status string, got, want []BoardCard) {
 	t.Helper()
 	if len(got) != len(want) {
