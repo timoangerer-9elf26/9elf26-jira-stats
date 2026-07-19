@@ -378,6 +378,54 @@ func TestActiveSprintBoardCarriesAssigneeAndAvatar(t *testing.T) {
 	}
 }
 
+// TestActiveSprintBoardCarriesParentEpic asserts the board projection resolves
+// each card's parent epic (#69): the epic's name and its captured Jira Issue
+// color, joined from the epic issue via the child's parent link, and empty for a
+// card with no parent epic.
+func TestActiveSprintBoardCarriesParentEpic(t *testing.T) {
+	st := openTempStore(t)
+	seedActiveSprintKW29(t, st)
+
+	// The parent epic itself: stored (like any issue), carrying its Issue color.
+	if err := st.SaveIssue(jira.Issue{
+		Key: "DCAI-100", Type: "Epic", Summary: "Checkout revamp",
+		Status: "In Progress", StatusCategory: "In Progress", EpicColor: "green",
+		ActiveSprint: "KW29",
+	}, "2026-07-15T10:00:00Z"); err != nil {
+		t.Fatalf("save epic: %v", err)
+	}
+	save := func(iss jira.Issue) {
+		t.Helper()
+		iss.Type, iss.Status, iss.StatusCategory, iss.ActiveSprint = "Task", "In Progress", "In Progress", "KW29"
+		if err := st.SaveIssue(iss, "2026-07-15T10:00:00Z"); err != nil {
+			t.Fatalf("save %s: %v", iss.Key, err)
+		}
+	}
+	save(jira.Issue{Key: "DCAI-10", Summary: "child with epic", ParentKey: "DCAI-100"})
+	save(jira.Issue{Key: "DCAI-11", Summary: "no parent"})
+
+	board, err := st.ActiveSprintBoard()
+	if err != nil {
+		t.Fatalf("ActiveSprintBoard: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range board.Columns {
+		for _, card := range c.Cards {
+			byKey[card.Key] = card
+		}
+	}
+	if got := byKey["DCAI-10"]; got.EpicName != "Checkout revamp" || got.EpicColor != "green" {
+		t.Errorf("DCAI-10 = {epic %q, color %q}, want {%q, %q}", got.EpicName, got.EpicColor, "Checkout revamp", "green")
+	}
+	if got := byKey["DCAI-11"]; got.EpicName != "" || got.EpicColor != "" {
+		t.Errorf("no-parent DCAI-11 = {epic %q, color %q}, want both empty", got.EpicName, got.EpicColor)
+	}
+	// The epic itself is not a board card (Epics are excluded from the rollup types).
+	if _, ok := byKey["DCAI-100"]; ok {
+		t.Errorf("epic DCAI-100 must not appear as a board card")
+	}
+}
+
 func assertCards(t *testing.T, status string, got, want []BoardCard) {
 	t.Helper()
 	if len(got) != len(want) {

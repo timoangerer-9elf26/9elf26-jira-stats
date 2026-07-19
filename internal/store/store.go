@@ -91,17 +91,26 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 	if iss.AssigneeAvatarURL != "" {
 		assigneeAvatarURL = iss.AssigneeAvatarURL
 	}
+	var parentKey any
+	if iss.ParentKey != "" {
+		parentKey = iss.ParentKey
+	}
+	var epicColor any
+	if iss.EpicColor != "" {
+		epicColor = iss.EpicColor
+	}
 	if _, err := tx.Exec(
-		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, assignee_avatar_url, created_at, creator, synced_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, assignee_avatar_url, parent_key, epic_color, created_at, creator, synced_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
 		     type=excluded.type, summary=excluded.summary, status=excluded.status,
 		     status_category=excluded.status_category, size=excluded.size,
 		     sprint=excluded.sprint, active_sprint=excluded.active_sprint,
 		     assignee=excluded.assignee, assignee_avatar_url=excluded.assignee_avatar_url,
+		     parent_key=excluded.parent_key, epic_color=excluded.epic_color,
 		     created_at=excluded.created_at,
 		     creator=excluded.creator, synced_at=excluded.synced_at`,
-		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, assigneeAvatarURL, createdAt, creator, syncedAt,
+		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, assigneeAvatarURL, parentKey, epicColor, createdAt, creator, syncedAt,
 	); err != nil {
 		return fmt.Errorf("upsert issue %s: %w", iss.Key, err)
 	}
@@ -1067,6 +1076,12 @@ type BoardCard struct {
 	// to initials computed from Assignee, or a neutral circle when unassigned.
 	Assignee          string
 	AssigneeAvatarURL string
+	// EpicName is the parent epic's summary ("" when the card has no parent epic);
+	// EpicColor is that epic's raw Jira Issue color value ("" when unset). Both are
+	// resolved by joining the card's parent link to the epic issue's own row. The
+	// card renders EpicName as a pill coloured from EpicColor.
+	EpicName  string
+	EpicColor string
 }
 
 // BoardColumn is one workflow-status column of the sprint board and the
@@ -1107,12 +1122,17 @@ func (s *Store) ActiveSprintBoard() (Board, error) {
 		return Board{}, nil
 	}
 
+	// The self-join resolves each card's parent epic (name + colour) from the epic
+	// issue's own row, matched on the child's parent_key and gated to Epic parents
+	// so a non-epic parent yields no pill.
 	const query = `
-		SELECT status, key, summary, size, type, assignee, assignee_avatar_url
-		FROM issue
-		WHERE active_sprint IS NOT NULL
-		  AND type IN (` + rollupTypes + `)
-		ORDER BY key`
+		SELECT i.status, i.key, i.summary, i.size, i.type, i.assignee, i.assignee_avatar_url,
+		       epic.summary, epic.epic_color
+		FROM issue i
+		LEFT JOIN issue epic ON epic.key = i.parent_key AND epic.type = 'Epic'
+		WHERE i.active_sprint IS NOT NULL
+		  AND i.type IN (` + rollupTypes + `)
+		ORDER BY i.key`
 
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -1138,13 +1158,15 @@ func (s *Store) ActiveSprintBoard() (Board, error) {
 	for rows.Next() {
 		var status string
 		var card BoardCard
-		var size, assignee, avatarURL sql.NullString
-		if err := rows.Scan(&status, &card.Key, &card.Summary, &size, &card.Type, &assignee, &avatarURL); err != nil {
+		var size, assignee, avatarURL, epicName, epicColor sql.NullString
+		if err := rows.Scan(&status, &card.Key, &card.Summary, &size, &card.Type, &assignee, &avatarURL, &epicName, &epicColor); err != nil {
 			return Board{}, fmt.Errorf("scan board card: %w", err)
 		}
 		card.Size = size.String                   // "" when NULL (no estimate)
 		card.Assignee = assignee.String           // "" when NULL (unassigned)
 		card.AssigneeAvatarURL = avatarURL.String // "" when NULL (no avatar)
+		card.EpicName = epicName.String           // "" when no parent epic
+		card.EpicColor = epicColor.String         // "" when the epic's colour is unset
 		norm := normalizeStatus(status)
 		switch i, seededHere := seededIndex[norm]; {
 		case boardExcludedStatuses[norm]:

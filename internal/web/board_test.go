@@ -178,6 +178,72 @@ func TestBoardCardShowsAssigneeAvatar(t *testing.T) {
 	}
 }
 
+// epicFixture is an active-sprint (KW29) mix exercising the epic pill (#69): a
+// coloured epic and children under it, a child with an unset epic colour (pill
+// defaults to purple), a child with no parent (no pill), and a long epic name
+// (truncated with a hover title).
+func epicFixture() *jira.FakeClient {
+	longName := "A very very long epic name that will not fit on one board card line"
+	epic := func(key, summary, color string) jira.Issue {
+		return jira.Issue{Key: key, Type: "Epic", Summary: summary, Status: "In Progress", StatusCategory: "In Progress", EpicColor: color}
+	}
+	child := func(key, summary, parent string) jira.Issue {
+		return jira.Issue{Key: key, Type: "Task", Summary: summary, Status: "In Progress", StatusCategory: "In Progress", ActiveSprint: "KW29", ParentKey: parent}
+	}
+	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
+		epic("DCAI-100", "Checkout revamp", "green"),
+		epic("DCAI-101", longName, "dark_teal"),
+		epic("DCAI-102", "Uncoloured epic", ""), // no Issue color → pill defaults to purple
+		child("DCAI-10", "child of green epic", "DCAI-100"),
+		child("DCAI-11", "no parent", ""),
+		child("DCAI-12", "child of long-named epic", "DCAI-101"),
+		child("DCAI-13", "child of uncoloured epic", "DCAI-102"),
+	}}
+}
+
+// TestBoardCardShowsEpicPill asserts each Board card shows its parent epic's name
+// as a pill under the title, coloured by the epic's Jira Issue color (purple by
+// default), truncated with a hover title for long names, and no pill when the
+// ticket has no parent epic.
+func TestBoardCardShowsEpicPill(t *testing.T) {
+	longName := "A very very long epic name that will not fit on one board card line"
+	app := newBoardApp(t, epicFixture())
+	body := get(t, app.URL+"/board")
+
+	// Named, coloured pill for a child with a coloured epic.
+	for _, want := range []string{
+		`data-testid="card:DCAI-10:epic"`,
+		"Checkout revamp",
+		"background-color:#36B37E", // green
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("board card DCAI-10 missing %q\n%s", want, body)
+		}
+	}
+
+	// An epic with no Issue color falls back to purple.
+	if !strings.Contains(body, "background-color:#6554C0") {
+		t.Errorf("board card DCAI-13 epic pill should default to purple\n%s", body)
+	}
+
+	// Long epic names truncate (truncate class) and carry the full name as a title.
+	if !strings.Contains(body, `title="`+longName+`"`) {
+		t.Errorf("long epic name should carry a hover title\n%s", body)
+	}
+
+	// No parent epic → no pill.
+	if strings.Contains(body, `data-testid="card:DCAI-11:epic"`) {
+		t.Errorf("board card DCAI-11 has no parent epic and must render no pill")
+	}
+
+	// The epics themselves never render as board cards.
+	for _, absent := range []string{`data-key="DCAI-100"`, `data-key="DCAI-101"`, `data-key="DCAI-102"`} {
+		if strings.Contains(body, absent) {
+			t.Errorf("epic leaked onto the board as a card: %q", absent)
+		}
+	}
+}
+
 // TestBoardColumnHeaderShowsCount asserts each column header carries its card
 // count.
 func TestBoardColumnHeaderShowsCount(t *testing.T) {
