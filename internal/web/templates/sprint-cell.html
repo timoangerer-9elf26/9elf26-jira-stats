@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+{{template "page-head" (printf "%s · %s — 9elf26 Jira Stats" .CohortLabel .OutcomeLabel)}}
+<body class="min-h-screen bg-slate-50 text-slate-900">
+  <main class="px-6 py-12">
+    {{template "nav" "sprint"}}
+    {{template "page-header" "Sprint — the tickets behind one cell of the sprint breakdown."}}
+
+    <div class="mt-8">
+      <a href="/sprint" data-testid="sprint-cell-back"
+         class="text-sm font-medium text-slate-500 hover:text-slate-900">&larr; Back to Sprint</a>
+
+      <div class="mt-4 flex items-baseline justify-between">
+        <h2 class="text-lg font-semibold text-slate-900" data-testid="sprint-cell-heading">{{.CohortLabel}} &middot; {{.OutcomeLabel}} &mdash; <span data-testid="sprint-cell-count">{{.Count}}</span> tickets</h2>
+        <span class="text-xs text-slate-400" data-testid="sprint-cell-window">{{.SprintName}} &middot; {{.WindowLabel}}</span>
+      </div>
+
+      <div class="mt-4 flex flex-col gap-2" data-testid="sprint-cell-list">
+        {{range .Cards}}
+          {{template "board-card" .}}
+        {{else}}
+          <p class="text-sm text-slate-500" data-testid="sprint-cell-empty">No tickets in this cell.</p>
+        {{end}}
+      </div>
+    </div>
+  </main>
+</body>
+</html>

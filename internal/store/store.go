@@ -974,21 +974,41 @@ func (s *Store) cohortTally(cohort sprintCategory, sprintID int, from, to time.T
 }
 
 // categoryTally tallies the rollup issues in one cohort × outcome cell (at
-// current size): the cohort-membership join (Started-with / Added) plus the
-// outcome predicate (Open / Finished / Removed), assembled from the shared SQL
-// fragments so the membership reconstruction, Done-crossing and cancelled/member
-// tests each live in one place. "Cancelled" and "no longer a member" read the
-// ticket's current state — its snapshot status and its membership at `to` (now).
-// Join-side and where-side args are collected separately and then concatenated,
-// matching the order the placeholders appear in the assembled query.
+// current size) using the shared cell predicate (sprintCellPredicate). Join-side
+// and where-side args are concatenated in the order the placeholders appear.
 func (s *Store) categoryTally(cohort sprintCategory, outcome sprintOutcome, sprintID int, from, to time.Time) (SizeTally, error) {
+	joinSQL, whereSQL, joinArgs, whereArgs := sprintCellPredicate(cohort, outcome, sprintID, from, to)
+
+	query := `SELECT ` + sizeTallyColumns + `
+		FROM issue` + joinSQL + `
+		WHERE issue.type IN (` + rollupTypes + `)` + whereSQL
+
+	args := append(joinArgs, whereArgs...)
+	tally, err := scanTally(s.db.QueryRow(query, args...))
+	if err != nil {
+		return SizeTally{}, fmt.Errorf("sprint category tally: %w", err)
+	}
+	return tally, nil
+}
+
+// sprintCellPredicate assembles the JOIN and WHERE fragments (and their ordered
+// bind args) for one cohort × outcome cell of the Sprint view over [from, to):
+// the cohort-membership join (Started-with / Added) plus the outcome predicate
+// (Open / Finished / Removed), assembled from the shared SQL fragments so the
+// membership reconstruction, Done-crossing and cancelled/member tests each live
+// in one place. "Cancelled" and "no longer a member" read the ticket's current
+// state — its snapshot status and its membership at `to` (now). It is the SINGLE
+// source of the cell predicates, shared by the cell tally (categoryTally) and the
+// drill-down card select (categoryCards) so the drill list can never drift from
+// the count. joinArgs precede whereArgs, matching the order the placeholders
+// appear in the assembled query.
+func sprintCellPredicate(cohort sprintCategory, outcome sprintOutcome, sprintID int, from, to time.Time) (joinSQL, whereSQL string, joinArgs, whereArgs []any) {
 	fromStr := from.UTC().Format(time.RFC3339)
 	toStr := to.UTC().Format(time.RFC3339)
 	graceEndStr := from.Add(sprintGraceWindow).UTC().Format(time.RFC3339)
 	canceled := normalizeStatus("Canceled")
 
-	var joinSQL, whereSQL strings.Builder
-	var joinArgs, whereArgs []any
+	var joinB, whereB strings.Builder
 
 	// Cohort membership.
 	switch cohort {
@@ -997,13 +1017,13 @@ func (s *Store) categoryTally(cohort sprintCategory, outcome sprintOutcome, spri
 		// sprintGraceWindow), regardless of status — the capacity baseline. A
 		// snapshot: later removal or status change does not rewrite it, and there
 		// is no open-at-start gate, so a member with no status history still counts.
-		joinSQL.WriteString(` JOIN (` + membersAtSubquery + `) started_m ON started_m.issue_key = issue.key`)
+		joinB.WriteString(` JOIN (` + membersAtSubquery + `) started_m ON started_m.issue_key = issue.key`)
 		joinArgs = append(joinArgs, sprintID, graceEndStr)
 	case catAdded:
 		// A ticket whose FIRST membership entry falls after the grace window
 		// (genuine scope creep). Re-entry of a ticket already present within the
 		// grace window stays out of Added, so the two cohorts are disjoint.
-		joinSQL.WriteString(` JOIN (` + firstEntryAfterSubquery + `) added_m ON added_m.issue_key = issue.key`)
+		joinB.WriteString(` JOIN (` + firstEntryAfterSubquery + `) added_m ON added_m.issue_key = issue.key`)
 		joinArgs = append(joinArgs, sprintID, graceEndStr)
 	}
 
@@ -1012,16 +1032,16 @@ func (s *Store) categoryTally(cohort sprintCategory, outcome sprintOutcome, spri
 	case outFinished:
 		// Crossed into the Done set within the window.
 		finSQL, finArgs := finishedInWindowSubquery(fromStr, toStr)
-		joinSQL.WriteString(` JOIN (` + finSQL + `) fin ON fin.issue_key = issue.key`)
+		joinB.WriteString(` JOIN (` + finSQL + `) fin ON fin.issue_key = issue.key`)
 		joinArgs = append(joinArgs, finArgs...)
 	case outOpen:
 		// Not finished, not cancelled, still a member at now — the remainder.
 		finSQL, finArgs := finishedInWindowSubquery(fromStr, toStr)
-		whereSQL.WriteString(` AND issue.key NOT IN (` + finSQL + `)`)
+		whereB.WriteString(` AND issue.key NOT IN (` + finSQL + `)`)
 		whereArgs = append(whereArgs, finArgs...)
-		whereSQL.WriteString(` AND LOWER(issue.status) <> ?`)
+		whereB.WriteString(` AND LOWER(issue.status) <> ?`)
 		whereArgs = append(whereArgs, canceled)
-		whereSQL.WriteString(` AND issue.key IN (` + membersAtSubquery + `)`)
+		whereB.WriteString(` AND issue.key IN (` + membersAtSubquery + `)`)
 		whereArgs = append(whereArgs, sprintID, toStr)
 	case outRemoved:
 		// Not finished, and cancelled or no longer a member — with the asymmetry:
@@ -1029,27 +1049,173 @@ func (s *Store) categoryTally(cohort sprintCategory, outcome sprintOutcome, spri
 		// arm); Added counts ONLY cancellation, so a reprioritised-out add drops
 		// out of every cell.
 		finSQL, finArgs := finishedInWindowSubquery(fromStr, toStr)
-		whereSQL.WriteString(` AND issue.key NOT IN (` + finSQL + `)`)
+		whereB.WriteString(` AND issue.key NOT IN (` + finSQL + `)`)
 		whereArgs = append(whereArgs, finArgs...)
 		if cohort == catStartedWith {
-			whereSQL.WriteString(` AND (LOWER(issue.status) = ? OR issue.key NOT IN (` + membersAtSubquery + `))`)
+			whereB.WriteString(` AND (LOWER(issue.status) = ? OR issue.key NOT IN (` + membersAtSubquery + `))`)
 			whereArgs = append(whereArgs, canceled, sprintID, toStr)
 		} else {
-			whereSQL.WriteString(` AND LOWER(issue.status) = ?`)
+			whereB.WriteString(` AND LOWER(issue.status) = ?`)
 			whereArgs = append(whereArgs, canceled)
 		}
 	}
 
-	query := `SELECT ` + sizeTallyColumns + `
-		FROM issue` + joinSQL.String() + `
-		WHERE issue.type IN (` + rollupTypes + `)` + whereSQL.String()
+	return joinB.String(), whereB.String(), joinArgs, whereArgs
+}
+
+// SprintCellIssue is one issue behind a Sprint-view cell drill-down (#79): the
+// board-card fields (so it renders with the same card machinery as the Board)
+// plus its CURRENT status, shown as a status pill.
+type SprintCellIssue struct {
+	BoardCard
+	Status string
+}
+
+// SprintCohortSel selects which cohort a drill-down cell covers, including the
+// Total row — the union of both cohorts.
+type SprintCohortSel int
+
+const (
+	CohortStartedWith SprintCohortSel = iota
+	CohortAdded
+	CohortTotal
+)
+
+// bases expands a cohort selector into the base cohorts it unions. The two base
+// cohorts are disjoint by construction, so the union count equals the summed
+// tally shown in the Total row.
+func (c SprintCohortSel) bases() ([]sprintCategory, error) {
+	switch c {
+	case CohortStartedWith:
+		return []sprintCategory{catStartedWith}, nil
+	case CohortAdded:
+		return []sprintCategory{catAdded}, nil
+	case CohortTotal:
+		return []sprintCategory{catStartedWith, catAdded}, nil
+	}
+	return nil, fmt.Errorf("unknown sprint cohort selector %d", c)
+}
+
+// SprintOutcomeSel selects which outcome column a drill-down cell covers,
+// including the Total column — the union of Open + Finished + Removed.
+type SprintOutcomeSel int
+
+const (
+	OutcomeOpen SprintOutcomeSel = iota
+	OutcomeFinished
+	OutcomeRemoved
+	OutcomeTotal
+)
+
+// bases expands an outcome selector into the base outcomes it unions. The three
+// base outcomes are mutually exclusive by construction (a ticket is Finished, or
+// Open, or Removed — never two), so the union count equals the summed tally shown
+// in the Total column.
+func (o SprintOutcomeSel) bases() ([]sprintOutcome, error) {
+	switch o {
+	case OutcomeOpen:
+		return []sprintOutcome{outOpen}, nil
+	case OutcomeFinished:
+		return []sprintOutcome{outFinished}, nil
+	case OutcomeRemoved:
+		return []sprintOutcome{outRemoved}, nil
+	case OutcomeTotal:
+		return []sprintOutcome{outOpen, outFinished, outRemoved}, nil
+	}
+	return nil, fmt.Errorf("unknown sprint outcome selector %d", o)
+}
+
+// SprintCellIssues returns the issues behind one cohort × outcome cell of the
+// Sprint view for the sprint over [from, to) — the exact rows the cell tallies,
+// SELECTed as cards so a drill-down list always matches the cell's count. It
+// reuses sprintCellPredicate (the same predicates behind SprintCategoriesInWindow),
+// so the removal asymmetry and every membership/outcome rule are shared. The
+// Total row and Total column expand to the union of their constituent base cells
+// (cohorts are disjoint; the outcomes are mutually exclusive), deduped by key so
+// the union count matches the summed tally. Cards are sorted by workflow order
+// then issue key, so same-status cards group together in the flat list.
+func (s *Store) SprintCellIssues(sprintID int, from, to time.Time, cohort SprintCohortSel, outcome SprintOutcomeSel) ([]SprintCellIssue, error) {
+	cohorts, err := cohort.bases()
+	if err != nil {
+		return nil, err
+	}
+	outcomes, err := outcome.bases()
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]bool)
+	var out []SprintCellIssue
+	for _, c := range cohorts {
+		for _, o := range outcomes {
+			issues, err := s.categoryCards(c, o, sprintID, from, to)
+			if err != nil {
+				return nil, err
+			}
+			for _, is := range issues {
+				if seen[is.Key] {
+					continue
+				}
+				seen[is.Key] = true
+				out = append(out, is)
+			}
+		}
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		switch {
+		case workflowLess(a.Status, b.Status):
+			return true
+		case workflowLess(b.Status, a.Status):
+			return false
+		default:
+			return a.Key < b.Key
+		}
+	})
+	return out, nil
+}
+
+// categoryCards selects the issues in one base cohort × base outcome cell as
+// drill-down cards (board-card fields + current status), using the shared cell
+// predicate (sprintCellPredicate) so the row set matches categoryTally exactly.
+// The self-join resolves each card's parent epic (name + colour) from the epic
+// issue's own row, matched on parent_key and gated to Epic parents, mirroring
+// ActiveSprintBoard.
+func (s *Store) categoryCards(cohort sprintCategory, outcome sprintOutcome, sprintID int, from, to time.Time) ([]SprintCellIssue, error) {
+	joinSQL, whereSQL, joinArgs, whereArgs := sprintCellPredicate(cohort, outcome, sprintID, from, to)
+
+	query := `SELECT issue.key, issue.summary, issue.size, issue.type, issue.assignee,
+	       issue.assignee_avatar_url, epic.summary, epic.epic_color, issue.status
+		FROM issue
+		LEFT JOIN issue epic ON epic.key = issue.parent_key AND epic.type = 'Epic'` + joinSQL + `
+		WHERE issue.type IN (` + rollupTypes + `)` + whereSQL
 
 	args := append(joinArgs, whereArgs...)
-	tally, err := scanTally(s.db.QueryRow(query, args...))
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return SizeTally{}, fmt.Errorf("sprint category tally: %w", err)
+		return nil, fmt.Errorf("sprint cell cards: %w", err)
 	}
-	return tally, nil
+	defer rows.Close()
+
+	var out []SprintCellIssue
+	for rows.Next() {
+		var is SprintCellIssue
+		var size, assignee, avatarURL, epicName, epicColor sql.NullString
+		if err := rows.Scan(&is.Key, &is.Summary, &size, &is.Type, &assignee, &avatarURL, &epicName, &epicColor, &is.Status); err != nil {
+			return nil, fmt.Errorf("scan sprint cell card: %w", err)
+		}
+		is.Size = size.String                   // "" when NULL (no estimate)
+		is.Assignee = assignee.String           // "" when NULL (unassigned)
+		is.AssigneeAvatarURL = avatarURL.String // "" when NULL (no avatar)
+		is.EpicName = epicName.String           // "" when no parent epic
+		is.EpicColor = epicColor.String         // "" when the epic's colour is unset
+		out = append(out, is)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sprint cell cards: %w", err)
+	}
+	return out, nil
 }
 
 // addTally sums two size tallies field-by-field — the Sprint cohort Total and

@@ -28,6 +28,10 @@ type boardCard struct {
 	// background hex resolved from the epic's Jira Issue color (purple by default).
 	EpicName     string
 	EpicColorHex string
+	// Status is the ticket's current workflow status, rendered as a status pill on
+	// the card. It is set only by the Sprint cell drill-down (#79); the Board leaves
+	// it "" so no status pill renders there.
+	Status string
 }
 
 // boardColumn is one workflow-status column and its cards.
