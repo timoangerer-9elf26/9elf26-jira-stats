@@ -179,6 +179,37 @@ func TestVelocityBarsAreAccessibleCSSBars(t *testing.T) {
 	}
 }
 
+// TestVelocityTallestBarHasHeadroom asserts the tallest sprint's bar does not
+// fill its plot box to the very top: it scales below 100% so there is visible
+// headroom above it and it never overflows/touches the box's top edge (#103).
+func TestVelocityTallestBarHasHeadroom(t *testing.T) {
+	loc := berlin(t)
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
+	app := newTestAppWith(t, twoSprintFixture(loc), now)
+
+	body := get(t, app.URL+"/velocity")
+	// twoSprintFixture: KW28 = 2 pts (the tallest), KW29 = 1 pt. The tallest bar
+	// must leave headroom, so its height style must not be 100%.
+	if strings.Contains(body, "height: 100%") {
+		t.Errorf("tallest bar must leave headroom (no 100%% height):\n%s", body)
+	}
+}
+
+// TestVelocityPlotBoxesTopAligned asserts the bar row top-aligns its columns so
+// every sprint's fixed-height plot box shares a common top (and, being equal
+// height, a common bottom) even when a column's date label wraps to two lines
+// (the active "… now (ongoing)" sprint) (#103).
+func TestVelocityPlotBoxesTopAligned(t *testing.T) {
+	loc := berlin(t)
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
+	app := newTestAppWith(t, twoSprintFixture(loc), now)
+
+	body := get(t, app.URL+"/velocity")
+	if !strings.Contains(body, `class="mt-6 flex items-start gap-2 sm:gap-3"`) {
+		t.Errorf("bar row must top-align columns (items-start) so a two-line date does not shove its plot box up:\n%s", body)
+	}
+}
+
 // TestVelocitySprintCountConfigurable asserts the trailing-sprint window size is
 // configurable (WithVelocitySprints): with a limit of 1, only the most recent
 // sprint's bar renders.

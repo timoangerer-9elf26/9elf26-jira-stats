@@ -86,11 +86,16 @@ func (s *Server) sprintDateLine(b store.VelocityBar) string {
 	return start + " – " + b.End.In(s.loc).Format("2 Jan")
 }
 
-// barPercent scales points to a 0–100 bar height relative to the tallest sprint.
-// A zero (or empty) window yields 0 so empty bars stay flat.
+// barMaxPercent caps the tallest bar's height so it leaves headroom inside the
+// fixed-height plot box instead of touching/overflowing the top edge (#103).
+const barMaxPercent = 90
+
+// barPercent scales points to a 0–barMaxPercent bar height relative to the
+// tallest sprint, so even the tallest bar keeps headroom above it. A zero (or
+// empty) window yields 0 so empty bars stay flat.
 func barPercent(points, max int) int {
 	if max <= 0 {
 		return 0
 	}
-	return points * 100 / max
+	return points * barMaxPercent / max
 }
