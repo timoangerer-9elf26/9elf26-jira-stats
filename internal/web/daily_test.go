@@ -425,6 +425,89 @@ func TestDailyDigest(t *testing.T) {
 	assertOrder(t, body, `data-testid="daily-digest"`, `data-testid="daily-results"`)
 }
 
+// TestDailyIgnoresIntraDoneMoves pins issue #98 over the HTTP seam: a status
+// move whose from AND to are both in the done set is dropped from BOTH the
+// granular cards and the digest, and the surviving changes drive the net From ⟶
+// To, the bucket, and whether a ticket appears at all.
+func TestDailyIgnoresIntraDoneMoves(t *testing.T) {
+	loc := berlin(t)
+	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, loc)
+	at := func(hour int) time.Time { return time.Date(2026, time.July, 16, hour, 0, 0, 0, loc) }
+
+	// multiDaily builds an active-sprint ticket carrying a sequence of status
+	// transitions (from, to) at ascending hours.
+	multiDaily := func(key, typ string, pairs ...[3]string) jira.Issue {
+		cl := make([]jira.ChangelogEntry, len(pairs))
+		for i, p := range pairs {
+			cl[i] = jira.ChangelogEntry{ID: key + "-" + p[2], Field: "status", From: p[0], To: p[1], Timestamp: at(9 + i)}
+		}
+		return jira.Issue{
+			Key: key, Type: typ, Summary: key + " summary", Status: "In Progress",
+			StatusCategory: "In Progress", Size: "M", Assignee: "alice",
+			ActiveSprint: "KW29", Changelog: cl,
+		}
+	}
+
+	client := &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
+		// In Progress → DONE → Released: the DONE→Released hop is intra-done, dropped;
+		// net is In Progress ⟶ DONE (This Sprint), Finished.
+		multiDaily("DCAI-20", "Story",
+			[3]string{"In Progress", "DONE (This Sprint)", "a"},
+			[3]string{"DONE (This Sprint)", "Released / Deployed", "b"}),
+		// Only intra-done moves — disappears entirely.
+		multiDaily("DCAI-21", "Task",
+			[3]string{"DONE (This Sprint)", "Ready for Release", "a"},
+			[3]string{"Ready for Release", "Released / Deployed", "b"}),
+		// Reopen (done → non-done) — kept, pulled back.
+		multiDaily("DCAI-22", "Bug",
+			[3]string{"Ready for Release", "In Progress", "a"}),
+	}}
+	app := newTestAppAt(t, client, now, web.WithMe("alice"))
+
+	body := get(t, app.URL+"/daily") // alice + Today
+
+	// The intra-done ticket disappears from the whole view.
+	if strings.Contains(body, `data-key="DCAI-21"`) {
+		t.Errorf("DCAI-21 (only intra-done moves) must not appear anywhere on Daily:\n%s", body)
+	}
+	// No intra-done movement label anywhere (cards or digest).
+	for _, banned := range []string{
+		"DONE (This Sprint) → Ready for Release",
+		"DONE (This Sprint) → Released / Deployed",
+		"Ready for Release → Released / Deployed",
+		"DONE (This Sprint) ⟶ Released / Deployed",
+	} {
+		if strings.Contains(body, banned) {
+			t.Errorf("intra-done movement %q must not render:\n%s", banned, body)
+		}
+	}
+	// DCAI-20 survives, net In Progress ⟶ DONE (This Sprint), bucketed Finished.
+	if !strings.Contains(body, `data-key="DCAI-20"`) {
+		t.Errorf("DCAI-20 (finish crossing) should appear:\n%s", body)
+	}
+	if !strings.Contains(body, "In Progress ⟶ DONE (This Sprint)") {
+		t.Errorf("DCAI-20 net movement not rendered:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="digest-bucket:finished"`) {
+		t.Errorf("DCAI-20 should be bucketed Finished:\n%s", body)
+	}
+	// Its surviving granular card shows the finish crossing, not the intra-done hop.
+	if !strings.Contains(body, "In Progress → DONE (This Sprint)") {
+		t.Errorf("DCAI-20 granular finish crossing not rendered:\n%s", body)
+	}
+	// The reopen survives as a pulled-back move.
+	if !strings.Contains(body, `data-testid="digest-bucket:pulled-back"`) {
+		t.Errorf("DCAI-22 reopen should be bucketed Pulled back:\n%s", body)
+	}
+	if !strings.Contains(body, "Ready for Release → In Progress") {
+		t.Errorf("DCAI-22 reopen granular move not rendered:\n%s", body)
+	}
+	// Headline counts derive from the filtered set: 2 moved (finish + reopen).
+	if !strings.Contains(body, "moved 2 — 1 finished, 1 pulled back") {
+		t.Errorf("headline should reflect the filtered change set:\n%s", body)
+	}
+}
+
 // TestDailyDigestOmitsEmptyBuckets: a selection whose tickets are all one bucket
 // shows only that bucket, and the headline lists only the non-empty bucket.
 func TestDailyDigestOmitsEmptyBuckets(t *testing.T) {
