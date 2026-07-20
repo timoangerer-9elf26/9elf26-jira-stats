@@ -85,6 +85,26 @@ end — into exactly one of:
   (moved out and back to the same status) folds in here.
 - **Pulled back** — net backward in the workflow, including a move to Canceled.
 
+**Movement *inside* the Done set is ignored** on the Daily view. A transition
+whose *both* endpoints are Done statuses (e.g. DONE (This Sprint) → Ready for
+Release, Ready for Release → Released / Deployed) is post-completion housekeeping
+and is dropped — from the digest and the granular log. The finish crossing
+(into Done) and a **reopen** out of Done are still shown; a ticket whose only
+in-window moves were inside Done disappears from Daily entirely. This is
+Daily-only — the [Sprint view metrics](#sprint-view-metrics) and
+[Velocity](#velocity) keep the full Done set (see `docs/adr/0003`).
+
+## Velocity
+
+Completed work per **sprint**, one bar per sprint (trailing recent sprints,
+oldest-first, labelled by the **sprint's name**). Each bar's points are that
+sprint's [Sprint view](#sprint-view-metrics) **Total-row Finished** — the same
+cohort-scoped, carry-over-excluded Done-crossing at current size — so Velocity
+and the Sprint view always agree. A completed sprint measures over
+`[sprint start, sprint completion]`; the active sprint over `[sprint start, now)`
+and is shown as *ongoing*. This replaces the earlier per-ISO-week, project-wide
+throughput, which never lined up with the Sprint view (see `docs/adr/0004`).
+
 ## Ticket status buckets
 
 The DCAI workflow statuses group into buckets for the sprint rollups. Workflow

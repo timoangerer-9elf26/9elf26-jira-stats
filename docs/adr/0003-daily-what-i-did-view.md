@@ -34,6 +34,20 @@ status: accepted
 > "Yesterday", while Monday and Sunday show "Friday". The concrete-date hover title
 > stays in both cases, and the range each preset drives plus its selected/disabled
 > behaviour are unchanged — only the visible label differs.
+>
+> **Amended by #98 (2026-07):** the Daily view **ignores movement inside the Done
+> set**. An in-window `status` transition is dropped when *both* its from- and
+> to-status are Done statuses (DONE (This Sprint) → Ready for Release, Ready for
+> Release → Released / Deployed) — post-completion housekeeping the standup doesn't
+> care about. Kept: the finish crossing (non-Done → Done) and a **reopen** (Done →
+> non-Done, shown as a pull-back). Applied to the whole Daily view (digest buckets
+> and granular cards); movement bucket, net From ⟶ To and the ticket's presence are
+> recomputed from the surviving changes, so a ticket whose only in-window moves were
+> inside Done disappears, and In Progress → Done → Released shows In Progress ⟶ DONE
+> (This Sprint). This is **Daily-only** — the Sprint view and Velocity keep the full
+> Done set `{DONE (This Sprint), Ready for Release, Released / Deployed}`; narrowing
+> the finish line globally was considered and rejected (it would reverse ADR 0002's
+> deliberate inclusion of Ready for Release and shift historical metrics).
 
 We reshape the Daily view from a neutral per-assignee status-change browser into
 a personal morning overview centred on **me** (a single configured Jira display
