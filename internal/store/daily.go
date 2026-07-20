@@ -152,7 +152,14 @@ func (s *Store) DailyStatusChanges(assignee string, from, to time.Time) ([]Daily
 
 	tickets := make([]DailyTicket, 0, len(order))
 	for _, key := range order {
-		tickets = append(tickets, *byKey[key])
+		tk := *byKey[key]
+		tk.Changes = dropIntraDoneChanges(tk.Changes)
+		// A ticket whose only in-window moves were inside the done set has no
+		// remaining changes, so it drops off the Daily view entirely (see #98).
+		if len(tk.Changes) == 0 {
+			continue
+		}
+		tickets = append(tickets, tk)
 	}
 	// Most recent in-window transition first; each ticket's last change is its
 	// latest, since the rows arrived time-ascending.
@@ -160,6 +167,26 @@ func (s *Store) DailyStatusChanges(assignee string, from, to time.Time) ([]Daily
 		return latestChange(tickets[i]).After(latestChange(tickets[j]))
 	})
 	return tickets, nil
+}
+
+// dropIntraDoneChanges removes the in-window status transitions that happen
+// ENTIRELY inside the done set — both from and to are done statuses (e.g. DONE
+// (This Sprint) → Ready for Release, Ready for Release → Released / Deployed).
+// This is a Daily-view-only rule (#98): such hops are workflow noise, not a
+// movement worth surfacing. Finish crossings (non-done → done) and reopens
+// (done → non-done) are kept, so the surviving changes still drive each ticket's
+// net From⟶To, its movement bucket, and whether it appears at all. It reuses
+// isDoneStatus (the authoritative done set) and does NOT alter the global bucket
+// used by the Sprint view and Velocity.
+func dropIntraDoneChanges(changes []DailyStatusChange) []DailyStatusChange {
+	kept := changes[:0:0]
+	for _, c := range changes {
+		if isDoneStatus(c.From) && isDoneStatus(c.To) {
+			continue
+		}
+		kept = append(kept, c)
+	}
+	return kept
 }
 
 // latestChange returns the instant of a ticket's most recent in-window change.
