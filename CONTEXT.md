@@ -186,3 +186,19 @@ window). Scope is the Sprint view only — the Board still shows these tickets i
 their status columns. [Velocity](#velocity) shares the Sprint view's Finished
 computation, so it excludes pre-finished carry-overs identically (their
 completion belongs to the prior sprint).
+
+## Estimate edit
+
+The one place a user can **change** Jira from the dashboard: on the **Board**,
+the estimate pill (the ticket's size — S / M / L / no-estimate) is editable.
+Picking a value **writes it back to Jira** as the ticket's estimate, immediately,
+with no confirm step. Everywhere else the size is read-only display.
+
+This is the sole exception to the dashboard being a read-only projection of Jira.
+Jira stays the **source of truth**: the edit is a write *to Jira*, not to the
+local projection — the projection only ever reflects what a Jira read returns, so
+after a successful write the changed ticket is re-read from Jira and the pill
+shows that authoritative value. A failed write leaves Jira (and the pill)
+unchanged. Editing is **Board-only**: the same size pill on the Daily view, the
+"tickets I created" list and the Sprint drill-down stays read-only (see
+`docs/adr/0005`).
