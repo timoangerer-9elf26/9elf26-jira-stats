@@ -6,6 +6,7 @@
     {{template "nav" "board"}}
     {{template "page-header" "Board — the active sprint mirrored from Jira, for data-quality validation."}}
 
+    {{template "board-estimate-style"}}
     {{if .HasSprint}}
     <section data-testid="board" class="mt-8">
       <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500" data-testid="board-heading">Sprint board — {{.SprintName}}</h2>

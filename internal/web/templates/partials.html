@@ -209,10 +209,120 @@
   {{template "card-epic" .}}
   {{template "card-status" .}}
   <div class="mt-2 flex items-center justify-between gap-2">
-    {{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}
+    {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "")}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
     {{template "card-avatar" .}}
   </div>
 {{if .Href}}</a>{{else}}</div>{{end}}
+{{end}}
+
+{{/* board-estimate is the editable estimate pill on the Board (#108,
+     docs/adr/0005): the app's only write path to Jira. The pill is a click/focus
+     popover (CSS-only, no JS toggle) offering S · M · L · No estimate; each
+     choice hx-posts /board/estimate, which writes the size to Jira, re-reads the
+     issue and swaps this whole control (hx-swap="outerHTML" on the closest
+     [data-estimate-control]) to the authoritative value — or, on failure, back to
+     the prior value plus an inline error. The control lives INSIDE the whole-card
+     <a>, so the interactive parts are spans (valid non-interactive content in an
+     anchor, unlike <button>/<details>) that preventDefault+stopPropagation on
+     click so activating the pill neither follows the card link nor bubbles to it;
+     htmx's own listener on the same span still fires. The popover reveals via
+     :focus-within (clicking the tabbable trigger focuses it) — the same JS-free
+     mechanism as the resync/sprint tooltips. Editability is Board-only: it renders
+     solely when boardCard.Editable, so the shared board-card stays read-only on
+     the Sprint drill-down. Takes a dict of Key, Size (raw "S"/"M"/"L"/""),
+     Display (its "S"/…/"no estimate" form) and Error (inline message, "" when
+     none). The pill keeps the card:<key>:size testid so the current value is
+     asserted exactly as the read-only chip's. All popover styling is inline / in
+     the board-estimate-style block (no Tailwind rebuild). */}}
+{{define "board-estimate"}}
+<span data-estimate-control data-testid="card:{{.Key}}:estimate" class="be" style="position:relative;display:inline-flex;flex-direction:column;align-items:flex-start">
+  <span class="be-trigger inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600"
+        data-testid="card:{{.Key}}:estimate-trigger" role="button" tabindex="0"
+        aria-haspopup="menu" aria-label="Edit estimate for {{.Key}}"
+        onclick="event.preventDefault();event.stopPropagation()">
+    <span class="text-slate-400">est</span>
+    <span class="tabular-nums text-slate-800" data-testid="card:{{.Key}}:size">{{.Display}}</span>
+  </span>
+  <span class="be-menu" role="menu" aria-label="Estimate for {{.Key}}">
+    {{template "board-estimate-opt" (dict "Key" .Key "OptKey" "s" "Label" "S" "Size" "S" "Cur" .Size)}}
+    {{template "board-estimate-opt" (dict "Key" .Key "OptKey" "m" "Label" "M" "Size" "M" "Cur" .Size)}}
+    {{template "board-estimate-opt" (dict "Key" .Key "OptKey" "l" "Label" "L" "Size" "L" "Cur" .Size)}}
+    {{template "board-estimate-opt" (dict "Key" .Key "OptKey" "none" "Label" "No estimate" "Size" "" "Cur" .Size)}}
+  </span>
+  {{if .Error}}<span class="be-error" data-testid="card:{{.Key}}:estimate-error" role="alert">{{.Error}}</span>{{end}}
+</span>
+{{end}}
+
+{{/* board-estimate-opt is one choice in the estimate popover. It hx-posts the
+     chosen size (and the current value as "prior", the revert target on failure)
+     to /board/estimate, swapping the whole control with the server's response.
+     The click handler prevents the enclosing card link from firing; htmx still
+     handles the click on this same element. The currently-selected value is
+     marked (aria-current + a highlighted style). Takes a dict of Key, OptKey (the
+     testid suffix), Label, Size (the value this choice writes) and Cur (the card's
+     current raw size). */}}
+{{define "board-estimate-opt"}}
+<span class="be-opt{{if eq .Size .Cur}} be-opt--sel{{end}}" role="menuitem" tabindex="0"
+      data-testid="card:{{.Key}}:estimate-opt:{{.OptKey}}"
+      {{if eq .Size .Cur}}aria-current="true"{{end}}
+      onclick="event.preventDefault();event.stopPropagation()"
+      hx-post="/board/estimate" hx-trigger="click"
+      hx-vals='{"key":"{{.Key}}","size":"{{.Size}}","prior":"{{.Cur}}"}'
+      hx-target="closest [data-estimate-control]" hx-swap="outerHTML">{{.Label}}</span>
+{{end}}
+
+{{/* board-estimate-style holds the CSS for the editable estimate popover, kept
+     out of the per-card partial (which renders once per card) and included ONCE
+     per Board page. The popover opens on :focus-within (JS-free, matching the
+     resync/sprint tooltips); the trigger gets a pointer cursor (not in the
+     compiled Tailwind build); the inline error is a small rose line under the
+     pill. No Tailwind rebuild is required. */}}
+{{define "board-estimate-style"}}
+<style>
+  .be-trigger { cursor: pointer; }
+  .be-trigger:hover { background: #e2e8f0; } /* slate-200 */
+  .be-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 30;
+    min-width: 9rem;
+    padding: 0.25rem;
+    background: #ffffff;
+    border: 1px solid #e2e8f0; /* slate-200 */
+    border-radius: 0.5rem;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.1s ease, visibility 0.1s ease;
+  }
+  .be:focus-within .be-menu {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+  .be-opt {
+    cursor: pointer;
+    border-radius: 0.375rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    color: #475569; /* slate-600 */
+    outline: none;
+  }
+  .be-opt:hover,
+  .be-opt:focus-visible { background: #f1f5f9; } /* slate-100 */
+  .be-opt--sel { font-weight: 600; color: #0f172a; background: #f8fafc; } /* slate-900 on slate-50 */
+  .be-error {
+    margin-top: 0.25rem;
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    color: #e11d48; /* rose-600 */
+  }
+</style>
 {{end}}
 
 {{/* card-status renders the ticket's current workflow status as a neutral pill

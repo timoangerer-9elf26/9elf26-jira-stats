@@ -97,6 +97,11 @@ func run() error {
 		// runs under the app context (ctx), not a request context, so it survives
 		// the POST handler returning promptly.
 		web.WithResyncer(resyncer{ctx: ctx, syncer: syncer}),
+		// The Board estimate edit's write path (docs/adr/0005): the Syncer's
+		// SetEstimate writes the size to Jira, re-reads the issue and persists it.
+		// Unlike the fire-and-forget resync it runs under the request context, so
+		// no adapter is needed — the Syncer satisfies web.Estimator directly.
+		web.WithEstimator(syncer),
 	}
 	// Only override the web clock when REVIEW_NOW is set; leaving it out keeps the
 	// server's default time.Now for every production deployment.

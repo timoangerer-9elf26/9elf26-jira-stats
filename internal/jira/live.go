@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -104,6 +105,39 @@ func (c *LiveClient) FetchSprints(ctx context.Context) ([]Sprint, error) {
 		}
 	}
 	return sprints, nil
+}
+
+// FetchIssue re-reads a single issue by key (with its changelog expanded) and
+// maps it into the domain snapshot shape. It is the reconciliation read the
+// Board estimate edit issues after a successful size write, so the projection is
+// only ever set from a Jira read (see docs/adr/0005).
+func (c *LiveClient) FetchIssue(ctx context.Context, key string) (Issue, error) {
+	q := url.Values{}
+	q.Set("fields", "summary,issuetype,status,assignee,created,creator,parent,"+sizeFieldID+","+sprintFieldID+","+epicColorFieldID)
+	q.Set("expand", "changelog")
+
+	var dto issueDTO
+	if err := c.get(ctx, "/rest/api/3/issue/"+url.PathEscape(key), q, &dto); err != nil {
+		return Issue{}, fmt.Errorf("jira fetch issue %s: %w", key, err)
+	}
+	return c.toIssue(ctx, dto)
+}
+
+// UpdateIssueSize writes the issue's "Estimated Time" size field back to Jira via
+// PUT /rest/api/3/issue/{key} — the app's sole write path (see docs/adr/0005).
+// size is the T-shirt label "S"/"M"/"L", mapped to the single-select value
+// Jira stores (Small/Medium/Large); "" clears the estimate (null). Last-write-
+// wins: no optimistic-locking guard.
+func (c *LiveClient) UpdateIssueSize(ctx context.Context, key, size string) error {
+	value, err := sizeToSelect(size)
+	if err != nil {
+		return err
+	}
+	body := map[string]any{"fields": map[string]any{sizeFieldID: value}}
+	if err := c.put(ctx, "/rest/api/3/issue/"+url.PathEscape(key), body); err != nil {
+		return fmt.Errorf("jira update size %s: %w", key, err)
+	}
+	return nil
 }
 
 // search runs a token-paginated JQL search (expand=changelog) and maps every
@@ -248,6 +282,36 @@ func (c *LiveClient) get(ctx context.Context, path string, q url.Values, out any
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	return nil
+}
+
+// put issues an authenticated PUT with a JSON body and expects a no-content
+// success (Jira answers 204 on a successful issue edit). It is the write
+// counterpart to get; the same basic-auth token is reused.
+func (c *LiveClient) put(ctx context.Context, path string, body any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.cfg.BaseURL+path, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(c.cfg.Email, c.cfg.APIToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Jira returns 204 No Content on a successful edit; accept any 2xx.
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("PUT %s: status %d: %s", path, resp.StatusCode, b)
 	}
 	return nil
 }
@@ -408,6 +472,25 @@ func mapSize(sel *selectDTO) string {
 		return "L"
 	default:
 		return ""
+	}
+}
+
+// sizeToSelect is the inverse of mapSize: it maps a T-shirt label ("S"/"M"/"L")
+// to the Jira "Estimated Time" single-select payload ({"value":"Small"|...}),
+// and "" to nil so the field is cleared (no-estimate). An unknown label is a
+// programmer error (the UI only offers the four choices).
+func sizeToSelect(size string) (map[string]string, error) {
+	switch size {
+	case "":
+		return nil, nil
+	case "S":
+		return map[string]string{"value": "Small"}, nil
+	case "M":
+		return map[string]string{"value": "Medium"}, nil
+	case "L":
+		return map[string]string{"value": "Large"}, nil
+	default:
+		return nil, fmt.Errorf("unknown size %q (want S, M, L or empty)", size)
 	}
 }
 
