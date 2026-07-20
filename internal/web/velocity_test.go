@@ -1,12 +1,13 @@
 package web_test
 
-// Integration tests for the "Velocity" view over the HTTP seam.
+// Integration tests for the per-sprint "Velocity" view over the HTTP seam.
 //
-// Fixtures place Done-crossings at known Berlin-local instants across several
-// trailing ISO weeks (including an empty week in the middle and completions
-// outside the window). The tests drive the real handler and assert on the
-// rendered per-week point totals and bar labels. A fixed clock pins "now" so
-// the "last N weeks" window is deterministic.
+// Each bar is one sprint's Finished points, computed via the SAME
+// SprintCategoriesInWindow path as the Sprint view's Total-row Finished, so the
+// active sprint's bar equals the live Sprint view. Fixtures build sprints (via
+// jira.FakeClient.Sprints) with membership + Done crossings; a fixed clock pins
+// "now" so the trailing window and the active sprint's [start, now) window are
+// deterministic.
 
 import (
 	"context"
@@ -23,7 +24,7 @@ import (
 )
 
 // newTestAppWith is like newTestAppAt but also threads extra Server options
-// (e.g. WithVelocityWeeks) so the Velocity window size can be pinned per test.
+// (e.g. WithVelocitySprints) so the Velocity window size can be pinned per test.
 func newTestAppWith(t *testing.T, client jira.Client, now time.Time, opts ...web.Option) *testApp {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -45,77 +46,132 @@ func newTestAppWith(t *testing.T, client jira.Client, now time.Time, opts ...web
 	return &testApp{Server: ts, Store: st}
 }
 
-// TestVelocityViewPerWeekPoints drives the Velocity view with completions
-// spread across several ISO weeks (with an empty week in the middle) and
-// asserts the per-week point totals, that the empty week appears as zero, that
-// the default window is 10 gapless weeks oldest-first, and that a completion
-// before the window is excluded.
-func TestVelocityViewPerWeekPoints(t *testing.T) {
+// twoSprintFixture builds a closed KW28 and an active KW29, each with a
+// Done-crossing member finished inside its own window. KW28: an M (2 pts);
+// KW29: an S (1 pt). Berlin-local instants keep the date line deterministic.
+func twoSprintFixture(loc *time.Location) *jira.FakeClient {
+	start28 := time.Date(2026, time.July, 6, 9, 0, 0, 0, loc)
+	end28 := time.Date(2026, time.July, 10, 17, 0, 0, 0, loc)
+	start29 := time.Date(2026, time.July, 13, 9, 0, 0, 0, loc)
+	return &jira.FakeClient{
+		Sprints: []jira.Sprint{
+			{ID: 28, Name: "KW28", State: "closed", ActivatedAt: start28.UTC(), CompletedAt: end28.UTC()},
+			{ID: 29, Name: "KW29", State: "active", ActivatedAt: start29.UTC()},
+		},
+		Issues: []jira.Issue{
+			sprintIssue("K28-FIN", "M", "DONE (This Sprint)", "KW28",
+				[]jira.ChangelogEntry{sprintStatus("k28", "In Progress", "DONE (This Sprint)", start28.Add(24*time.Hour))},
+				[]jira.SprintMembershipChange{enteredSprintID("k28-m", 28, "KW28", start28)}),
+			sprintIssue("K29-FIN", "S", "DONE (This Sprint)", "KW29",
+				[]jira.ChangelogEntry{sprintStatus("k29", "In Progress", "DONE (This Sprint)", start29.Add(24*time.Hour))},
+				[]jira.SprintMembershipChange{enteredSprintID("k29-m", 29, "KW29", start29)}),
+		},
+	}
+}
+
+// TestVelocityPerSprintPoints drives the Velocity view and asserts one bar per
+// sprint, labelled by the sprint's NAME, with per-sprint Finished points and
+// oldest-first order.
+func TestVelocityPerSprintPoints(t *testing.T) {
 	loc := berlin(t)
-	// "now" is Wed 2026-07-15; this ISO week is Mon 2026-07-13 = KW29.
-	// The default 10-week window is KW20 (Mon 2026-05-11) .. KW29 (Mon 2026-07-13).
 	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
-	app := newTestAppWith(t, &jira.FakeClient{Issues: []jira.Issue{
-		completedIssue("DCAI-1", "M", time.Date(2026, time.July, 14, 9, 0, 0, 0, loc)), // KW29: 2
-		completedIssue("DCAI-2", "L", time.Date(2026, time.July, 8, 9, 0, 0, 0, loc)),  // KW28: 3
-		// KW27 (Mon 2026-06-29): intentionally empty.
-		completedIssue("DCAI-3", "S", time.Date(2026, time.June, 24, 9, 0, 0, 0, loc)), // KW26: 1 + 2
-		completedIssue("DCAI-4", "M", time.Date(2026, time.June, 25, 9, 0, 0, 0, loc)), // KW26
-		// Before the window (KW19, Mon 2026-05-04): must be excluded entirely.
-		completedIssue("DCAI-5", "L", time.Date(2026, time.May, 6, 9, 0, 0, 0, loc)),
-	}}, now)
+	app := newTestAppWith(t, twoSprintFixture(loc), now)
 
 	body := get(t, app.URL+"/velocity")
-
 	if !strings.Contains(body, "<!DOCTYPE") || !strings.Contains(body, "<html") {
 		t.Fatalf("/velocity must render a full standalone page:\n%s", body)
 	}
 
-	// Per-week point totals, including the empty middle week as zero.
 	wants := map[string]string{
-		"KW29": `data-testid="week-points:KW29">2<`,
-		"KW28": `data-testid="week-points:KW28">3<`,
-		"KW27": `data-testid="week-points:KW27">0<`, // empty middle week
-		"KW26": `data-testid="week-points:KW26">3<`,
-		"KW20": `data-testid="week-points:KW20">0<`, // oldest week in window
+		"KW28": `data-testid="sprint-points:KW28">2<`,
+		"KW29": `data-testid="sprint-points:KW29">1<`,
 	}
-	for wk, want := range wants {
+	for sp, want := range wants {
 		if !strings.Contains(body, want) {
-			t.Errorf("velocity view missing %s total %q\n%s", wk, want, body)
+			t.Errorf("velocity view missing %s points %q\n%s", sp, want, body)
 		}
 	}
-
-	// A completion before the window must not surface as its own bar.
-	if strings.Contains(body, `data-week="KW19"`) {
-		t.Errorf("velocity view shows out-of-window week KW19; must be excluded:\n%s", body)
+	// One bar per sprint (only two sprints exist), labelled by name.
+	if n := strings.Count(body, `data-testid="velocity-sprint"`); n != 2 {
+		t.Errorf("expected 2 per-sprint bars, got %d\n%s", n, body)
 	}
-
-	// The series must have no gaps: exactly 10 weeks, in chronological order.
-	if n := strings.Count(body, `data-testid="velocity-week"`); n != 10 {
-		t.Errorf("expected 10 gapless per-week bars, got %d\n%s", n, body)
+	if !strings.Contains(body, `data-testid="sprint-label:KW29">KW29<`) {
+		t.Errorf("bar must be labelled by the sprint name:\n%s", body)
 	}
-	assertOrder(t, body,
-		`data-week="KW20"`, `data-week="KW21"`, `data-week="KW22"`, `data-week="KW23"`,
-		`data-week="KW24"`, `data-week="KW25"`, `data-week="KW26"`, `data-week="KW27"`,
-		`data-week="KW28"`, `data-week="KW29"`,
-	)
+	assertOrder(t, body, `data-sprint="KW28"`, `data-sprint="KW29"`)
 }
 
-// TestVelocityBarsAreAccessibleCSSBars asserts the reusable velocity-bar
-// partial renders accessible CSS bars (no JS charting library) with a
-// per-week aria-label carrying the week and its points.
+// TestVelocityBarMatchesSprintViewFinished is the alignment guarantee: the
+// current sprint's Velocity bar points EQUAL the live Sprint view's Total-row
+// Finished points (same rendered number), because both derive from
+// SprintCategoriesInWindow.
+func TestVelocityBarMatchesSprintViewFinished(t *testing.T) {
+	loc := berlin(t)
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
+	start := time.Date(2026, time.July, 13, 9, 0, 0, 0, loc)
+	afterGrace := time.Date(2026, time.July, 14, 9, 0, 0, 0, loc)
+	doneAt := time.Date(2026, time.July, 14, 15, 0, 0, 0, loc)
+	prior := time.Date(2026, time.July, 9, 9, 0, 0, 0, loc) // crossed in a prior sprint
+
+	app := newTestAppWith(t, &jira.FakeClient{
+		Sprints: []jira.Sprint{{ID: 29, Name: "KW29", State: "active", ActivatedAt: start.UTC()}},
+		Issues: []jira.Issue{
+			// Started-with, finished in-window (M = 2).
+			sprintIssue("SW-FIN", "M", "DONE (This Sprint)", "KW29",
+				[]jira.ChangelogEntry{sprintStatus("swf", "In Progress", "DONE (This Sprint)", doneAt)},
+				[]jira.SprintMembershipChange{enteredSprintID("sw", 29, "KW29", start)}),
+			// Added, finished in-window (S = 1).
+			sprintIssue("AD-FIN", "S", "DONE (This Sprint)", "KW29",
+				[]jira.ChangelogEntry{sprintStatus("adf", "In Progress", "DONE (This Sprint)", doneAt)},
+				[]jira.SprintMembershipChange{enteredSprintID("ad", 29, "KW29", afterGrace)}),
+			// Pre-finished carry-over: currently Done, crossed before the window → excluded.
+			sprintIssue("CARRY", "L", "Ready for Release", "KW29",
+				[]jira.ChangelogEntry{sprintStatus("cy", "In Progress", "Ready for Release", prior)},
+				[]jira.SprintMembershipChange{enteredSprintID("cy-m", 29, "KW29", start)}),
+		},
+	}, now)
+
+	sprintBody := get(t, app.URL+"/sprint")
+	velBody := get(t, app.URL+"/velocity")
+
+	// The Sprint view Total-row Finished points and the Velocity KW29 bar must be
+	// the same rendered number (3 = M + S; carry-over excluded).
+	if !strings.Contains(sprintBody, `data-testid="sprint-cell:total:finished:points">3<`) {
+		t.Fatalf("Sprint view Total Finished points not 3 as expected:\n%s", sprintBody)
+	}
+	if !strings.Contains(velBody, `data-testid="sprint-points:KW29">3<`) {
+		t.Fatalf("Velocity KW29 bar must equal the Sprint view Finished (3):\n%s", velBody)
+	}
+}
+
+// TestVelocityDateLine asserts the start–end date line (date only, Europe/Berlin):
+// a completed sprint as "start – end"; the active sprint as "start – now (ongoing)".
+func TestVelocityDateLine(t *testing.T) {
+	loc := berlin(t)
+	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
+	app := newTestAppWith(t, twoSprintFixture(loc), now)
+
+	body := get(t, app.URL+"/velocity")
+	if !strings.Contains(body, `data-testid="sprint-dates:KW28">6 Jul – 10 Jul<`) {
+		t.Errorf("completed sprint date line wrong (want \"6 Jul – 10 Jul\"):\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="sprint-dates:KW29">13 Jul – now (ongoing)<`) {
+		t.Errorf("active sprint date line wrong (want \"13 Jul – now (ongoing)\"):\n%s", body)
+	}
+}
+
+// TestVelocityBarsAreAccessibleCSSBars asserts the reusable velocity-bar partial
+// renders accessible CSS bars (no JS charting library) with a per-sprint
+// aria-label carrying the sprint name and its points.
 func TestVelocityBarsAreAccessibleCSSBars(t *testing.T) {
 	loc := berlin(t)
 	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
-	app := newTestAppWith(t, &jira.FakeClient{Issues: []jira.Issue{
-		completedIssue("DCAI-1", "M", time.Date(2026, time.July, 14, 9, 0, 0, 0, loc)), // KW29: 2
-	}}, now)
+	app := newTestAppWith(t, twoSprintFixture(loc), now)
 
 	body := get(t, app.URL+"/velocity")
-	if !strings.Contains(body, `aria-label="KW29: 2 points"`) {
-		t.Errorf("velocity bars missing accessible per-week label:\n%s", body)
+	if !strings.Contains(body, `aria-label="KW29: 1 points"`) {
+		t.Errorf("velocity bars missing accessible per-sprint label:\n%s", body)
 	}
-	// No JS charting library.
 	for _, banned := range []string{"chart.js", "d3.js", "d3.min.js", "plotly", "apexcharts"} {
 		if strings.Contains(strings.ToLower(body), banned) {
 			t.Errorf("velocity view must not use a JS charting library (found %q)", banned)
@@ -123,47 +179,23 @@ func TestVelocityBarsAreAccessibleCSSBars(t *testing.T) {
 	}
 }
 
-// TestVelocityWeekCountConfigurable asserts the trailing-week window size is
-// configurable (WithVelocityWeeks) rather than fixed at the default.
-func TestVelocityWeekCountConfigurable(t *testing.T) {
+// TestVelocitySprintCountConfigurable asserts the trailing-sprint window size is
+// configurable (WithVelocitySprints): with a limit of 1, only the most recent
+// sprint's bar renders.
+func TestVelocitySprintCountConfigurable(t *testing.T) {
 	loc := berlin(t)
 	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
-	app := newTestAppWith(t, jira.NewFakeClient(), now, web.WithVelocityWeeks(4))
+	app := newTestAppWith(t, twoSprintFixture(loc), now, web.WithVelocitySprints(1))
 
 	body := get(t, app.URL+"/velocity")
-	if n := strings.Count(body, `data-testid="velocity-week"`); n != 4 {
-		t.Errorf("expected 4 per-week bars with WithVelocityWeeks(4), got %d\n%s", n, body)
+	if n := strings.Count(body, `data-testid="velocity-sprint"`); n != 1 {
+		t.Errorf("expected 1 bar with WithVelocitySprints(1), got %d\n%s", n, body)
 	}
-	// The window is KW26 .. KW29; older weeks must not appear.
-	if strings.Contains(body, `data-week="KW25"`) {
-		t.Errorf("4-week window should not include KW25:\n%s", body)
+	if strings.Contains(body, `data-sprint="KW28"`) {
+		t.Errorf("1-sprint window should not include the older KW28:\n%s", body)
 	}
-	assertOrder(t, body, `data-week="KW26"`, `data-week="KW27"`, `data-week="KW28"`, `data-week="KW29"`)
-}
-
-// TestVelocityCountsReadyForReleaseAsFinished is the #30 guard: a ticket whose
-// latest status is "Ready for Release" is treated as FINISHED, so Velocity
-// counts its completion in the week it crossed into a Done bucket. (This was
-// once a cross-view guard against the Now board, removed in #66.)
-func TestVelocityCountsReadyForReleaseAsFinished(t *testing.T) {
-	loc := berlin(t)
-	// "now" is Wed 2026-07-15; this ISO week is Mon 2026-07-13 = KW29.
-	now := time.Date(2026, time.July, 15, 12, 0, 0, 0, loc)
-
-	active := func(iss jira.Issue) jira.Issue { iss.ActiveSprint = "KW29"; return iss }
-	app := newTestAppWith(t, &jira.FakeClient{Issues: []jira.Issue{
-		active(jira.Issue{Key: "DCAI-40", Type: "Story", Summary: "open one", Status: "In Progress", StatusCategory: "In Progress", Size: "S"}),
-		// Crossed into Ready for Release this week: finished, not open.
-		active(jira.Issue{Key: "DCAI-50", Type: "Bug", Summary: "released one", Status: "Ready for Release", StatusCategory: "Done", Size: "M",
-			Changelog: []jira.ChangelogEntry{
-				{ID: "rfr", Field: "status", From: "Review / Testing", To: "Ready for Release", Timestamp: time.Date(2026, time.July, 14, 9, 0, 0, 0, loc)},
-			}}),
-	}}, now)
-
-	// Velocity counts the Ready-for-Release ticket as completed this week (M = 2 points).
-	velBody := get(t, app.URL+"/velocity")
-	if !strings.Contains(velBody, `data-testid="week-points:KW29">2<`) {
-		t.Errorf("Velocity should count the Ready-for-Release completion this week (2 points):\n%s", velBody)
+	if !strings.Contains(body, `data-sprint="KW29"`) {
+		t.Errorf("1-sprint window should include the most recent KW29:\n%s", body)
 	}
 }
 

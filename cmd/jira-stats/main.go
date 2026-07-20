@@ -56,7 +56,7 @@ func run() error {
 		return fmt.Errorf("invalid SYNC_INTERVAL: %w", err)
 	}
 
-	velocityWeeks, err := parseVelocityWeeks(getenv("VELOCITY_WEEKS", "10"))
+	velocitySprints, err := parseVelocitySprints(getenv("VELOCITY_SPRINTS", "10"))
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func run() error {
 
 	opts := []web.Option{
 		web.WithLocation(loc),
-		web.WithVelocityWeeks(velocityWeeks),
+		web.WithVelocitySprints(velocitySprints),
 		web.WithJiraBaseURL(os.Getenv("JIRA_BASE_URL")),
 		web.WithMe(os.Getenv("DAILY_ME")),
 		// The resync button rebuilds the projection through the same Syncer that
@@ -159,19 +159,19 @@ func jiraClient() (jira.Client, error) {
 	}), nil
 }
 
-// parseVelocityWeeks reads the VELOCITY_WEEKS setting: how many trailing ISO
-// weeks the Velocity view shows. It must be a positive integer.
-func parseVelocityWeeks(v string) (int, error) {
+// parseVelocitySprints reads the VELOCITY_SPRINTS setting: how many trailing
+// sprints the Velocity view shows. It must be a positive integer.
+func parseVelocitySprints(v string) (int, error) {
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("invalid VELOCITY_WEEKS %q: must be a positive integer", v)
+		return 0, fmt.Errorf("invalid VELOCITY_SPRINTS %q: must be a positive integer", v)
 	}
 	return n, nil
 }
 
 // parseReviewNow reads the optional REVIEW_NOW override: an RFC3339 timestamp
 // that pins the web clock used to resolve relative date ranges, so the
-// date-bearing views (Sprint window, Velocity weeks, Daily window) render
+// date-bearing views (Sprint window, Velocity sprints, Daily window) render
 // reproducibly against the canned fake backend during live/visual review (see
 // docs/adr/0001-agent-driven-acceptance-review-harness.md). An empty value means
 // unset — the server keeps its default time.Now — so it returns a nil clock and

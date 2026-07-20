@@ -4,19 +4,19 @@
 <body class="min-h-screen bg-slate-50 text-slate-900">
   <main class="px-6 py-12">
     {{template "nav" "velocity"}}
-    {{template "page-header" "Velocity — completed points per ISO week, to inform next week's plan."}}
+    {{template "page-header" "Velocity — Finished points per sprint, aligned with the Sprint view."}}
 
     <section data-testid="velocity" class="mt-8 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Completed points per week</h2>
-      <div class="mt-6 flex items-end gap-2 sm:gap-3" role="list" aria-label="Completed points per ISO week">
-        {{range .Weeks}}
+      <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Finished points per sprint</h2>
+      <div class="mt-6 flex items-end gap-2 sm:gap-3" role="list" aria-label="Finished points per sprint">
+        {{range .Sprints}}
           {{template "velocity-bar" .}}
         {{else}}
           <p class="text-sm text-slate-500">No velocity data yet.</p>
         {{end}}
       </div>
       {{if .Empty}}
-      <p data-testid="velocity-empty" class="mt-6 text-sm text-slate-500">No completed work in the last {{len .Weeks}} weeks yet.</p>
+      <p data-testid="velocity-empty" class="mt-6 text-sm text-slate-500">No finished work in the last {{len .Sprints}} sprints yet.</p>
       {{end}}
     </section>
   </main>

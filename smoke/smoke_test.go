@@ -178,10 +178,11 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 // sits in ISO week KW29 (activated 2026-07-13 09:00 Berlin), so:
 //   - /sprint (window [sprint start, now)) echoes the window "13 Jul – 14 Jul
 //     2026" (activation day → the day before now), and
-//   - /velocity's latest bar is labelled KW29.
+//   - /velocity's active-sprint bar is labelled by the sprint name KW29.
 //
-// Both labels are computed from `now` (and the sprint start) alone, not the
-// synced tally, so the assertion holds without waiting on the background sync.
+// The /sprint window label is computed from `now` (and the sprint start) alone,
+// and /velocity's active-sprint bar is named for the active sprint KW29, so both
+// assertions hold without waiting on the background sync to tally points.
 // /sprint renders the window because the canned fake has an active sprint (KW29).
 func TestReviewNowPinsDateViews(t *testing.T) {
 	base := startDashboardEnv(t, "REVIEW_NOW=2026-07-15T12:00:00Z")
@@ -194,8 +195,8 @@ func TestReviewNowPinsDateViews(t *testing.T) {
 
 	if code, body := get(t, base+"/velocity"); code != http.StatusOK {
 		t.Fatalf("GET /velocity: got status %d, want 200", code)
-	} else if want := `data-week="KW29"`; !strings.Contains(body, want) {
-		t.Fatalf("/velocity: body missing pinned week label %q", want)
+	} else if want := `data-sprint="KW29"`; !strings.Contains(body, want) {
+		t.Fatalf("/velocity: body missing active-sprint bar label %q", want)
 	}
 }
 

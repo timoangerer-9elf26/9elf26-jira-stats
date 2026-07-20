@@ -292,21 +292,23 @@
 </div>
 {{end}}
 
-{{/* velocity-bar renders one ISO week of the Velocity view as an accessible
-     CSS bar (no JS charting library). Takes a velocityWeek (Label, Points,
-     Percent). The full-height track marks the week even when it is empty, so
-     zero-completion weeks still render (no gaps in the series); the filled
-     portion carries an aria-label with the week and its points. */}}
+{{/* velocity-bar renders one sprint of the Velocity view as an accessible CSS
+     bar (no JS charting library). Takes a velocitySprint (Label = sprint name,
+     Points, Percent, Dates). The full-height track marks the sprint even when it
+     has no Finished points; the filled portion carries an aria-label with the
+     sprint name and its points. Below the label, the start–end date line
+     ("14 Jul – 18 Jul", or "14 Jul – now (ongoing)" for the active sprint). */}}
 {{define "velocity-bar"}}
-<div class="flex flex-1 flex-col items-center gap-2" data-testid="velocity-week" data-week="{{.Label}}">
+<div class="flex flex-1 flex-col items-center gap-2" data-testid="velocity-sprint" data-sprint="{{.Label}}">
   <div class="flex h-40 w-full items-end justify-center rounded-t bg-slate-100">
     <div class="w-6 rounded-t {{if .Points}}bg-slate-900{{else}}bg-slate-300{{end}}"
          style="height: {{.Percent}}%"
          role="img"
          aria-label="{{.Label}}: {{.Points}} points"></div>
   </div>
-  <span class="text-sm font-semibold tabular-nums text-slate-700" data-testid="week-points:{{.Label}}">{{.Points}}</span>
-  <span class="text-xs uppercase tracking-wide text-slate-400" data-testid="week-label:{{.Label}}">{{.Label}}</span>
+  <span class="text-sm font-semibold tabular-nums text-slate-700" data-testid="sprint-points:{{.Label}}">{{.Points}}</span>
+  <span class="text-xs font-medium uppercase tracking-wide text-slate-500" data-testid="sprint-label:{{.Label}}">{{.Label}}</span>
+  <span class="text-[11px] tabular-nums text-slate-400" data-testid="sprint-dates:{{.Label}}">{{.Dates}}</span>
 </div>
 {{end}}
 
