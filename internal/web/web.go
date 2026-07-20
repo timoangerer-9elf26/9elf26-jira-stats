@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"html/template"
@@ -92,11 +93,25 @@ type Resyncer interface {
 	Resyncing() bool
 }
 
+// Estimator is the Board estimate edit's write path (docs/adr/0005 / #108): the
+// app's only mutation of Jira. SetEstimate writes the issue's size back to Jira,
+// re-reads that one issue and persists it, returning the authoritative size the
+// re-fetch carried ("S"/"M"/"L" or "" for no-estimate). An error means the write
+// (or its reconciliation read/save) failed, so the handler reverts the pill and
+// shows an inline error, leaving Jira and the projection unchanged. It is nil
+// when the server is built without one (most in-process tests): the pill still
+// renders editable, but a write is reported as a failure (reverted + inline
+// error), never silently dropped. The running *sync.Syncer satisfies it.
+type Estimator interface {
+	SetEstimate(ctx context.Context, key, size string) (string, error)
+}
+
 // Server holds the parsed templates and the rollup source, and implements
 // http.Handler via its router.
 type Server struct {
 	rollups         Rollups
 	resyncer        Resyncer
+	estimator       Estimator
 	templates       *template.Template
 	mux             *http.ServeMux
 	now             func() time.Time
@@ -151,6 +166,14 @@ func WithResyncer(r Resyncer) Option {
 	return func(s *Server) { s.resyncer = r }
 }
 
+// WithEstimator wires the Board estimate edit's write path into the server,
+// enabling POST /board/estimate to write a ticket's size back to Jira (see
+// docs/adr/0005). Left unset, the editable pill still renders but a write is
+// reported back as a failure (the pill reverts and shows an inline error).
+func WithEstimator(e Estimator) Option {
+	return func(s *Server) { s.estimator = e }
+}
+
 // WithVelocitySprints overrides how many trailing sprints the Velocity view
 // shows (spec: ~10). Non-positive values are ignored, keeping the default.
 func WithVelocitySprints(n int) Option {
@@ -190,6 +213,7 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.handleIndex)
 	s.mux.HandleFunc("GET /board", s.handleBoard)
+	s.mux.HandleFunc("POST /board/estimate", s.handleBoardEstimate)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
 	s.mux.HandleFunc("GET /sprint", s.handleSprint)

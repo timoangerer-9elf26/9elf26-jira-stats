@@ -115,4 +115,14 @@ type Client interface {
 	// its actual lifecycle instants (see Sprint). It is fetched on every sync so
 	// the store's sprint entities track Jira.
 	FetchSprints(ctx context.Context) ([]Sprint, error)
+	// FetchIssue re-reads a single issue by key (with its changelog), the
+	// post-write reconciliation read behind the Board estimate edit: after a
+	// successful size write the changed issue is re-fetched so the projection is
+	// set only ever from a Jira read (see docs/adr/0005).
+	FetchIssue(ctx context.Context, key string) (Issue, error)
+	// UpdateIssueSize writes the issue's "Estimated Time" size field back to Jira
+	// (the app's only write path — see docs/adr/0005). size is the T-shirt label
+	// "S"/"M"/"L", or "" to clear the estimate (no-estimate). It is the inverse of
+	// the mapSize read mapping.
+	UpdateIssueSize(ctx context.Context, key, size string) error
 }

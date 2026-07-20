@@ -145,6 +145,36 @@ func (s *Syncer) TriggerResync(ctx context.Context) bool {
 // Resyncing reports whether a full resync is currently running.
 func (s *Syncer) Resyncing() bool { return s.resyncing.Load() }
 
+// SetEstimate is the Board estimate edit's write path (docs/adr/0005): it writes
+// the ticket's size back to Jira, then immediately re-reads that one issue from
+// Jira and persists it, so the projection is set only ever from a Jira read
+// (never from local UI state) and stays a pure projection. It returns the
+// authoritative size the re-fetched issue carries ("S"/"M"/"L" or "" for
+// no-estimate). Any failure — the write or the reconciliation read/save — is
+// returned so the handler can revert the pill and surface an inline error,
+// leaving Jira and the projection unchanged (last-write-wins, no locking guard).
+//
+// The Jira write and re-fetch run without the sync mutex (they must not block on
+// an in-flight cycle); only the SaveIssue persist is serialized with the sync
+// loop, so a resync's clear-and-rebuild never interleaves with this write.
+func (s *Syncer) SetEstimate(ctx context.Context, key, size string) (string, error) {
+	if err := s.client.UpdateIssueSize(ctx, key, size); err != nil {
+		return "", fmt.Errorf("update size: %w", err)
+	}
+	iss, err := s.client.FetchIssue(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("re-fetch issue: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	syncedAt := time.Now().UTC().Format(time.RFC3339)
+	if err := s.store.SaveIssue(iss, syncedAt); err != nil {
+		return "", fmt.Errorf("save issue: %w", err)
+	}
+	return iss.Size, nil
+}
+
 // resync clears the projection and re-backfills the whole project — a full
 // resync (CONTEXT.md → Sync). It holds the sync mutex for the duration so no
 // incremental cycle interleaves with the wipe or the rebuild, and on success

@@ -32,6 +32,16 @@ type boardCard struct {
 	// the card. It is set only by the Sprint cell drill-down (#79); the Board leaves
 	// it "" so no status pill renders there.
 	Status string
+	// Editable makes the estimate pill an interactive write-back control (#108,
+	// docs/adr/0005). It is set ONLY by the Board view; the same card on the Sprint
+	// drill-down leaves it false, so editability does not leak in through the shared
+	// board-card partial. When false the pill is a read-only display chip.
+	Editable bool
+	// RawSize is the ticket's stored T-shirt label ("S"/"M"/"L" or "" for
+	// no-estimate), carried alongside the display string (Size) so the editable
+	// pill knows the current selection and the value to revert to. It is only
+	// consumed when Editable.
+	RawSize string
 }
 
 // boardColumn is one workflow-status column and its cards.
@@ -77,6 +87,8 @@ func (s *Server) boardView() (boardView, error) {
 				Key:          c.Key,
 				Summary:      c.Summary,
 				Size:         sizeDisplay(c.Size),
+				RawSize:      c.Size,
+				Editable:     true, // the Board is the sole surface the estimate is editable on
 				Type:         c.Type,
 				Href:         s.jiraIssueURL(c.Key),
 				Assignee:     c.Assignee,

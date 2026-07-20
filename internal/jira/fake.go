@@ -32,6 +32,10 @@ type FakeClient struct {
 	// Err, if set, is returned by both fetch methods (for exercising error
 	// paths).
 	Err error
+	// WriteErr, if set, is returned by UpdateIssueSize instead of applying the
+	// write, so a test can exercise the Board estimate edit's failure path (the
+	// pill reverts and an inline error shows, with Jira left unchanged).
+	WriteErr error
 }
 
 // NewFakeClient returns a FakeClient loaded with the canned DCAI dataset (issues
@@ -74,6 +78,45 @@ func (c *FakeClient) FetchSprints(ctx context.Context) ([]Sprint, error) {
 		return nil, c.Err
 	}
 	return c.Sprints, nil
+}
+
+// FetchIssue returns the current in-memory snapshot of one issue by key (or the
+// configured error). It reflects any prior UpdateIssueSize write, so the Board
+// estimate edit's post-write reconciliation read returns the authoritative
+// value in fake mode, exactly as it would against live Jira.
+func (c *FakeClient) FetchIssue(ctx context.Context, key string) (Issue, error) {
+	if c.Err != nil {
+		return Issue{}, c.Err
+	}
+	for _, iss := range c.Issues {
+		if iss.Key == key {
+			return iss, nil
+		}
+	}
+	return Issue{}, fmt.Errorf("fake jira: issue %q not found", key)
+}
+
+// UpdateIssueSize applies the size write in memory (or returns WriteErr), so
+// local dev and the smoke suite exercise the real edit flow rather than a
+// disabled control. size is the T-shirt label "S"/"M"/"L" or "" (no-estimate);
+// the fake stores that label directly (unlike live Jira's single-select), so the
+// write is a straight field set on the matching issue.
+func (c *FakeClient) UpdateIssueSize(ctx context.Context, key, size string) error {
+	if c.WriteErr != nil {
+		return c.WriteErr
+	}
+	switch size {
+	case "", "S", "M", "L":
+	default:
+		return fmt.Errorf("fake jira: unknown size %q (want S, M, L or empty)", size)
+	}
+	for i := range c.Issues {
+		if c.Issues[i].Key == key {
+			c.Issues[i].Size = size
+			return nil
+		}
+	}
+	return fmt.Errorf("fake jira: issue %q not found", key)
 }
 
 func cannedIssues() ([]Issue, error) {

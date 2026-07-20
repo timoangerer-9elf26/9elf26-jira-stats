@@ -53,6 +53,14 @@ func (c *gatedClient) FetchSprints(context.Context) ([]jira.Sprint, error) {
 	return c.Sprints, nil
 }
 
+func (c *gatedClient) FetchIssue(context.Context, string) (jira.Issue, error) {
+	return jira.Issue{}, nil
+}
+
+func (c *gatedClient) UpdateIssueSize(context.Context, string, string) error {
+	return nil
+}
+
 func TestTriggerResyncRebuildsProjectionAndGuardsOverlap(t *testing.T) {
 	st := openTempStore(t)
 
