@@ -146,6 +146,13 @@ func jiraClient() (jira.Client, error) {
 	token := os.Getenv("JIRA_API_TOKEN")
 
 	if base == "" || email == "" || token == "" {
+		// REVIEW_DATASET=dense selects the dense/adversarial review dataset (issue
+		// #104) that stresses every view's layout; unset or any other value keeps
+		// the canonical canned dataset byte-for-byte unchanged.
+		if os.Getenv("REVIEW_DATASET") == "dense" {
+			log.Print("JIRA_* not all set and REVIEW_DATASET=dense; using dense review fake Jira")
+			return jira.NewDenseFakeClient(), nil
+		}
 		log.Print("JIRA_BASE_URL/JIRA_EMAIL/JIRA_API_TOKEN not all set; using canned fake Jira")
 		return jira.NewFakeClient(), nil
 	}
