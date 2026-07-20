@@ -789,11 +789,11 @@ func workflowLess(a, b string) bool {
 // counted at most once at its most recent crossing. Counts use the CURRENT size
 // (S=1/M=2/L=3, NULL = no estimate) and only the rollup issue types.
 //
-// Callers own the calendar: from/to are absolute instants (typically an ISO
-// week or preset range computed in Europe/Berlin). A completion is included
-// when its stored UTC instant is >= from and < to. The Velocity rollup reuses
-// this method — one call per ISO week — rather than reimplementing crossing
-// detection.
+// Callers own the calendar: from/to are absolute instants (a preset range
+// computed in Europe/Berlin). A completion is included when its stored UTC
+// instant is >= from and < to. It is the project-wide Done-crossing tally;
+// per-sprint Velocity uses VelocitySeries (via SprintCategoriesInWindow)
+// instead, so its bars align with the Sprint view.
 func (s *Store) CompletedInRange(from, to time.Time) (SizeTally, error) {
 	return s.completedTally(from, to, false)
 }
@@ -1102,6 +1102,88 @@ func sprintCellPredicate(cohort sprintCategory, outcome sprintOutcome, sprintID 
 	whereArgs = append(whereArgs, finArgs...)
 
 	return joinB.String(), whereB.String(), joinArgs, whereArgs
+}
+
+// VelocityBar is one sprint's Velocity datum: its identity, resolved window and
+// Finished points. Points is the sprint's Sprint-view Total-row Finished
+// (SprintCategoriesInWindow(...).Total.Finished.Points) — computed via the SAME
+// code path as the Sprint view so a bar can never silently drift from it. Start
+// is the sprint's activation instant; End is its completion instant, or `now`
+// when Ongoing (the active sprint, whose planned end date is deliberately not
+// trusted — see docs/adr/0004). Instants are UTC; the caller localizes them.
+type VelocityBar struct {
+	SprintID int
+	Name     string
+	Start    time.Time
+	End      time.Time
+	Ongoing  bool
+	Points   int
+}
+
+// VelocitySeries returns the trailing `trailing` sprints as Velocity bars,
+// oldest-first (by activation instant). Each bar's Points are that sprint's
+// Sprint-view Total-row Finished, read from SprintCategoriesInWindow over the
+// sprint's own window, so the Velocity and Sprint views can never drift: the
+// active sprint's bar is, by construction, the Sprint view's Finished points.
+//
+// Window per bar: a completed sprint uses [start, completion); an active
+// (not-yet-completed) sprint uses [start, now). `now` bounds the active sprint.
+// Future / never-started sprints (state "future", or with no activation instant)
+// are skipped — they have no real window. A non-positive `trailing` yields no
+// bars.
+func (s *Store) VelocitySeries(now time.Time, trailing int) ([]VelocityBar, error) {
+	if trailing <= 0 {
+		return nil, nil
+	}
+	sprints, err := s.Sprints()
+	if err != nil {
+		return nil, err
+	}
+
+	// Keep only started sprints with a window anchor; a future sprint has none
+	// (its activation instant, if any, is a createdDate fallback — not a real
+	// start).
+	started := make([]Sprint, 0, len(sprints))
+	for _, sp := range sprints {
+		if strings.EqualFold(sp.State, "future") || sp.ActivatedAt.IsZero() {
+			continue
+		}
+		started = append(started, sp)
+	}
+
+	// Oldest-first by activation instant; id breaks ties for a stable order.
+	sort.SliceStable(started, func(i, j int) bool {
+		if started[i].ActivatedAt.Equal(started[j].ActivatedAt) {
+			return started[i].ID < started[j].ID
+		}
+		return started[i].ActivatedAt.Before(started[j].ActivatedAt)
+	})
+
+	// Trailing N, keeping oldest-first.
+	if len(started) > trailing {
+		started = started[len(started)-trailing:]
+	}
+
+	bars := make([]VelocityBar, 0, len(started))
+	for _, sp := range started {
+		end, ongoing := sp.CompletedAt, false
+		if end.IsZero() {
+			end, ongoing = now, true
+		}
+		cats, err := s.SprintCategoriesInWindow(sp.ID, sp.ActivatedAt, end)
+		if err != nil {
+			return nil, err
+		}
+		bars = append(bars, VelocityBar{
+			SprintID: sp.ID,
+			Name:     sp.Name,
+			Start:    sp.ActivatedAt,
+			End:      end,
+			Ongoing:  ongoing,
+			Points:   cats.Total.Finished.Points,
+		})
+	}
+	return bars, nil
 }
 
 // SprintCellIssue is one issue behind a Sprint-view cell drill-down (#79): the

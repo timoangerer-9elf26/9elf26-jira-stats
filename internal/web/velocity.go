@@ -1,32 +1,34 @@
 package web
 
 import (
-	"fmt"
 	"net/http"
-	"time"
+
+	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 )
 
-// defaultVelocityWeeks is how many trailing ISO weeks the Velocity view shows
-// when not otherwise configured. The spec calls for ~8–12 weeks of history to
-// inform "how much can we plan next week."
-const defaultVelocityWeeks = 10
+// defaultVelocitySprints is how many trailing sprints the Velocity view shows
+// when not otherwise configured (~10, per the spec).
+const defaultVelocitySprints = 10
 
-// velocityWeek is one bar of the Velocity view: a single ISO week's completed
-// points. Percent is the bar height relative to the tallest week in the window
-// (0 when the whole window is empty), so bars share one scale.
-type velocityWeek struct {
-	Label   string // ISO week, Europe/Berlin, e.g. "KW29"
+// velocitySprint is one bar of the Velocity view: a single sprint's Finished
+// points (equal to the Sprint view's Total-row Finished for that sprint).
+// Percent is the bar height relative to the tallest sprint in the window (0 when
+// the whole window is empty), so bars share one scale. Dates is the start–end
+// date line (date only, Europe/Berlin): "14 Jul – 18 Jul" for a completed
+// sprint, "14 Jul – now (ongoing)" for the active one.
+type velocitySprint struct {
+	Label   string // the sprint's name (e.g. "KW29")
 	Points  int
 	Percent int
+	Dates   string
 }
 
-// velocityView is the Velocity page model: the trailing ISO weeks oldest-first
-// with no gaps — every week in the window is present, empty weeks included.
-// Empty is true when no week in the window has any completed points, so the
+// velocityView is the Velocity page model: the trailing sprints oldest-first.
+// Empty is true when no sprint in the window has any Finished points, so the
 // view can show a friendly note (e.g. before the first sync populates history).
 type velocityView struct {
-	Weeks []velocityWeek
-	Empty bool
+	Sprints []velocitySprint
+	Empty   bool
 }
 
 // handleVelocity renders the full standalone Velocity page.
@@ -42,57 +44,53 @@ func (s *Server) handleVelocity(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// velocityView computes completed points per ISO week for the trailing
-// s.velocityWeeks weeks (Europe/Berlin, Monday-start), oldest first.
+// velocityView computes Finished points per sprint for the trailing
+// s.velocitySprints sprints, oldest-first.
 //
-// It reuses store.CompletedInRange once per [weekStart, weekStart+7d) window
-// rather than reimplementing Done-crossing detection, and reuses weekStart for
-// the Monday boundaries. Every week in the window is emitted so the series has
-// no gaps; weeks with no completions carry zero points.
+// It reuses store.VelocitySeries — which reads each sprint's Finished from the
+// SAME SprintCategoriesInWindow path as the Sprint view — so a bar can never
+// drift from the Sprint view's Total-row Finished. This layer only localizes the
+// window instants into the display timezone and formats the date line.
 func (s *Server) velocityView() (velocityView, error) {
-	thisMonday := weekStart(s.now().In(s.loc), s.loc)
-	weeks := make([]velocityWeek, 0, s.velocityWeeks)
+	bars, err := s.rollups.VelocitySeries(s.now(), s.velocitySprints)
+	if err != nil {
+		return velocityView{}, err
+	}
+	sprints := make([]velocitySprint, 0, len(bars))
 	maxPoints := 0
-	for i := s.velocityWeeks - 1; i >= 0; i-- {
-		from := thisMonday.AddDate(0, 0, -7*i)
-		to := from.AddDate(0, 0, 7)
-		tally, err := s.rollups.CompletedInRange(from, to)
-		if err != nil {
-			return velocityView{}, err
-		}
-		weeks = append(weeks, velocityWeek{Label: isoWeekLabel(from), Points: tally.Points})
-		if tally.Points > maxPoints {
-			maxPoints = tally.Points
+	for _, b := range bars {
+		sprints = append(sprints, velocitySprint{
+			Label:  b.Name,
+			Points: b.Points,
+			Dates:  s.sprintDateLine(b),
+		})
+		if b.Points > maxPoints {
+			maxPoints = b.Points
 		}
 	}
-	for i := range weeks {
-		weeks[i].Percent = barPercent(weeks[i].Points, maxPoints)
+	for i := range sprints {
+		sprints[i].Percent = barPercent(sprints[i].Points, maxPoints)
 	}
-	return velocityView{Weeks: weeks, Empty: maxPoints == 0}, nil
+	return velocityView{Sprints: sprints, Empty: maxPoints == 0}, nil
 }
 
-// isoWeekLabel formats a week's Monday as its Europe/Berlin ISO-week label
-// (e.g. "KW29"). weekStart hands us a Monday, so ISOWeek is unambiguous.
-func isoWeekLabel(mondayStart time.Time) string {
-	_, week := mondayStart.ISOWeek()
-	return fmt.Sprintf("KW%02d", week)
+// sprintDateLine formats a bar's start–end dates (date only, display timezone):
+// a completed sprint as "14 Jul – 18 Jul"; the active sprint as
+// "14 Jul – now (ongoing)" — the running end date plus an ongoing marker, since
+// the planned end date is deliberately not used (docs/adr/0004).
+func (s *Server) sprintDateLine(b store.VelocityBar) string {
+	start := b.Start.In(s.loc).Format("2 Jan")
+	if b.Ongoing {
+		return start + " – now (ongoing)"
+	}
+	return start + " – " + b.End.In(s.loc).Format("2 Jan")
 }
 
-// barPercent scales points to a 0–100 bar height relative to the tallest week.
+// barPercent scales points to a 0–100 bar height relative to the tallest sprint.
 // A zero (or empty) window yields 0 so empty bars stay flat.
 func barPercent(points, max int) int {
 	if max <= 0 {
 		return 0
 	}
 	return points * 100 / max
-}
-
-// weekStart returns Monday 00:00 in loc for the ISO week containing t — the
-// per-week boundary the Velocity view buckets on.
-func weekStart(t time.Time, loc *time.Location) time.Time {
-	t = t.In(loc)
-	// Go weekdays are Sunday=0..Saturday=6; ISO weeks start Monday.
-	offset := (int(t.Weekday()) + 6) % 7
-	y, m, d := t.Date()
-	return time.Date(y, m, d-offset, 0, 0, 0, 0, loc)
 }

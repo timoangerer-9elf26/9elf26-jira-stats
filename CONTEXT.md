@@ -183,4 +183,6 @@ The test is by *current* state, not status-at-start: a carry-over that is
 **reopened** and worked this sprint leaves the finished bucket and correctly
 re-enters the counts (as Open, or as Finished if it is re-finished within the
 window). Scope is the Sprint view only — the Board still shows these tickets in
-their status columns, and Velocity attributes their completion to the prior week.
+their status columns. [Velocity](#velocity) shares the Sprint view's Finished
+computation, so it excludes pre-finished carry-overs identically (their
+completion belongs to the prior sprint).

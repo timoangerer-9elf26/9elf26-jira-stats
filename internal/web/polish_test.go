@@ -92,7 +92,7 @@ func TestViewsRenderFriendlyEmptyStateBeforeFirstSync(t *testing.T) {
 		// A never-synced store has no active sprint, so Sprint shows the no-sprint
 		// empty state (same treatment as the Board), not a finished-work note.
 		{"/sprint", "No active sprint"},
-		{"/velocity", "No completed work"},
+		{"/velocity", "No finished work"},
 	}
 	for _, c := range cases {
 		body := get(t, app.URL+c.path) // get() already fails on a non-200 status.
@@ -108,6 +108,9 @@ type failingRollups struct{}
 
 func (failingRollups) CompletedInRange(_, _ time.Time) (store.SizeTally, error) {
 	return store.SizeTally{}, errBoom
+}
+func (failingRollups) VelocitySeries(_ time.Time, _ int) ([]store.VelocityBar, error) {
+	return nil, errBoom
 }
 func (failingRollups) SprintCategoriesInWindow(_ int, _, _ time.Time) (store.SprintCategories, error) {
 	return store.SprintCategories{}, errBoom

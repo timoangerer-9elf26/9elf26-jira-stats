@@ -35,6 +35,11 @@ var assetsFS embed.FS
 // HTTP seam testable and decoupled from the concrete store.
 type Rollups interface {
 	CompletedInRange(from, to time.Time) (store.SizeTally, error)
+	// VelocitySeries returns the trailing N sprints as Velocity bars (oldest-first),
+	// each bar's Finished points read from the Sprint view's SprintCategoriesInWindow
+	// path, so a bar can never drift from the Sprint view. `now` bounds the active
+	// sprint's open window.
+	VelocitySeries(now time.Time, trailing int) ([]store.VelocityBar, error)
 	// SprintCategoriesInWindow is the Sprint view's Started-with / Added / Finished
 	// breakdown for a sprint over [from, to), reconstructed from status and
 	// membership history.
@@ -90,23 +95,23 @@ type Resyncer interface {
 // Server holds the parsed templates and the rollup source, and implements
 // http.Handler via its router.
 type Server struct {
-	rollups       Rollups
-	resyncer      Resyncer
-	templates     *template.Template
-	mux           *http.ServeMux
-	now           func() time.Time
-	loc           *time.Location
-	velocityWeeks int
-	jiraBaseURL   string
-	me            string
+	rollups         Rollups
+	resyncer        Resyncer
+	templates       *template.Template
+	mux             *http.ServeMux
+	now             func() time.Time
+	loc             *time.Location
+	velocitySprints int
+	jiraBaseURL     string
+	me              string
 }
 
 // Option configures a Server at construction.
 type Option func(*Server)
 
 // WithClock overrides the wall clock used to resolve relative windows (the
-// Sprint window [sprint start, now), the Daily window, Velocity weeks), so
-// tests can pin "now" deterministically.
+// Sprint window [sprint start, now), the Daily window, the Velocity active
+// sprint's [start, now)), so tests can pin "now" deterministically.
 func WithClock(now func() time.Time) Option {
 	return func(s *Server) { s.now = now }
 }
@@ -146,12 +151,12 @@ func WithResyncer(r Resyncer) Option {
 	return func(s *Server) { s.resyncer = r }
 }
 
-// WithVelocityWeeks overrides how many trailing ISO weeks the Velocity view
-// shows (spec: ~8–12). Non-positive values are ignored, keeping the default.
-func WithVelocityWeeks(n int) Option {
+// WithVelocitySprints overrides how many trailing sprints the Velocity view
+// shows (spec: ~10). Non-positive values are ignored, keeping the default.
+func WithVelocitySprints(n int) Option {
 	return func(s *Server) {
 		if n > 0 {
-			s.velocityWeeks = n
+			s.velocitySprints = n
 		}
 	}
 }
@@ -168,12 +173,12 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 		return nil, fmt.Errorf("load %s: %w", displayTimeZone, err)
 	}
 	s := &Server{
-		rollups:       rollups,
-		templates:     tmpl,
-		mux:           http.NewServeMux(),
-		now:           time.Now,
-		loc:           loc,
-		velocityWeeks: defaultVelocityWeeks,
+		rollups:         rollups,
+		templates:       tmpl,
+		mux:             http.NewServeMux(),
+		now:             time.Now,
+		loc:             loc,
+		velocitySprints: defaultVelocitySprints,
 	}
 	for _, opt := range opts {
 		opt(s)
