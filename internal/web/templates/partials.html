@@ -716,8 +716,10 @@
 {{end}}
 
 {{/* daily-card is one ticket on the Daily board: key, title, type badge, a
-     read-only size chip, the assignee display name, the latest in-window activity
-     timestamp ("20.7. 19:10"), and a bottom origin badge. The badge reads
+     read-only size chip, the latest in-window activity timestamp
+     ("20.7. 19:10"), the assignee avatar (shared card-avatar: image → initials →
+     neutral empty circle when unassigned, #114), and a bottom origin badge. The
+     badge reads
      "↳ from <status> · N moves" (the "· N moves" only when it moved more than
      once), coloured by movement kind; a card created in the window reads
      "✦ created here" (with a kind colour only when it also moved). When Href is
@@ -736,8 +738,8 @@
   <div class="mt-2 flex items-center justify-between gap-2 text-xs text-slate-400">
     {{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}
     <span class="flex min-w-0 items-center gap-2">
-      <span class="truncate text-slate-500" title="{{.Assignee}}" data-testid="card:{{.Key}}:assignee">{{.Assignee}}</span>
       <span class="shrink-0 tabular-nums" data-testid="card:{{.Key}}:at">{{.LatestAt}}</span>
+      {{template "card-avatar" .}}
     </span>
   </div>
   <div class="daily-origin daily-origin--{{.Kind}} mt-2" data-testid="card:{{.Key}}:origin">
