@@ -620,9 +620,10 @@
 </style>
 {{end}}
 
-{{/* daily-controls is the Daily selector: a left group of three working-day
-     preset buttons (in chronological order: the weekday-named first day →
-     Yesterday → Today), then a right-aligned group holding the custom From/Until
+{{/* daily-controls is the Daily selector: a left group of preset buttons (in
+     chronological order: the weekday-named first day → Yesterday → Today, then
+     the rolling "Last 24h" rightmost), then a right-aligned group holding the
+     custom From/Until
      datetime pair and the assignee dropdown, in the order From · Until · Assignee
      (Assignee rightmost). It is one <form>; each control fires its own HTMX GET
      that swaps the whole #daily-panel, so the controls always reflect the current

@@ -37,6 +37,15 @@ const (
 	dailyPresetDayBefore = "day-before-yesterday"
 )
 
+// dailyPresetLast24h is the rolling preset key: a [now − 24h, now) window,
+// distinct from the calendar-day presets above. It is never weekend-adjusted
+// and never disabled — it always resolves relative to the current instant, and
+// sits rightmost after Today. See docs/adr/0003 (amended).
+const dailyPresetLast24h = "last-24h"
+
+// dailyLast24hWindow is the rolling window the Last 24h preset spans.
+const dailyLast24hWindow = 24 * time.Hour
+
 // dailyCardView is one card on the Daily board: the display fields, resolved
 // Jira link (empty when unconfigured), the latest in-window activity timestamp
 // ("20.7. 19:10"), and the origin badge fields. Origin names where the card came
@@ -330,9 +339,16 @@ func (s *Server) dailyRangeSelection(q url.Values, now time.Time) dailyRangeResu
 		}
 	} else {
 		selectedKey = normalizeDailyPreset(presetParam, todayDisabled)
-		day := days[selectedKey]
-		res.from = day
-		res.to = day.AddDate(0, 0, 1)
+		if selectedKey == dailyPresetLast24h {
+			// Rolling window: relative to the current instant, never snapped to a
+			// calendar day and never weekend-adjusted.
+			res.to = now
+			res.from = now.Add(-dailyLast24hWindow)
+		} else {
+			day := days[selectedKey]
+			res.from = day
+			res.to = day.AddDate(0, 0, 1)
+		}
 		res.customFrom = res.from.Format(dailyInputFormat)
 		res.customTo = res.to.Format(dailyInputFormat)
 	}
@@ -367,11 +383,19 @@ func (s *Server) dailyRangeSelection(q url.Values, now time.Time) dailyRangeResu
 			Selected: selectedKey == dailyPresetToday,
 			Disabled: todayDisabled,
 		},
+		// Rightmost: the rolling [now − 24h, now) preset. Never disabled and never
+		// weekend-adjusted — it sits after Today but is not a calendar day.
+		{
+			Key: dailyPresetLast24h, Label: "Last 24h",
+			Title:    "Rolling window: the last 24 hours up to now",
+			Selected: selectedKey == dailyPresetLast24h,
+		},
 	}
 	return res
 }
 
 // normalizeDailyPreset resolves a requested preset key to a concrete selection.
+// The rolling Last 24h key passes through unchanged (never weekend-adjusted).
 // An absent or unrecognised key defaults to Today; because Today is disabled on
 // a weekend, a Today selection (default or explicit) then falls back to
 // Yesterday — the most recent enabled preset — so a disabled Today is never the
@@ -382,6 +406,8 @@ func normalizeDailyPreset(param string, todayDisabled bool) string {
 		return dailyPresetYesterday
 	case dailyPresetDayBefore:
 		return dailyPresetDayBefore
+	case dailyPresetLast24h:
+		return dailyPresetLast24h
 	default: // "today", "" or unknown
 		if todayDisabled {
 			return dailyPresetYesterday
