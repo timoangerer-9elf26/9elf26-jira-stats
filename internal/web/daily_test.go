@@ -78,15 +78,42 @@ func TestDailyAllAssigneesToday(t *testing.T) {
 			t.Errorf("Today/All should NOT include %s", key)
 		}
 	}
-	// From → To change and its Berlin timestamp render.
-	if !strings.Contains(body, "In Progress → Review / Testing") {
-		t.Errorf("DCAI-1 change (From → To) not rendered:\n%s", body)
+	// The origin badge names where the card came from, and its Berlin timestamp
+	// renders in the compact "16.7. 08:00" form.
+	if !strings.Contains(body, "from In Progress") {
+		t.Errorf("DCAI-1 origin badge (from <status>) not rendered:\n%s", body)
 	}
-	if !strings.Contains(body, "08:00") {
-		t.Errorf("DCAI-1 change timestamp (Berlin) not rendered:\n%s", body)
+	if !strings.Contains(body, "16.7. 08:00") {
+		t.Errorf("DCAI-1 latest-activity timestamp (Berlin, compact) not rendered:\n%s", body)
 	}
-	// Cards sorted most-recent-first: DCAI-4 (09:00) before DCAI-1 (08:00).
+	// Placement is by window-end status: DCAI-4 lands in In Progress, DCAI-1 in
+	// Review / Testing. The In Progress column renders before Review / Testing, so
+	// DCAI-4 appears before DCAI-1 in the DOM.
+	assertColumnHasCard(t, body, "In Progress", "DCAI-4")
+	assertColumnHasCard(t, body, "Review / Testing", "DCAI-1")
 	assertOrder(t, body, `data-key="DCAI-4"`, `data-key="DCAI-1"`)
+}
+
+// assertColumnHasCard checks that the given card key appears within the board
+// column of the given status name (a card placed in its window-end column).
+func assertColumnHasCard(t *testing.T, body, status, key string) {
+	t.Helper()
+	marker := `data-status="` + status + `"`
+	start := strings.Index(body, marker)
+	if start == -1 {
+		t.Errorf("column %q not found:\n%s", status, body)
+		return
+	}
+	// The next column starts at the following data-status; the card must fall
+	// before it.
+	rest := body[start+len(marker):]
+	end := strings.Index(rest, `data-testid="daily-column"`)
+	if end == -1 {
+		end = len(rest)
+	}
+	if !strings.Contains(rest[:end], `data-key="`+key+`"`) {
+		t.Errorf("card %s should be in column %q:\n%s", key, status, body)
+	}
 }
 
 func TestDailySpecificAssignee(t *testing.T) {
@@ -221,8 +248,18 @@ func TestDailyEmptyState(t *testing.T) {
 	}}, now)
 
 	body := get(t, app.URL+"/daily/results?assignee=all&preset=today")
-	if !strings.Contains(body, `data-testid="daily-empty"`) {
-		t.Errorf("expected friendly empty state when nothing matches:\n%s", body)
+	// The five workflow columns always render, even when the board is empty.
+	if !strings.Contains(body, `data-testid="daily-board"`) {
+		t.Errorf("board should still render its columns when empty:\n%s", body)
+	}
+	for _, col := range []string{"Refinement", "Ready To Do", "In Progress", "Review / Testing", "Done"} {
+		if !strings.Contains(body, `data-status="`+col+`"`) {
+			t.Errorf("empty board should still render the %q column:\n%s", col, body)
+		}
+	}
+	// Canceled has no card, so its column is not rendered.
+	if strings.Contains(body, `data-status="Canceled"`) {
+		t.Errorf("empty Canceled column must not render")
 	}
 	if strings.Contains(body, `data-key="DCAI-1"`) {
 		t.Errorf("out-of-window ticket must not render")
@@ -392,37 +429,38 @@ func dailyDigestFixture(t *testing.T) (*jira.FakeClient, time.Time) {
 	}}, now
 }
 
-// TestDailyDigest: the digest section renders above the granular log, groups
-// each moved ticket under its net-movement bucket, and its headline counts match
-// the groupings.
-func TestDailyDigest(t *testing.T) {
+// TestDailyBoardMovementKinds: each moved ticket lands in the column of its
+// window-end status with an origin badge coloured by its net-movement kind.
+func TestDailyBoardMovementKinds(t *testing.T) {
 	client, now := dailyDigestFixture(t)
 	app := newTestAppAt(t, client, now, web.WithMe("alice"))
 
 	body := get(t, app.URL+"/daily") // defaults to alice + Today
 
-	// Headline: total plus a per-bucket breakdown that matches the groupings.
-	if !strings.Contains(body, "moved 3 — 1 finished, 1 advanced, 1 pulled back") {
-		t.Errorf("digest headline missing/incorrect:\n%s", body)
-	}
-	// Each ticket lands under its bucket with its net From ⟶ To movement.
+	// DCAI-10 finished (In Progress → DONE): Done column, finished-coloured badge.
+	assertColumnHasCard(t, body, "Done", "DCAI-10")
+	// DCAI-11 advanced (Ready to Do → In Progress): In Progress column.
+	assertColumnHasCard(t, body, "In Progress", "DCAI-11")
+	// DCAI-12 pulled back (Review / Testing → In Progress): In Progress column too.
+	assertColumnHasCard(t, body, "In Progress", "DCAI-12")
+
 	for _, want := range []string{
-		`data-testid="digest-bucket:finished"`,
-		`data-testid="digest-bucket:advanced"`,
-		`data-testid="digest-bucket:pulled-back"`,
+		`data-testid="card:DCAI-10:origin"`,
+		"daily-origin--finished",
+		"daily-origin--advanced",
+		"daily-origin--pulled-back",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("digest bucket missing %q:\n%s", want, body)
+			t.Errorf("board movement cue missing %q:\n%s", want, body)
 		}
 	}
-	if !strings.Contains(body, "In Progress ⟶ DONE (This Sprint)") {
-		t.Errorf("digest net movement for the finished ticket not rendered:\n%s", body)
+	// The origin badge names where each card came from.
+	if !strings.Contains(body, "from In Progress") { // DCAI-10's origin
+		t.Errorf("finished card origin (from In Progress) not rendered:\n%s", body)
 	}
-	if !strings.Contains(body, "Review / Testing ⟶ In Progress") {
-		t.Errorf("digest net movement for the pulled-back ticket not rendered:\n%s", body)
+	if !strings.Contains(body, "from Review / Testing") { // DCAI-12's origin
+		t.Errorf("pulled-back card origin (from Review / Testing) not rendered:\n%s", body)
 	}
-	// The digest renders above the granular per-transition log.
-	assertOrder(t, body, `data-testid="daily-digest"`, `data-testid="daily-results"`)
 }
 
 // TestDailyIgnoresIntraDoneMoves pins issue #98 over the HTTP seam: a status
@@ -466,75 +504,77 @@ func TestDailyIgnoresIntraDoneMoves(t *testing.T) {
 
 	body := get(t, app.URL+"/daily") // alice + Today
 
-	// The intra-done ticket disappears from the whole view.
+	// The intra-done-only ticket disappears from the board entirely (#98).
 	if strings.Contains(body, `data-key="DCAI-21"`) {
 		t.Errorf("DCAI-21 (only intra-done moves) must not appear anywhere on Daily:\n%s", body)
 	}
-	// No intra-done movement label anywhere (cards or digest).
-	for _, banned := range []string{
-		"DONE (This Sprint) → Ready for Release",
-		"DONE (This Sprint) → Released / Deployed",
-		"Ready for Release → Released / Deployed",
-		"DONE (This Sprint) ⟶ Released / Deployed",
-	} {
-		if strings.Contains(body, banned) {
-			t.Errorf("intra-done movement %q must not render:\n%s", banned, body)
-		}
-	}
-	// DCAI-20 survives, net In Progress ⟶ DONE (This Sprint), bucketed Finished.
+	// DCAI-20 survives: its window-end status is Released / Deployed (a done
+	// status), so it lands in the collapsed Done column, and its surviving move is
+	// the finish crossing from In Progress.
 	if !strings.Contains(body, `data-key="DCAI-20"`) {
 		t.Errorf("DCAI-20 (finish crossing) should appear:\n%s", body)
 	}
-	if !strings.Contains(body, "In Progress ⟶ DONE (This Sprint)") {
-		t.Errorf("DCAI-20 net movement not rendered:\n%s", body)
+	assertColumnHasCard(t, body, "Done", "DCAI-20")
+	if !strings.Contains(body, "from In Progress") {
+		t.Errorf("DCAI-20 origin (from In Progress) not rendered:\n%s", body)
 	}
-	if !strings.Contains(body, `data-testid="digest-bucket:finished"`) {
-		t.Errorf("DCAI-20 should be bucketed Finished:\n%s", body)
+	if !strings.Contains(body, "daily-origin--finished") {
+		t.Errorf("DCAI-20 should carry the finished movement colour:\n%s", body)
 	}
-	// Its surviving granular card shows the finish crossing, not the intra-done hop.
-	if !strings.Contains(body, "In Progress → DONE (This Sprint)") {
-		t.Errorf("DCAI-20 granular finish crossing not rendered:\n%s", body)
+	// The reopen (Ready for Release → In Progress) survives as a pulled-back move,
+	// placed in the In Progress column.
+	assertColumnHasCard(t, body, "In Progress", "DCAI-22")
+	if !strings.Contains(body, "from Ready for Release") {
+		t.Errorf("DCAI-22 reopen origin (from Ready for Release) not rendered:\n%s", body)
 	}
-	// The reopen survives as a pulled-back move.
-	if !strings.Contains(body, `data-testid="digest-bucket:pulled-back"`) {
-		t.Errorf("DCAI-22 reopen should be bucketed Pulled back:\n%s", body)
-	}
-	if !strings.Contains(body, "Ready for Release → In Progress") {
-		t.Errorf("DCAI-22 reopen granular move not rendered:\n%s", body)
-	}
-	// Headline counts derive from the filtered set: 2 moved (finish + reopen).
-	if !strings.Contains(body, "moved 2 — 1 finished, 1 pulled back") {
-		t.Errorf("headline should reflect the filtered change set:\n%s", body)
+	if !strings.Contains(body, "daily-origin--pulled-back") {
+		t.Errorf("DCAI-22 reopen should carry the pulled-back movement colour:\n%s", body)
 	}
 }
 
-// TestDailyDigestOmitsEmptyBuckets: a selection whose tickets are all one bucket
-// shows only that bucket, and the headline lists only the non-empty bucket.
-func TestDailyDigestOmitsEmptyBuckets(t *testing.T) {
-	client, now := dailyFixture(t)
-	app := newTestAppAt(t, client, now)
+// TestDailyBoardCreatedHere: a ticket created in the window that never moved is
+// placed in its creation-status column and highlighted "created here" (no origin
+// "from" status, no movement colour). Also covers the Canceled column appearing.
+func TestDailyBoardCreatedHere(t *testing.T) {
+	loc := berlin(t)
+	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, loc)
+	at := time.Date(2026, time.July, 16, 8, 0, 0, 0, loc)
 
-	// All-assignees Today in the base fixture are all Advanced (DCAI-1/4).
-	body := get(t, app.URL+"/daily/results?assignee=all&preset=today")
+	// A created-today active-sprint ticket in Refinement, with no transitions.
+	created := jira.Issue{
+		Key: "DCAI-30", Type: "Story", Summary: "DCAI-30 summary", Status: "Refinement",
+		StatusCategory: "To Do", Size: "M", Assignee: "alice", Creator: "alice",
+		CreatedAt: at, ActiveSprint: "KW29",
+	}
+	// A moved-to-Canceled ticket so the Canceled column renders.
+	canceled := dailyIssue("DCAI-31", "Bug", "alice", true, "In Progress", "Canceled",
+		time.Date(2026, time.July, 16, 9, 0, 0, 0, loc))
+	app := newTestAppAt(t, &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{created, canceled}}, now)
 
-	if !strings.Contains(body, "moved 2 — 2 advanced") {
-		t.Errorf("headline should list only the non-empty bucket:\n%s", body)
+	body := get(t, app.URL+"/daily/results?assignee=alice&preset=today")
+
+	assertColumnHasCard(t, body, "Refinement", "DCAI-30")
+	if !strings.Contains(body, "created here") {
+		t.Errorf("created-in-window card should read 'created here':\n%s", body)
 	}
-	if strings.Contains(body, `data-testid="digest-bucket:finished"`) ||
-		strings.Contains(body, `data-testid="digest-bucket:pulled-back"`) {
-		t.Errorf("empty buckets must not render:\n%s", body)
-	}
+	// The Canceled column renders (rightmost) and holds the canceled card.
+	assertColumnHasCard(t, body, "Canceled", "DCAI-31")
+	assertOrder(t, body, `data-status="Done"`, `data-status="Canceled"`)
 }
 
-// TestDailyDigestAbsentWhenEmpty: with no in-window changes there is no digest.
-func TestDailyDigestAbsentWhenEmpty(t *testing.T) {
+// TestDailyBoardEmptyForAssigneeWithNoWork: an assignee with no in-window work
+// still gets the five columns, just empty.
+func TestDailyBoardEmptyForAssigneeWithNoWork(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
 
 	// carol has no active-sprint work in the window.
 	body := get(t, app.URL+"/daily/results?assignee=carol&preset=today")
-	if strings.Contains(body, `data-testid="daily-digest"`) {
-		t.Errorf("digest must not render for an empty selection:\n%s", body)
+	if !strings.Contains(body, `data-testid="daily-board"`) {
+		t.Errorf("board should render even for an empty selection:\n%s", body)
+	}
+	if strings.Contains(body, `data-testid="daily-card"`) {
+		t.Errorf("no cards should render for carol:\n%s", body)
 	}
 }
 

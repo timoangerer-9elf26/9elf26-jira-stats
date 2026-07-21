@@ -194,75 +194,247 @@ func latestChange(t DailyTicket) time.Time {
 	return t.Changes[len(t.Changes)-1].TransitionedAt
 }
 
-// CreatedTicket is a ticket authored (by its immutable Jira Creator) within the
-// Daily window: its display fields plus the creation instant. Unlike the
-// movement digest, this is NOT scoped to the active sprint — a ticket you
-// authored is something you did regardless of whether it landed in the sprint
-// (see docs/adr/0003).
-type CreatedTicket struct {
-	Key       string
-	Summary   string
-	Type      string // Task, Bug, Story, Epic, Sub-task
-	Size      string // 'S'/'M'/'L', or "" for no estimate
-	Creator   string // Jira Creator display name
-	CreatedAt time.Time
+// DailyBoardCard is one ticket on the Daily board (issue #112): an active-sprint
+// Task/Bug/Story that was created in the window OR moved in it, resolved to the
+// facts a board card renders. Placement is by EndStatus (status at the window
+// END); the origin badge and movement kind derive from the in-window changes.
+type DailyBoardCard struct {
+	Key      string
+	Summary  string
+	Assignee string // "" for an unassigned ticket
+	Size     string // 'S'/'M'/'L', or "" for no estimate
+	Type     string // Task, Bug or Story
+	// Column is the collapsed Daily-board column the card belongs to, decided by
+	// its status at the window END (see dailyBoardColumn): the four open statuses
+	// map to themselves, the whole done set collapses to "Done", Canceled to
+	// "Canceled", and anything else falls into "Refinement" so a card is never
+	// dropped.
+	Column string
+	// StartStatus is the ticket's status at the window START — the origin the badge
+	// names ("↳ from <StartStatus>"). "" when the ticket was created in the window
+	// (no prior status); CreatedInWindow is then set and the card reads
+	// "✦ created here".
+	StartStatus string
+	// Moves is the number of surviving in-window status changes (after the #98
+	// intra-Done drop); 0 for a created-but-unmoved ticket.
+	Moves int
+	// Movement is the net-movement kind (Finished/Advanced/Pulled back), meaningful
+	// only when Moves > 0 (a created-but-unmoved card carries no kind colour).
+	Movement DailyMovement
+	// CreatedInWindow is set when the ticket's created_at falls in the window; it
+	// drives the "✦ created here" highlight.
+	CreatedInWindow bool
+	// LatestActivity is the instant of the most recent in-window activity — the
+	// last surviving move, or the creation instant for a created-but-unmoved
+	// ticket. Drives the card timestamp and the within-column sort.
+	LatestActivity time.Time
 }
 
-// IssuesCreatedInRange returns the tickets whose immutable Jira Creator matches
-// the given creator and whose creation instant falls in [from, to), most-recent
-// first. It is deliberately NOT sprint-scoped (see CreatedTicket): every ticket
-// you authored counts, in the sprint or not.
-//
-// The creator argument mirrors DailyStatusChanges' assignee filter: "" means any
-// creator; UnassignedAssignee means only tickets with no recorded creator; any
-// other value is an exact display-name match. from/to are absolute instants; a
-// ticket is included when its stored UTC created_at is >= from and < to.
-func (s *Store) IssuesCreatedInRange(creator string, from, to time.Time) ([]CreatedTicket, error) {
+// DailyBoard returns the Daily board's cards for [from, to): active-sprint
+// Task/Bug/Story that were created in the window OR had an in-window status
+// change (the same population the digest used, plus created-but-unmoved
+// tickets), filtered by assignee ("" = all, UnassignedAssignee = unassigned,
+// else an exact current-assignee match). Each card is placed by its status at
+// the window END, reconstructed at that instant via statusAtSubquery (so a
+// historical window is a snapshot and a ticket moved after the window still
+// shows in its window-end column); a created-but-unmoved ticket lands in its
+// creation status. The #98 intra-Done drop is preserved (a ticket whose only
+// in-window moves are inside the done set is absent). Cards are returned sorted
+// by most-recent in-window activity first.
+func (s *Store) DailyBoard(assignee string, from, to time.Time) ([]DailyBoardCard, error) {
+	moved, err := s.DailyStatusChanges(assignee, from, to)
+	if err != nil {
+		return nil, err
+	}
+	created, err := s.dailyCreatedInSprint(assignee, from, to)
+	if err != nil {
+		return nil, err
+	}
+	statusAt, err := s.statusAtInstant(to)
+	if err != nil {
+		return nil, err
+	}
+
+	byKey := map[string]*DailyBoardCard{}
+	var order []string
+	get := func(key string) (*DailyBoardCard, bool) {
+		if c, ok := byKey[key]; ok {
+			return c, true
+		}
+		c := &DailyBoardCard{Key: key}
+		byKey[key] = c
+		order = append(order, key)
+		return c, false
+	}
+
+	// endStatus reconstructs the window-end status for placement: the latest
+	// transition at or before `to` (statusAtSubquery), falling back to the given
+	// current status when the ticket has no such transition (e.g. a created ticket
+	// whose creation recorded no status change).
+	endStatus := func(key, fallback string) string {
+		if st, ok := statusAt[key]; ok {
+			return st
+		}
+		return fallback
+	}
+
+	for _, tk := range moved {
+		c, _ := get(tk.Key)
+		c.Summary, c.Assignee, c.Size, c.Type = tk.Summary, tk.Assignee, tk.Size, tk.Type
+		c.StartStatus = tk.StartStatus()
+		c.Moves = len(tk.Changes)
+		c.Movement = tk.Movement()
+		c.LatestActivity = latestChange(tk)
+		c.Column = dailyBoardColumn(endStatus(tk.Key, tk.EndStatus()))
+	}
+	for _, ct := range created {
+		c, existed := get(ct.Key)
+		c.CreatedInWindow = true
+		if !existed {
+			// Created in the window but never moved in it: place it in its creation
+			// status, timestamp/sort on the creation instant, carry no movement kind.
+			c.Summary, c.Assignee, c.Size, c.Type = ct.summary, ct.assignee, ct.size, ct.typ
+			c.LatestActivity = ct.createdAt
+			c.Column = dailyBoardColumn(endStatus(ct.Key, ct.status))
+		}
+	}
+
+	cards := make([]DailyBoardCard, 0, len(order))
+	for _, key := range order {
+		cards = append(cards, *byKey[key])
+	}
+	// Most-recent in-window activity first (stable, so equal instants keep the
+	// moved-then-created arrival order).
+	sort.SliceStable(cards, func(i, j int) bool {
+		return cards[i].LatestActivity.After(cards[j].LatestActivity)
+	})
+	return cards, nil
+}
+
+// dailyCreatedRow is an active-sprint work item created within the Daily window
+// (used to place created-but-unmoved tickets on the board); status is its
+// CURRENT status, the window-end fallback when the ticket has no reconstructable
+// status transition.
+type dailyCreatedRow struct {
+	Key       string
+	summary   string
+	assignee  string
+	size      string
+	typ       string
+	status    string
+	createdAt time.Time
+}
+
+// dailyCreatedInSprint returns the active-sprint Task/Bug/Story created within
+// [from, to), filtered by CURRENT assignee the same way DailyStatusChanges is
+// ("" = all, UnassignedAssignee = unassigned, else an exact match). Unlike the
+// removed "tickets I created" list this IS sprint-scoped and keyed on assignee
+// (not creator): it is the created-in-window arm of the board population.
+func (s *Store) dailyCreatedInSprint(assignee string, from, to time.Time) ([]dailyCreatedRow, error) {
 	query := `
-		SELECT key, summary, type, size, creator, created_at
+		SELECT key, summary, assignee, size, type, status, created_at
 		FROM issue
-		WHERE created_at IS NOT NULL
+		WHERE active_sprint IS NOT NULL
+		  AND type IN (` + rollupTypes + `)
+		  AND created_at IS NOT NULL
 		  AND created_at >= ? AND created_at < ?`
 	args := []any{from.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339)}
 
-	switch creator {
+	switch assignee {
 	case "":
-		// Any creator — no additional predicate.
+		// All assignees — no additional predicate.
 	case UnassignedAssignee:
-		query += ` AND (creator IS NULL OR creator = '')`
+		query += ` AND (assignee IS NULL OR assignee = '')`
 	default:
-		query += ` AND creator = ?`
-		args = append(args, creator)
+		query += ` AND assignee = ?`
+		args = append(args, assignee)
 	}
-	query += ` ORDER BY created_at DESC, key`
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("issues created in range: %w", err)
+		return nil, fmt.Errorf("daily created in sprint: %w", err)
 	}
 	defer rows.Close()
 
-	var tickets []CreatedTicket
+	var out []dailyCreatedRow
 	for rows.Next() {
-		var key, summary, typ, createdStr string
-		var size, creatorCol sql.NullString
-		if err := rows.Scan(&key, &summary, &typ, &size, &creatorCol, &createdStr); err != nil {
-			return nil, fmt.Errorf("scan created row: %w", err)
+		var r dailyCreatedRow
+		var createdStr string
+		var assigneeCol, size sql.NullString
+		if err := rows.Scan(&r.Key, &r.summary, &assigneeCol, &size, &r.typ, &r.status, &createdStr); err != nil {
+			return nil, fmt.Errorf("scan daily created row: %w", err)
 		}
-		createdAt, err := time.Parse(time.RFC3339, createdStr)
-		if err != nil {
+		r.assignee, r.size = assigneeCol.String, size.String
+		if r.createdAt, err = time.Parse(time.RFC3339, createdStr); err != nil {
 			return nil, fmt.Errorf("parse created_at %q: %w", createdStr, err)
 		}
-		tickets = append(tickets, CreatedTicket{
-			Key: key, Summary: summary, Type: typ, Size: size.String,
-			Creator: creatorCol.String, CreatedAt: createdAt,
-		})
+		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate created rows: %w", err)
+		return nil, fmt.Errorf("iterate daily created rows: %w", err)
 	}
-	return tickets, nil
+	return out, nil
 }
+
+// statusAtInstant reconstructs every issue's status at instant `at` (the
+// to_status of its latest `status` transition at or before `at`), returning a
+// key→status map. It reuses statusAtSubquery — the same machinery the Sprint
+// view uses for status-at-window-start — so the Daily board's window-end
+// placement never drifts from it.
+func (s *Store) statusAtInstant(at time.Time) (map[string]string, error) {
+	rows, err := s.db.Query(statusAtSubquery, at.UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil, fmt.Errorf("status at instant: %w", err)
+	}
+	defer rows.Close()
+
+	m := map[string]string{}
+	for rows.Next() {
+		var key, status string
+		if err := rows.Scan(&key, &status); err != nil {
+			return nil, fmt.Errorf("scan status-at row: %w", err)
+		}
+		m[key] = status
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate status-at rows: %w", err)
+	}
+	return m, nil
+}
+
+// dailyBoardColumn collapses a workflow status into one of the Daily board's
+// columns: the four open statuses map to their canonical names, the whole done
+// set collapses to "Done", Canceled to "Canceled", and anything else
+// (Triage/none/an unknown status) falls into "Refinement" (the leftmost column)
+// so a card is never dropped. Matching is case-insensitive (normalizeStatus), so
+// a Jira casing quirk like "Ready to Do" still lands in "Ready To Do".
+func dailyBoardColumn(status string) string {
+	switch {
+	case isDoneStatus(status):
+		return DailyColumnDone
+	case normalizeStatus(status) == normalizeStatus("Canceled"):
+		return DailyColumnCanceled
+	}
+	switch normalizeStatus(status) {
+	case normalizeStatus("Ready To Do"):
+		return "Ready To Do"
+	case normalizeStatus("In Progress"):
+		return "In Progress"
+	case normalizeStatus("Review / Testing"):
+		return "Review / Testing"
+	default: // Refinement, Triage, none, or an unknown status
+		return "Refinement"
+	}
+}
+
+// The two collapsed Daily-board columns whose names are not a single workflow
+// status: Done folds the whole done set, Canceled is the rightmost column
+// rendered only when non-empty. The four open columns use their status names
+// verbatim.
+const (
+	DailyColumnDone     = "Done"
+	DailyColumnCanceled = "Canceled"
+)
 
 // ActiveSprintAssignees returns the distinct, non-empty assignees of active-
 // sprint work items (Task/Bug/Story), sorted alphabetically — the named options

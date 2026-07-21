@@ -1,18 +1,16 @@
 package web
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 )
 
-// dailyTimeFormat renders an in-window transition instant in the display
-// timezone, e.g. "16 Jul 08:00".
-const dailyTimeFormat = "2 Jan 15:04"
+// dailyTimeFormat renders a card's latest in-window activity instant in the
+// display timezone as the compact "20.7. 19:10" the board uses.
+const dailyTimeFormat = "2.1. 15:04"
 
 // dailyTitleFormat renders a preset button's concrete date for its hover title,
 // e.g. "Fri 17 Jul" — since "Yesterday" can actually resolve to Friday.
@@ -39,25 +37,39 @@ const (
 	dailyPresetDayBefore = "day-before-yesterday"
 )
 
-// dailyChangeView is one in-window status change on a card: "From → To" at a
-// display-timezone timestamp.
-type dailyChangeView struct {
-	From string
-	To   string
-	At   string
+// dailyCardView is one card on the Daily board: the display fields, resolved
+// Jira link (empty when unconfigured), the latest in-window activity timestamp
+// ("20.7. 19:10"), and the origin badge fields. Origin names where the card came
+// from into its column ("↳ from <OriginFrom>"), coloured by Kind; a card created
+// in the window reads "✦ created here" (CreatedHere), with a kind colour only
+// when it also moved. Moves is shown as "· N moves" when > 1.
+type dailyCardView struct {
+	Key         string
+	Summary     string
+	Assignee    string // "Unassigned" for a ticket with no assignee
+	Size        string // "S"/"M"/"L" or "no estimate"
+	Type        string
+	Href        string
+	LatestAt    string
+	OriginFrom  string // window-start status (shown when not CreatedHere)
+	Moves       int
+	Kind        string // "finished" | "advanced" | "pulled-back" | "" (created, unmoved)
+	CreatedHere bool
 }
 
-// dailyCardView is one ticket on the Daily view: its display fields, resolved
-// Jira link (empty when unconfigured), and its in-window status changes.
-type dailyCardView struct {
-	Key      string
-	Summary  string
-	Assignee string // "Unassigned" for a ticket with no assignee
-	Size     string // "S"/"M"/"L" or "no estimate"
-	Type     string
-	Href     string
-	Changes  []dailyChangeView
+// dailyColumnView is one column of the Daily board: its display name, its cards
+// (already recency-sorted), and whether it is the Canceled column (rendered only
+// when it holds a card, and styled distinctly).
+type dailyColumnView struct {
+	Name     string
+	Canceled bool
+	Cards    []dailyCardView
 }
+
+// dailyBoardOrder is the fixed left→right set of workflow columns the Daily board
+// always renders, even empty (Done collapses the whole done set). The Canceled
+// column is appended after these, only when it holds at least one card.
+var dailyBoardOrder = []string{"Refinement", "Ready To Do", "In Progress", "Review / Testing", store.DailyColumnDone}
 
 // dailyAssigneeOption is one entry of the assignee dropdown (All, Unassigned, or
 // a named assignee), with Selected reflecting the current filter.
@@ -93,61 +105,11 @@ type dailyRangeResult struct {
 	errMsg     string
 }
 
-// dailyDigestTicketView is one ticket in a digest bucket: its key, resolved Jira
-// link (empty when unconfigured), and its net movement across the window
-// rendered as From ⟶ To.
-type dailyDigestTicketView struct {
-	Key  string
-	Href string
-	From string
-	To   string
-}
-
-// dailyDigestBucketView is one net-movement bucket of the digest: a stable Key
-// for testids/styling, a display Label, its ticket count, and the tickets that
-// landed in it (in the granular log's recency order).
-type dailyDigestBucketView struct {
-	Key     string
-	Label   string
-	Count   int
-	Tickets []dailyDigestTicketView
-}
-
-// dailyDigestView is the summary layer above the granular log: a one-line
-// Headline (e.g. "moved 5 — 2 finished, 2 advanced, 1 pulled back, created 2")
-// plus the non-empty movement buckets in Finished → Advanced → Pulled back
-// order. Present is false only when the selection moved nothing AND created
-// nothing, so the template omits the whole section.
-type dailyDigestView struct {
-	Present  bool
-	Headline string
-	Buckets  []dailyDigestBucketView
-}
-
-// dailyCreatedTicketView is one ticket in the "tickets I created" section: its
-// display fields, resolved Jira link (empty when unconfigured), and the creation
-// instant rendered in the display timezone.
-type dailyCreatedTicketView struct {
-	Key     string
-	Summary string
-	Type    string
-	Size    string // "S"/"M"/"L" or "no estimate"
-	Href    string
-	At      string
-}
-
-// dailyCreatedView is the "tickets I created" section: the tickets the selection
-// authored within the window (NOT sprint-scoped, unlike the movement digest) and
-// their count. Empty is true when the selection created nothing in the window.
-type dailyCreatedView struct {
-	Count   int
-	Tickets []dailyCreatedTicketView
-	Empty   bool
-}
-
-// dailyView is the model for the Daily page and its panel fragment. HasSprint is
-// false when no active sprint is known (drives the no-sprint empty state); Empty
-// is true when the selection has no in-window status changes.
+// dailyView is the model for the Daily board page and its panel fragment.
+// HasSprint is false when no active sprint is known (drives the no-sprint empty
+// state). Columns are the board's columns (the five workflow columns always
+// present, plus Canceled when non-empty). On an invalid custom range Columns is
+// nil and RangeError is set, so the template shows the inline error and no board.
 type dailyView struct {
 	SprintName string
 	HasSprint  bool
@@ -156,10 +118,7 @@ type dailyView struct {
 	CustomFrom string
 	CustomTo   string
 	RangeError string
-	Digest     dailyDigestView
-	Created    dailyCreatedView
-	Cards      []dailyCardView
-	Empty      bool
+	Columns    []dailyColumnView
 }
 
 // handleDaily renders the full standalone Daily page.
@@ -244,127 +203,77 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 	}
 
 	// An invalid custom range renders no results, no silent fallback: the inline
-	// error is shown and the digest / created / cards stay empty.
+	// error is shown and the board stays empty (no columns at all).
 	if rng.errMsg != "" {
-		view.Empty = true
 		return view, nil
 	}
 
 	from, to := rng.from, rng.to
-	tickets, err := s.rollups.DailyStatusChanges(dailyStoreAssignee(assigneeParam), from, to)
+	cards, err := s.rollups.DailyBoard(dailyStoreAssignee(assigneeParam), from, to)
 	if err != nil {
 		return dailyView{}, err
 	}
-	// "Tickets I created" is pinned to the configured "me", NOT the selected
-	// assignee: it is a personal "what I authored" panel (see the issue AC and
-	// docs/adr/0003), so it stays on me even while the dropdown re-scopes the
-	// movement digest to a teammate. Same window as the rest of Daily, but NOT
-	// sprint-scoped: a ticket you authored counts whether or not it landed in the
-	// sprint. With no me configured the section is simply empty (no crash,
-	// consistent with #46's fallback) rather than listing everyone's tickets.
-	var created []store.CreatedTicket
-	if s.me != "" {
-		created, err = s.rollups.IssuesCreatedInRange(s.me, from, to)
-		if err != nil {
-			return dailyView{}, err
-		}
-	}
-	view.Created = s.dailyCreated(created)
-	for _, tk := range tickets {
-		card := dailyCardView{
-			Key:      tk.Key,
-			Summary:  tk.Summary,
-			Assignee: assigneeDisplay(tk.Assignee),
-			Size:     sizeDisplay(tk.Size),
-			Type:     tk.Type,
-			Href:     s.jiraIssueURL(tk.Key),
-		}
-		for _, c := range tk.Changes {
-			card.Changes = append(card.Changes, dailyChangeView{
-				From: statusDisplay(c.From),
-				To:   c.To,
-				At:   c.TransitionedAt.In(s.loc).Format(dailyTimeFormat),
-			})
-		}
-		view.Cards = append(view.Cards, card)
-	}
-	view.Digest = s.dailyDigest(tickets, view.Created.Count)
-	view.Empty = len(view.Cards) == 0
+	view.Columns = s.dailyBoard(cards)
 	return view, nil
 }
 
-// dailyCreated builds the "tickets I created" section from the created tickets,
-// keeping the store's most-recent-first order. Empty is set when nothing was
-// created so the template can show a friendly empty state.
-func (s *Server) dailyCreated(created []store.CreatedTicket) dailyCreatedView {
-	view := dailyCreatedView{Count: len(created), Empty: len(created) == 0}
-	for _, tk := range created {
-		view.Tickets = append(view.Tickets, dailyCreatedTicketView{
-			Key:     tk.Key,
-			Summary: tk.Summary,
-			Type:    tk.Type,
-			Size:    sizeDisplay(tk.Size),
-			Href:    s.jiraIssueURL(tk.Key),
-			At:      tk.CreatedAt.In(s.loc).Format(dailyTimeFormat),
-		})
+// dailyBoard groups the store's recency-sorted board cards into the fixed
+// workflow columns (Refinement → Done, always rendered even empty), appending
+// the Canceled column last only when it holds a card. Each store card is mapped
+// to its display card, resolving the Jira link, the compact timestamp, the
+// origin badge fields and the movement-kind colour.
+func (s *Server) dailyBoard(cards []store.DailyBoardCard) []dailyColumnView {
+	cols := make([]dailyColumnView, len(dailyBoardOrder))
+	index := make(map[string]int, len(dailyBoardOrder))
+	for i, name := range dailyBoardOrder {
+		cols[i] = dailyColumnView{Name: name}
+		index[name] = i
 	}
-	return view
+	var canceled dailyColumnView
+	canceled = dailyColumnView{Name: store.DailyColumnCanceled, Canceled: true}
+
+	for _, c := range cards {
+		card := dailyCardView{
+			Key:         c.Key,
+			Summary:     c.Summary,
+			Assignee:    assigneeDisplay(c.Assignee),
+			Size:        sizeDisplay(c.Size),
+			Type:        c.Type,
+			Href:        s.jiraIssueURL(c.Key),
+			LatestAt:    c.LatestActivity.In(s.loc).Format(dailyTimeFormat),
+			Moves:       c.Moves,
+			CreatedHere: c.CreatedInWindow,
+		}
+		if !c.CreatedInWindow {
+			card.OriginFrom = statusDisplay(c.StartStatus)
+		}
+		// A created-but-unmoved card carries no movement kind (neutral highlight);
+		// anything that moved is coloured by its net-movement bucket.
+		if c.Moves > 0 {
+			card.Kind = dailyMovementKind(c.Movement)
+		}
+		if c.Column == store.DailyColumnCanceled {
+			canceled.Cards = append(canceled.Cards, card)
+			continue
+		}
+		cols[index[c.Column]].Cards = append(cols[index[c.Column]].Cards, card)
+	}
+	if len(canceled.Cards) > 0 {
+		cols = append(cols, canceled)
+	}
+	return cols
 }
 
-// dailyDigest summarises the window into the digest: the moved tickets bucketed
-// by net-movement (Finished / Advanced / Pulled back) plus the count of tickets
-// the selection created. It keeps the granular log's recency order within each
-// bucket, drops empty buckets, and builds the headline from the same counts
-// (e.g. "moved 5 — 2 finished, 2 advanced, 1 pulled back, created 2"). The
-// created count feeds the headline alongside the movement count but the bucket
-// grid stays movement-only (the created tickets get their own section). Returns a
-// zero (Present=false) digest only when nothing moved AND nothing was created, so
-// the template omits the whole section.
-func (s *Server) dailyDigest(tickets []store.DailyTicket, createdCount int) dailyDigestView {
-	if len(tickets) == 0 && createdCount == 0 {
-		return dailyDigestView{}
-	}
-	// Display order: Finished, Advanced, Pulled back.
-	finished := dailyDigestBucketView{Key: "finished", Label: "Finished"}
-	advanced := dailyDigestBucketView{Key: "advanced", Label: "Advanced"}
-	pulledBack := dailyDigestBucketView{Key: "pulled-back", Label: "Pulled back"}
-	for _, tk := range tickets {
-		entry := dailyDigestTicketView{
-			Key:  tk.Key,
-			Href: s.jiraIssueURL(tk.Key),
-			From: statusDisplay(tk.StartStatus()),
-			To:   tk.EndStatus(),
-		}
-		switch tk.Movement() {
-		case store.MovementFinished:
-			finished.Tickets = append(finished.Tickets, entry)
-		case store.MovementPulledBack:
-			pulledBack.Tickets = append(pulledBack.Tickets, entry)
-		default:
-			advanced.Tickets = append(advanced.Tickets, entry)
-		}
-	}
-	var buckets []dailyDigestBucketView
-	var parts []string
-	if len(tickets) > 0 {
-		var movementParts []string
-		for _, b := range []dailyDigestBucketView{finished, advanced, pulledBack} {
-			b.Count = len(b.Tickets)
-			if b.Count == 0 {
-				continue
-			}
-			buckets = append(buckets, b)
-			movementParts = append(movementParts, fmt.Sprintf("%d %s", b.Count, strings.ToLower(b.Label)))
-		}
-		parts = append(parts, fmt.Sprintf("moved %d — %s", len(tickets), strings.Join(movementParts, ", ")))
-	}
-	if createdCount > 0 {
-		parts = append(parts, fmt.Sprintf("created %d", createdCount))
-	}
-	return dailyDigestView{
-		Present:  true,
-		Headline: strings.Join(parts, ", "),
-		Buckets:  buckets,
+// dailyMovementKind maps a net-movement bucket to the CSS kind suffix the origin
+// badge is coloured by (finished=emerald, advanced=sky, pulled-back=amber).
+func dailyMovementKind(m store.DailyMovement) string {
+	switch m {
+	case store.MovementFinished:
+		return "finished"
+	case store.MovementPulledBack:
+		return "pulled-back"
+	default:
+		return "advanced"
 	}
 }
 
