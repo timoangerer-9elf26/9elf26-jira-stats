@@ -715,8 +715,10 @@
 </div>
 {{end}}
 
-{{/* daily-card is one ticket on the Daily board: key, title, type badge, a
-     read-only size chip, the latest in-window activity timestamp
+{{/* daily-card is one ticket on the Daily board: key, title, type badge, an
+     estimate pill (editable when .Editable, reusing the Board's board-estimate
+     write-back to POST /board/estimate — #115; a read-only size chip otherwise),
+     the latest in-window activity timestamp
      ("20.7. 19:10"), the assignee avatar (shared card-avatar: image → initials →
      neutral empty circle when unassigned, #114), and a bottom origin badge. The
      badge reads
@@ -736,7 +738,7 @@
   </div>
   <p class="mt-1.5 truncate text-sm text-slate-800" title="{{.Summary}}" data-testid="card:{{.Key}}:title">{{.Summary}}</p>
   <div class="mt-2 flex items-center justify-between gap-2 text-xs text-slate-400">
-    {{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}
+    {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "")}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
     <span class="flex min-w-0 items-center gap-2">
       <span class="shrink-0 tabular-nums" data-testid="card:{{.Key}}:at">{{.LatestAt}}</span>
       {{template "card-avatar" .}}

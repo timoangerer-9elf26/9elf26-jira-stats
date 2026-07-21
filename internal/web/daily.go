@@ -59,10 +59,19 @@ type dailyCardView struct {
 	// Jira avatar image URL ("" when none) and Initials the computed fallback — the
 	// trio the shared card-avatar partial renders (image → initials → empty circle),
 	// exactly as the Board does.
-	Assignee    string
-	AvatarURL   string
-	Initials    string
-	Size        string // "S"/"M"/"L" or "no estimate"
+	Assignee  string
+	AvatarURL string
+	Initials  string
+	Size      string // "S"/"M"/"L" or "no estimate"
+	// RawSize is the ticket's stored T-shirt label ("S"/"M"/"L" or "" for
+	// no-estimate), carried alongside Size so the editable pill knows the current
+	// selection and the value to revert to. Only consumed when Editable.
+	RawSize string
+	// Editable makes the estimate pill an interactive write-back control reusing
+	// POST /board/estimate (#115, docs/adr/0005), the same behaviour as the Board.
+	// The Daily board sets it true; the Sprint drill-down (a different partial)
+	// stays read-only, so editability never leaks in through a shared define.
+	Editable    bool
 	Type        string
 	Href        string
 	LatestAt    string
@@ -255,6 +264,8 @@ func (s *Server) dailyBoard(cards []store.DailyBoardCard) []dailyColumnView {
 			AvatarURL:   c.AssigneeAvatarURL,
 			Initials:    avatarInitials(c.Assignee),
 			Size:        sizeDisplay(c.Size),
+			RawSize:     c.Size,
+			Editable:    true, // the Daily board is an editable estimate surface (#115)
 			Type:        c.Type,
 			Href:        s.jiraIssueURL(c.Key),
 			LatestAt:    c.LatestActivity.In(s.loc).Format(dailyTimeFormat),

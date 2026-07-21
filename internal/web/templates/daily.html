@@ -6,6 +6,7 @@
     {{template "nav" "daily"}}
     {{template "page-header" "Daily — a board of active-sprint tickets created or moved in the window, placed by workflow stage and showing where each came from."}}
 
+    {{template "board-estimate-style"}}
     {{if .HasSprint}}
     <div id="daily-panel">
       {{template "daily-panel" .}}
