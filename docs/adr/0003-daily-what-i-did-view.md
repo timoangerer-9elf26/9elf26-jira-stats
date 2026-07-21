@@ -4,6 +4,33 @@ status: accepted
 
 # Daily view becomes a "what I did since yesterday" overview
 
+> **Amended (2026-07): the Daily view becomes a board.** The digest + granular
+> per-transition log are **replaced by a single board** (workflow columns
+> Refinement → Ready To Do → In Progress → Review / Testing → **Done** (one
+> column collapsing the whole Done set) → **Canceled** (rightmost, only when
+> non-empty); the five workflow columns always render). It shows every
+> active-sprint work item **created in the window or moved within it**; each card
+> sits in the column of its **status at the window end** (reconstructed at that
+> instant) — so the board is live for *Today* and a point-in-time snapshot for
+> older windows. Cards are the Board card (key, type, title, editable estimate,
+> assignee avatar) plus in-window movement: the latest move's timestamp and an
+> **origin badge** (`from <window-start status>` + move count) coloured by
+> movement kind (Finished / Advanced / Pulled back, unchanged incl. the #98
+> intra-Done drop); a card created in-window is highlighted and reads *created
+> here* when it never moved.
+>
+> Two decisions worth recording. **Placement is by status at window-end, not
+> current status** — a ticket that moved after the window still shows where it
+> sat when the window closed, keeping a historical "Yesterday" board a truthful
+> snapshot rather than a picture of now; a created-but-unmoved ticket's
+> window-end status is simply its creation status. **The board replaces the
+> digest entirely** rather than sitting above it: movement kind is on every card
+> and totals are the column counts, so a separate summary would be redundant —
+> the one-line headline is dropped. A new **Last 24h** rolling preset
+> (`[now − 24h, now)`) is added to the right of Today (presets read
+> earliest→now); it is not weekend-adjusted. Default stays Today. Estimate
+> editing now works on this board too (see `docs/adr/0005`).
+>
 > **Amended by #90 (2026-07):** the two fixed windows (Last 24h, Since yesterday)
 > are replaced by a **selectable date-time range**: a custom **From / Until**
 > (date + time, Europe/Berlin) plus three **working-day presets** — **Today**,

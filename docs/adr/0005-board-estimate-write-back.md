@@ -4,6 +4,16 @@ status: accepted
 
 # Editable estimate on the Board writes back to Jira
 
+> **Amended (2026-07): editing is no longer Board-only.** When the Daily view
+> became a board (`docs/adr/0003`) it adopted the same board-style card, so the
+> **editable estimate pill now renders on the Daily board as well**. It is the
+> identical write path — click → S/M/L/No-estimate → PUT to Jira → re-read the
+> issue → revert + inline error on failure — reusing the same `Editable` card
+> flag and `POST /board/estimate` handler; nothing about the write itself
+> changes, only that a second surface now sets `Editable`. The "Board-only"
+> framing below should be read as "the two board surfaces (Board + Daily board)";
+> the Sprint drill-down card stays read-only.
+
 The Board's estimate pill (a ticket's size — S / M / L / no-estimate) becomes
 editable: clicking it opens a small popover (S · M · L · No estimate) and picking
 a value **writes that estimate back to Jira** immediately, with no confirm step.
