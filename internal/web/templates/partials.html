@@ -698,7 +698,7 @@
 {{define "daily-board"}}
 <div data-testid="daily-results">
   <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Board{{if .SprintName}} — {{.SprintName}}{{end}}</h2>
-  <div class="mt-4 flex gap-4 overflow-x-auto pb-4" data-testid="daily-board">
+  <div class="mt-4 flex gap-4 overflow-x-auto pb-4" style="overflow-y:hidden" data-testid="daily-board">
     {{range .Columns}}
     <div class="flex w-72 shrink-0 flex-col rounded-xl border border-slate-200 bg-slate-100/60 p-3"
          data-testid="daily-column" data-status="{{.Name}}">

@@ -119,6 +119,22 @@ func TestBoardShowsActiveSprintCardsInColumns(t *testing.T) {
 	}
 }
 
+// TestBoardStripScrollsHorizontallyOnly asserts the /board column strip is a
+// horizontal-only scroll box (overflow-x auto paired with overflow-y hidden),
+// so vertical scrolling is handed back to the browser window rather than nested
+// inside the strip (#120).
+func TestBoardStripScrollsHorizontallyOnly(t *testing.T) {
+	app := newBoardApp(t, boardFixture())
+	body := get(t, app.URL+"/board")
+
+	if !strings.Contains(body, "overflow-x-auto") {
+		t.Errorf("board strip must keep horizontal scrolling (overflow-x-auto)\n%s", body)
+	}
+	if !strings.Contains(body, "overflow-y:hidden") {
+		t.Errorf("board strip must disable vertical scrolling (overflow-y:hidden)\n%s", body)
+	}
+}
+
 // avatarFixture is an active-sprint (KW29) mix exercising the three assignee
 // states a Board card renders (#68): assigned with a Jira avatar image,
 // assigned without one (initials fallback), and unassigned (neutral circle).

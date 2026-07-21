@@ -10,7 +10,7 @@
     {{if .HasSprint}}
     <section data-testid="board" class="mt-8">
       <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500" data-testid="board-heading">Sprint board — {{.SprintName}}</h2>
-      <div class="mt-4 flex gap-4 overflow-x-auto pb-4">
+      <div class="mt-4 flex gap-4 overflow-x-auto pb-4" style="overflow-y:hidden">
         {{range .Columns}}
           {{template "board-column" .}}
         {{else}}

@@ -295,6 +295,10 @@ func TestDailyEmptyState(t *testing.T) {
 	if !strings.Contains(body, `data-testid="daily-board"`) {
 		t.Errorf("board should still render its columns when empty:\n%s", body)
 	}
+	// The strip scrolls horizontally only; vertical scroll belongs to the window (#120).
+	if !strings.Contains(body, "overflow-x-auto") || !strings.Contains(body, "overflow-y:hidden") {
+		t.Errorf("daily board strip must scroll horizontally only (overflow-x-auto + overflow-y:hidden):\n%s", body)
+	}
 	for _, col := range []string{"Refinement", "Ready To Do", "In Progress", "Review / Testing", "Done"} {
 		if !strings.Contains(body, `data-status="`+col+`"`) {
 			t.Errorf("empty board should still render the %q column:\n%s", col, body)
