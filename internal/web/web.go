@@ -64,18 +64,14 @@ type Rollups interface {
 	// ActiveSprintBoard is the whole active sprint as a per-status Kanban board
 	// (Done columns included) for the /board data-quality view.
 	ActiveSprintBoard() (store.Board, error)
-	// DailyStatusChanges returns active-sprint Task/Bug/Story tickets whose status
-	// changed within [from, to), filtered by assignee ("" = all,
-	// store.UnassignedAssignee = unassigned, else an exact name), for the /daily view.
-	DailyStatusChanges(assignee string, from, to time.Time) ([]store.DailyTicket, error)
+	// DailyBoard returns the /daily board's cards for [from, to): active-sprint
+	// Task/Bug/Story created in the window OR moved in it, filtered by assignee
+	// ("" = all, store.UnassignedAssignee = unassigned, else an exact name), each
+	// placed by its status at the window END and carrying its movement facts.
+	DailyBoard(assignee string, from, to time.Time) ([]store.DailyBoardCard, error)
 	// ActiveSprintAssignees lists the distinct named assignees of active-sprint
 	// work items, to populate the /daily assignee dropdown.
 	ActiveSprintAssignees() ([]string, error)
-	// IssuesCreatedInRange returns the tickets authored (by their immutable Jira
-	// Creator) within [from, to), filtered by creator ("" = any,
-	// store.UnassignedAssignee = none, else an exact name), for the Daily view's
-	// "tickets I created" section. Deliberately NOT sprint-scoped.
-	IssuesCreatedInRange(creator string, from, to time.Time) ([]store.CreatedTicket, error)
 }
 
 // Resyncer triggers a full rebuild of the SQLite projection from Jira and

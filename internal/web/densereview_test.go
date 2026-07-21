@@ -101,19 +101,33 @@ func TestDenseDatasetStressesAllViews(t *testing.T) {
 		}
 	})
 
-	t.Run("daily has a dense digest, created tickets and drops the intra-done sequence", func(t *testing.T) {
-		body := get(t, app.URL+"/daily")
-		if !strings.Contains(body, "moved 5 — 2 finished, 2 advanced, 1 pulled back, created 2") {
-			t.Error("daily: expected the dense digest headline")
+	t.Run("daily renders a populated board and drops the intra-done sequence", func(t *testing.T) {
+		body := get(t, app.URL+"/daily") // DenseMe + Today (Wed 15 Jul)
+		// The five workflow columns always render.
+		for _, col := range []string{"Refinement", "Ready To Do", "In Progress", "Review / Testing", "Done"} {
+			if !strings.Contains(body, `data-status="`+col+`"`) {
+				t.Errorf("daily: missing board column %q", col)
+			}
 		}
-		// The intra-done-only ticket (#98) is dropped from the Daily view.
-		if strings.Contains(body, "DCAI-D19") {
+		// DenseMe's Today activity places cards across the board: D1/D8 finished
+		// (Done), D9 advanced (In Progress), D22 advanced (Ready To Do), D13
+		// cancelled (Canceled, rightmost).
+		for _, key := range []string{"DCAI-D1", "DCAI-D8", "DCAI-D9", "DCAI-D22", "DCAI-D13"} {
+			if !strings.Contains(body, `data-key="`+key+`"`) {
+				t.Errorf("daily: missing card %q", key)
+			}
+		}
+		if !strings.Contains(body, `data-status="Canceled"`) {
+			t.Error("daily: Canceled column should render (DCAI-D13 was cancelled today)")
+		}
+		// The intra-done-only-today ticket (#98) is dropped from the board.
+		if strings.Contains(body, `data-key="DCAI-D19"`) {
 			t.Error("daily: intra-done-only ticket DCAI-D19 must be dropped (#98)")
 		}
-		// Created tickets (authored today by me) are surfaced.
-		for _, created := range []string{"DCAI-D20", "DCAI-D21"} {
-			if !strings.Contains(body, created) {
-				t.Errorf("daily: missing created ticket %q", created)
+		// The movement-kind origin cues are exercised.
+		for _, cue := range []string{"daily-origin--finished", "daily-origin--advanced", "daily-origin--pulled-back"} {
+			if !strings.Contains(body, cue) {
+				t.Errorf("daily: missing movement cue %q", cue)
 			}
 		}
 		// Several distinct assignees make the Assignee control non-trivial.

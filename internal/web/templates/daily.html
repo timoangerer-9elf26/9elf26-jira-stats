@@ -4,7 +4,7 @@
 <body class="min-h-screen bg-slate-50 text-slate-900">
   <main class="px-6 py-12">
     {{template "nav" "daily"}}
-    {{template "page-header" "Daily — per-assignee status changes in the active sprint over a recent window."}}
+    {{template "page-header" "Daily — a board of active-sprint tickets created or moved in the window, placed by workflow stage and showing where each came from."}}
 
     {{if .HasSprint}}
     <div id="daily-panel">
