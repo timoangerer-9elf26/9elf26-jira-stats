@@ -212,6 +212,78 @@ func TestDailyDefaultSelection(t *testing.T) {
 	}
 }
 
+// TestDailyLast24hRolling: the Last 24h preset resolves a rolling
+// [now − 24h, now) window (not a calendar day), sits rightmost after Today, is
+// never disabled, and is never weekend-adjusted — it resolves identically on a
+// weekend, always relative to the current instant.
+func TestDailyLast24hRolling(t *testing.T) {
+	s := rangeServer(t)
+	loc := s.loc
+
+	// A mid-afternoon Wednesday and a Sunday, each with a non-midnight instant to
+	// prove the window is not snapped to a calendar day.
+	cases := []struct {
+		name string
+		now  time.Time
+	}{
+		{"weekday", berlinDay(loc, 2026, time.July, 15).Add(14*time.Hour + 37*time.Minute)}, // Wed
+		{"weekend", berlinDay(loc, 2026, time.July, 19).Add(9*time.Hour + 5*time.Minute)},   // Sun
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := s.dailyRangeSelection(url.Values{"preset": {dailyPresetLast24h}}, tc.now)
+
+			if !res.to.Equal(tc.now) {
+				t.Errorf("to = %s, want now %s", res.to, tc.now)
+			}
+			if want := tc.now.Add(-24 * time.Hour); !res.from.Equal(want) {
+				t.Errorf("from = %s, want now-24h %s", res.from, want)
+			}
+			if got := selectedPreset(res); got != dailyPresetLast24h {
+				t.Errorf("Last 24h should be the selected preset, got %q", got)
+			}
+
+			// The button exists, is never disabled, and is rightmost (after Today).
+			last, ok := presetByKey(res, dailyPresetLast24h)
+			if !ok {
+				t.Fatalf("Last 24h preset button missing")
+			}
+			if last.Disabled {
+				t.Errorf("Last 24h must never be disabled")
+			}
+			if got := res.presets[len(res.presets)-1].Key; got != dailyPresetLast24h {
+				t.Errorf("Last 24h must be rightmost, last preset is %q", got)
+			}
+			todayIdx, lastIdx := -1, -1
+			for i, p := range res.presets {
+				switch p.Key {
+				case dailyPresetToday:
+					todayIdx = i
+				case dailyPresetLast24h:
+					lastIdx = i
+				}
+			}
+			if !(todayIdx >= 0 && lastIdx == todayIdx+1) {
+				t.Errorf("Last 24h must sit directly after Today (today=%d, last=%d)", todayIdx, lastIdx)
+			}
+		})
+	}
+
+	// Weekend-invariance: the resolved window depends only on the instant, so at
+	// the same clock time it is identical whether the day is a weekday or weekend.
+	sat := berlinDay(loc, 2026, time.July, 18).Add(10 * time.Hour) // Sat
+	resSat := s.dailyRangeSelection(url.Values{"preset": {dailyPresetLast24h}}, sat)
+	if !resSat.from.Equal(sat.Add(-24*time.Hour)) || !resSat.to.Equal(sat) {
+		t.Errorf("Last 24h must not be weekend-adjusted: got [%s, %s)", resSat.from, resSat.to)
+	}
+
+	// It is not the default: absent params still resolve to a calendar preset.
+	def := s.dailyRangeSelection(url.Values{}, berlinDay(loc, 2026, time.July, 15).Add(9*time.Hour)) // Wed
+	if got := selectedPreset(def); got == dailyPresetLast24h {
+		t.Errorf("Last 24h must not be the default preset, got %q", got)
+	}
+}
+
 // TestDailyCustomRangeParsing: a valid custom From/Until is honoured verbatim
 // (weekend transitions included), no preset is highlighted, and the inputs
 // round-trip in datetime-local form.
