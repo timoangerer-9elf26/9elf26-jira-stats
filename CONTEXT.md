@@ -50,18 +50,38 @@ reconstructed from the sprint-membership history at the window bounds.
 
 ## Daily view
 
-The morning standup overview. For a chosen **assignee** — defaulting to **me** —
-over a **selectable date-time range**, it answers "what did this person do". Two
-stacked sections: a **daily digest** summarising the net outcome, and beneath it
-the granular per-transition log. Scoped to active-sprint work items.
+The morning standup overview, presented as a **board**. For a chosen
+**assignee** — defaulting to **me** — over a **selectable date-time range**, it
+shows every active-sprint work item that was **created in the window or had a
+status change within it**, laid out in workflow columns so you can see at a
+glance where each moved and what each is now. This single board is the whole
+view — there is no separate digest or per-transition log (see `docs/adr/0003`).
 
-The range is chosen either with a custom **From / Until** (date + time) or with
-one of three **working-day presets** — **Today**, **Yesterday**, and the working
-day before that (labelled by its weekday name) — each spanning one whole calendar
-day. Working days are Monday–Friday: the Yesterday / day-before presets **walk
-back over weekends** to the most recent working days (so on a Monday, Yesterday is
-Friday), while the Today preset is literal and is disabled on a weekend. Weekend
-exclusion applies to the presets only — a custom range is honoured verbatim.
+The **columns** are the workflow stages left-to-right: Refinement → Ready To Do →
+In Progress → Review / Testing → **Done** (one column collapsing the whole
+[Done set](#ticket-status-buckets)) → **Canceled** (rightmost, shown only when it
+holds a card). The five workflow columns always render, even when empty. Each
+card sits in the column of its **status at the window end** — so the board is
+live for *Today* and a point-in-time snapshot for *Yesterday* and older windows.
+
+Each **card** follows the [Board](#estimate-edit) card (key linking to Jira, type
+badge, title, an **editable estimate**, and the assignee **avatar**) and adds its
+in-window **movement**: the latest move's timestamp and an **origin badge** —
+`from <window-start status>` with a move count — coloured by
+[movement kind](#daily-movement). A card **created in the window** is highlighted
+and, if it never moved, reads *created here* instead of an origin.
+
+The range is chosen either with a custom **From / Until** (date + time) or with a
+**preset** button. The presets run earliest-to-now left-to-right: three
+**working-day presets** — the working day before yesterday (labelled by its
+weekday name), **Yesterday**, **Today** — each spanning one whole calendar day,
+then **Last 24h**, a **rolling** `[now − 24h, now)` window. Working days are
+Monday–Friday: the Yesterday / day-before presets **walk back over weekends** to
+the most recent working days (so on a Monday, Yesterday is Friday); Today is
+literal and disabled on a weekend; Last 24h is rolling and never weekend-adjusted.
+The default is **Today** (falling back to Yesterday when Today is disabled).
+Weekend adjustment applies to the working-day presets only — a custom range and
+Last 24h are honoured verbatim.
 
 ## Me
 
@@ -72,12 +92,12 @@ so a status move made while a ticket was mine but later reassigned away is
 credited to the new assignee, not me (a known limitation, accepted until the
 sync captures the actor of each transition).
 
-## Daily digest
+## Daily movement
 
-The Daily view's summary of what *me* (or the selected assignee) did in the
-window, bucketing each moved ticket by its **net movement** — the workflow
-distance from where it sat at the window start to where it sits at the window
-end — into exactly one of:
+Each [Daily view](#daily-view) card's **net movement** over the window — the
+workflow distance from where the ticket sat at the window start to where it sits
+at the window end — classified into exactly one **kind**, which colours the
+card's origin badge:
 
 - **Finished** — crossed into the Done set within the window (the same crossing
   the [Sprint view](#sprint-view-metrics) counts as Finished).
@@ -85,14 +105,16 @@ end — into exactly one of:
   (moved out and back to the same status) folds in here.
 - **Pulled back** — net backward in the workflow, including a move to Canceled.
 
+A card **created in the window that never moved** has no movement kind — it is
+shown only with its created highlight.
+
 **Movement *inside* the Done set is ignored** on the Daily view. A transition
 whose *both* endpoints are Done statuses (e.g. DONE (This Sprint) → Ready for
 Release, Ready for Release → Released / Deployed) is post-completion housekeeping
-and is dropped — from the digest and the granular log. The finish crossing
-(into Done) and a **reopen** out of Done are still shown; a ticket whose only
-in-window moves were inside Done disappears from Daily entirely. This is
-Daily-only — the [Sprint view metrics](#sprint-view-metrics) and
-[Velocity](#velocity) keep the full Done set (see `docs/adr/0003`).
+and is dropped, so a ticket whose only in-window moves were inside Done drops off
+the board entirely. The finish crossing (into Done) and a **reopen** out of Done
+are still shown. This is Daily-only — the [Sprint view metrics](#sprint-view-metrics)
+and [Velocity](#velocity) keep the full Done set (see `docs/adr/0003`).
 
 ## Velocity
 
@@ -189,8 +211,9 @@ completion belongs to the prior sprint).
 
 ## Estimate edit
 
-The one place a user can **change** Jira from the dashboard: on the **Board**,
-the estimate pill (the ticket's size — S / M / L / no-estimate) is editable.
+The way a user can **change** Jira from the dashboard: the estimate pill (the
+ticket's size — S / M / L / no-estimate) is editable on the **Board** and on the
+**[Daily board](#daily-view)** — the same board-style card carries it on both.
 Picking a value **writes it back to Jira** as the ticket's estimate, immediately,
 with no confirm step. Everywhere else the size is read-only display.
 
@@ -199,6 +222,5 @@ Jira stays the **source of truth**: the edit is a write *to Jira*, not to the
 local projection — the projection only ever reflects what a Jira read returns, so
 after a successful write the changed ticket is re-read from Jira and the pill
 shows that authoritative value. A failed write leaves Jira (and the pill)
-unchanged. Editing is **Board-only**: the same size pill on the Daily view, the
-"tickets I created" list and the Sprint drill-down stays read-only (see
-`docs/adr/0005`).
+unchanged. The pill is editable only on those two board surfaces; the size shown
+on the Sprint drill-down stays read-only (see `docs/adr/0005`).
