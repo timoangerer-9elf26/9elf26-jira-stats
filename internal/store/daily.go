@@ -27,9 +27,13 @@ type DailyTicket struct {
 	Key      string
 	Summary  string
 	Assignee string // "" for an unassigned ticket
-	Size     string // 'S'/'M'/'L', or "" for no estimate
-	Type     string // Task, Bug or Story
-	Changes  []DailyStatusChange
+	// AssigneeAvatarURL is the current assignee's public Jira avatar image URL
+	// ("" when unassigned or no avatar captured) — the same field the Board fetches
+	// so the Daily card avatar renders identically.
+	AssigneeAvatarURL string
+	Size              string // 'S'/'M'/'L', or "" for no estimate
+	Type              string // Task, Bug or Story
+	Changes           []DailyStatusChange
 }
 
 // DailyMovement is the net-movement bucket a moved ticket falls into over the
@@ -92,7 +96,7 @@ func (t DailyTicket) Movement() DailyMovement {
 // stored UTC instant is >= from and < to, mirroring CompletedInRange.
 func (s *Store) DailyStatusChanges(assignee string, from, to time.Time) ([]DailyTicket, error) {
 	query := `
-		SELECT i.key, i.summary, i.assignee, i.size, i.type,
+		SELECT i.key, i.summary, i.assignee, i.assignee_avatar_url, i.size, i.type,
 		       t.from_status, t.to_status, t.transitioned_at
 		FROM issue i
 		JOIN status_transition t ON t.issue_key = i.key
@@ -125,8 +129,8 @@ func (s *Store) DailyStatusChanges(assignee string, from, to time.Time) ([]Daily
 	var order []string
 	for rows.Next() {
 		var key, summary, typ, toStatus, atStr string
-		var assigneeCol, size, fromStatus sql.NullString
-		if err := rows.Scan(&key, &summary, &assigneeCol, &size, &typ, &fromStatus, &toStatus, &atStr); err != nil {
+		var assigneeCol, avatarCol, size, fromStatus sql.NullString
+		if err := rows.Scan(&key, &summary, &assigneeCol, &avatarCol, &size, &typ, &fromStatus, &toStatus, &atStr); err != nil {
 			return nil, fmt.Errorf("scan daily row: %w", err)
 		}
 		at, err := time.Parse(time.RFC3339, atStr)
@@ -137,7 +141,8 @@ func (s *Store) DailyStatusChanges(assignee string, from, to time.Time) ([]Daily
 		if !seen {
 			ticket = &DailyTicket{
 				Key: key, Summary: summary, Assignee: assigneeCol.String,
-				Size: size.String, Type: typ,
+				AssigneeAvatarURL: avatarCol.String,
+				Size:              size.String, Type: typ,
 			}
 			byKey[key] = ticket
 			order = append(order, key)
@@ -202,8 +207,12 @@ type DailyBoardCard struct {
 	Key      string
 	Summary  string
 	Assignee string // "" for an unassigned ticket
-	Size     string // 'S'/'M'/'L', or "" for no estimate
-	Type     string // Task, Bug or Story
+	// AssigneeAvatarURL is the current assignee's public Jira avatar image URL
+	// ("" when unassigned or no avatar captured) — sourced directly from the Daily
+	// query so the card avatar matches the Board's without a secondary fetch.
+	AssigneeAvatarURL string
+	Size              string // 'S'/'M'/'L', or "" for no estimate
+	Type              string // Task, Bug or Story
 	// Column is the collapsed Daily-board column the card belongs to, decided by
 	// its status at the window END (see dailyBoardColumn): the four open statuses
 	// map to themselves, the whole done set collapses to "Done", Canceled to
@@ -281,6 +290,7 @@ func (s *Store) DailyBoard(assignee string, from, to time.Time) ([]DailyBoardCar
 	for _, tk := range moved {
 		c, _ := get(tk.Key)
 		c.Summary, c.Assignee, c.Size, c.Type = tk.Summary, tk.Assignee, tk.Size, tk.Type
+		c.AssigneeAvatarURL = tk.AssigneeAvatarURL
 		c.StartStatus = tk.StartStatus()
 		c.Moves = len(tk.Changes)
 		c.Movement = tk.Movement()
@@ -294,6 +304,7 @@ func (s *Store) DailyBoard(assignee string, from, to time.Time) ([]DailyBoardCar
 			// Created in the window but never moved in it: place it in its creation
 			// status, timestamp/sort on the creation instant, carry no movement kind.
 			c.Summary, c.Assignee, c.Size, c.Type = ct.summary, ct.assignee, ct.size, ct.typ
+			c.AssigneeAvatarURL = ct.assigneeAvatarURL
 			c.LatestActivity = ct.createdAt
 			c.Column = dailyBoardColumn(endStatus(ct.Key, ct.status))
 		}
@@ -316,13 +327,14 @@ func (s *Store) DailyBoard(assignee string, from, to time.Time) ([]DailyBoardCar
 // CURRENT status, the window-end fallback when the ticket has no reconstructable
 // status transition.
 type dailyCreatedRow struct {
-	Key       string
-	summary   string
-	assignee  string
-	size      string
-	typ       string
-	status    string
-	createdAt time.Time
+	Key               string
+	summary           string
+	assignee          string
+	assigneeAvatarURL string
+	size              string
+	typ               string
+	status            string
+	createdAt         time.Time
 }
 
 // dailyCreatedInSprint returns the active-sprint Task/Bug/Story created within
@@ -332,7 +344,7 @@ type dailyCreatedRow struct {
 // (not creator): it is the created-in-window arm of the board population.
 func (s *Store) dailyCreatedInSprint(assignee string, from, to time.Time) ([]dailyCreatedRow, error) {
 	query := `
-		SELECT key, summary, assignee, size, type, status, created_at
+		SELECT key, summary, assignee, assignee_avatar_url, size, type, status, created_at
 		FROM issue
 		WHERE active_sprint IS NOT NULL
 		  AND type IN (` + rollupTypes + `)
@@ -360,11 +372,11 @@ func (s *Store) dailyCreatedInSprint(assignee string, from, to time.Time) ([]dai
 	for rows.Next() {
 		var r dailyCreatedRow
 		var createdStr string
-		var assigneeCol, size sql.NullString
-		if err := rows.Scan(&r.Key, &r.summary, &assigneeCol, &size, &r.typ, &r.status, &createdStr); err != nil {
+		var assigneeCol, avatarCol, size sql.NullString
+		if err := rows.Scan(&r.Key, &r.summary, &assigneeCol, &avatarCol, &size, &r.typ, &r.status, &createdStr); err != nil {
 			return nil, fmt.Errorf("scan daily created row: %w", err)
 		}
-		r.assignee, r.size = assigneeCol.String, size.String
+		r.assignee, r.assigneeAvatarURL, r.size = assigneeCol.String, avatarCol.String, size.String
 		if r.createdAt, err = time.Parse(time.RFC3339, createdStr); err != nil {
 			return nil, fmt.Errorf("parse created_at %q: %w", createdStr, err)
 		}

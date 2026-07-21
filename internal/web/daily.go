@@ -53,9 +53,15 @@ const dailyLast24hWindow = 24 * time.Hour
 // in the window reads "✦ created here" (CreatedHere), with a kind colour only
 // when it also moved. Moves is shown as "· N moves" when > 1.
 type dailyCardView struct {
-	Key         string
-	Summary     string
-	Assignee    string // "Unassigned" for a ticket with no assignee
+	Key     string
+	Summary string
+	// Assignee is the raw display name ("" when unassigned), AvatarURL the public
+	// Jira avatar image URL ("" when none) and Initials the computed fallback — the
+	// trio the shared card-avatar partial renders (image → initials → empty circle),
+	// exactly as the Board does.
+	Assignee    string
+	AvatarURL   string
+	Initials    string
 	Size        string // "S"/"M"/"L" or "no estimate"
 	Type        string
 	Href        string
@@ -245,7 +251,9 @@ func (s *Server) dailyBoard(cards []store.DailyBoardCard) []dailyColumnView {
 		card := dailyCardView{
 			Key:         c.Key,
 			Summary:     c.Summary,
-			Assignee:    assigneeDisplay(c.Assignee),
+			Assignee:    c.Assignee,
+			AvatarURL:   c.AssigneeAvatarURL,
+			Initials:    avatarInitials(c.Assignee),
 			Size:        sizeDisplay(c.Size),
 			Type:        c.Type,
 			Href:        s.jiraIssueURL(c.Key),
@@ -476,15 +484,6 @@ func dailyStoreAssignee(param string) string {
 	default:
 		return param
 	}
-}
-
-// assigneeDisplay renders a ticket's assignee for a card, labelling an empty
-// assignee as "Unassigned".
-func assigneeDisplay(assignee string) string {
-	if assignee == "" {
-		return "Unassigned"
-	}
-	return assignee
 }
 
 // statusDisplay renders a transition's source status, labelling a missing from

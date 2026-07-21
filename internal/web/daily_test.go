@@ -238,6 +238,49 @@ func TestDailyUnassigned(t *testing.T) {
 	}
 }
 
+// TestDailyCardAvatars: each Daily card shows the assignee avatar the way the
+// Board does (#114) — the public Jira avatar image when captured, the computed
+// initials fallback alongside it, and a neutral empty circle when unassigned.
+// The plain assignee-name span is gone.
+func TestDailyCardAvatars(t *testing.T) {
+	loc := berlin(t)
+	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, loc)
+	at := time.Date(2026, time.July, 16, 9, 0, 0, 0, loc)
+
+	withAvatar := dailyIssue("DCAI-1", "Story", "Alice Smith", true, "Ready to Do", "In Progress", at)
+	withAvatar.AssigneeAvatarURL = "https://jira.example/avatar/alice.png"
+	unassigned := dailyIssue("DCAI-4", "Bug", "", true, "Ready to Do", "In Progress", at)
+
+	app := newTestAppAt(t, &jira.FakeClient{
+		Sprints: activeSprintKW29(),
+		Issues:  []jira.Issue{withAvatar, unassigned},
+	}, now)
+
+	body := get(t, app.URL+"/daily/results?assignee=all&preset=today")
+
+	// Assigned-with-avatar: the image (sourced from the Daily query) plus its
+	// hidden initials fallback ("AS").
+	if !strings.Contains(body, `data-testid="card:DCAI-1:avatar-img"`) ||
+		!strings.Contains(body, `src="https://jira.example/avatar/alice.png"`) {
+		t.Errorf("DCAI-1 should render its Jira avatar image:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="card:DCAI-1:avatar-initials"`) ||
+		!strings.Contains(body, `>AS</span>`) {
+		t.Errorf("DCAI-1 should carry the computed initials fallback:\n%s", body)
+	}
+	// Unassigned: the neutral empty circle, no initials.
+	if !strings.Contains(body, `data-testid="card:DCAI-4:avatar-empty"`) {
+		t.Errorf("unassigned DCAI-4 should render the neutral empty circle:\n%s", body)
+	}
+	if strings.Contains(body, `data-testid="card:DCAI-4:avatar-initials"`) {
+		t.Errorf("unassigned DCAI-4 must not render an initials circle:\n%s", body)
+	}
+	// The old plain assignee-name span is gone.
+	if strings.Contains(body, `data-testid="card:DCAI-1:assignee"`) {
+		t.Errorf("the plain assignee-name span should be replaced by the avatar:\n%s", body)
+	}
+}
+
 func TestDailyEmptyState(t *testing.T) {
 	loc := berlin(t)
 	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, loc)

@@ -150,3 +150,71 @@ func TestDailyBoardSnapshotPlacement(t *testing.T) {
 		t.Errorf("DCAI-1 window-end column = %q, want In Progress (a snapshot, not its current Done)", one.Column)
 	}
 }
+
+// TestDailyBoardCarriesAssigneeAvatarURL verifies the avatar URL is sourced by
+// the Daily query itself (both arms — moved and created-in-window), not a
+// secondary board fetch (#114): a moved and a created ticket each carry their
+// assignee's captured avatar URL, and an unassigned ticket carries none.
+func TestDailyBoardCarriesAssigneeAvatarURL(t *testing.T) {
+	loc := berlin(t)
+	st := openTempStore(t)
+	at := func(day, hour int) time.Time { return time.Date(2026, time.July, day, hour, 0, 0, 0, loc) }
+	from := time.Date(2026, time.July, 15, 0, 0, 0, 0, loc)
+	to := time.Date(2026, time.July, 16, 0, 0, 0, 0, loc)
+
+	// Moved arm: alice with an avatar.
+	saveIssueWithAvatar(t, st, "DCAI-1", "Story", "alice",
+		"https://jira.example/avatar/alice.png", at(15, 9))
+	// Created-but-unmoved arm: bob with an avatar.
+	saveCreatedWithAvatar(t, st, "DCAI-2", "Task", "bob",
+		"https://jira.example/avatar/bob.png", at(15, 11))
+	// Unassigned moved ticket: no avatar.
+	saveIssueWithAvatar(t, st, "DCAI-3", "Bug", "", "", at(15, 10))
+
+	cards, err := st.DailyBoard("", from, to)
+	if err != nil {
+		t.Fatalf("daily board: %v", err)
+	}
+	by := dailyBoardByKey(cards)
+	if got := by["DCAI-1"].AssigneeAvatarURL; got != "https://jira.example/avatar/alice.png" {
+		t.Errorf("DCAI-1 (moved) avatar = %q, want alice's URL", got)
+	}
+	if got := by["DCAI-2"].AssigneeAvatarURL; got != "https://jira.example/avatar/bob.png" {
+		t.Errorf("DCAI-2 (created) avatar = %q, want bob's URL", got)
+	}
+	if got := by["DCAI-3"].AssigneeAvatarURL; got != "" {
+		t.Errorf("DCAI-3 (unassigned) avatar = %q, want empty", got)
+	}
+}
+
+// saveIssueWithAvatar saves an active-sprint issue that moved once in-window,
+// carrying the given assignee avatar URL.
+func saveIssueWithAvatar(t *testing.T, st *Store, key, typ, assignee, avatarURL string, at time.Time) {
+	t.Helper()
+	iss := jira.Issue{
+		Key: key, Type: typ, Summary: key + " summary", Status: "In Progress",
+		StatusCategory: "In Progress", Size: "M", Assignee: assignee,
+		AssigneeAvatarURL: avatarURL, ActiveSprint: "KW29",
+		Changelog: []jira.ChangelogEntry{
+			{ID: key + "-x", Field: "status", From: "Ready to Do", To: "In Progress", Timestamp: at},
+		},
+	}
+	if err := st.SaveIssue(iss, "2026-07-16T10:00:00Z"); err != nil {
+		t.Fatalf("save %s: %v", key, err)
+	}
+}
+
+// saveCreatedWithAvatar saves an active-sprint issue created in-window with no
+// transitions, carrying the given assignee avatar URL.
+func saveCreatedWithAvatar(t *testing.T, st *Store, key, typ, assignee, avatarURL string, createdAt time.Time) {
+	t.Helper()
+	iss := jira.Issue{
+		Key: key, Type: typ, Summary: key + " summary", Status: "Ready to Do",
+		StatusCategory: "To Do", Size: "M", Assignee: assignee,
+		AssigneeAvatarURL: avatarURL, ActiveSprint: "KW29",
+		Creator: assignee, CreatedAt: createdAt,
+	}
+	if err := st.SaveIssue(iss, "2026-07-16T10:00:00Z"); err != nil {
+		t.Fatalf("save %s: %v", key, err)
+	}
+}
