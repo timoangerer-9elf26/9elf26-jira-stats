@@ -59,10 +59,10 @@ type dailyCardView struct {
 	// Jira avatar image URL ("" when none) and Initials the computed fallback — the
 	// trio the shared card-avatar partial renders (image → initials → empty circle),
 	// exactly as the Board does.
-	Assignee    string
-	AvatarURL   string
-	Initials    string
-	Size        string // "S"/"M"/"L" or "no estimate"
+	Assignee  string
+	AvatarURL string
+	Initials  string
+	Size      string // "S"/"M"/"L" or "no estimate"
 	// RawSize is the ticket's stored T-shirt label ("S"/"M"/"L" or "" for
 	// no-estimate), carried alongside Size so the editable pill knows the current
 	// selection and the value to revert to. Only consumed when Editable.
