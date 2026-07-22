@@ -374,7 +374,7 @@
 
 {{/* card-avatar renders the assignee at a card's bottom-right (#68): the public
      Jira avatar image when one is captured, otherwise the computed initials in a
-     tinted circle, otherwise a neutral empty circle when the ticket is
+     tinted circle, otherwise a neutral person silhouette when the ticket is
      unassigned. When an image is present it is paired with a hidden initials
      circle that its onerror handler reveals, so a broken/expired avatar URL
      still degrades to initials rather than a broken-image icon. The circle
@@ -390,8 +390,13 @@
    style="height:1.75rem;width:1.75rem;border-radius:9999px;object-fit:cover">{{template "avatar-initials" .}}
 {{- else if .Assignee}}{{template "avatar-initials" .}}
 {{- else}}<span data-testid="card:{{.Key}}:avatar-empty" aria-label="Unassigned" title="Unassigned"
-   class="inline-flex shrink-0 bg-slate-100"
-   style="height:1.75rem;width:1.75rem;border-radius:9999px"></span>{{end}}
+   class="inline-flex shrink-0 items-center justify-center bg-slate-100"
+   style="height:1.75rem;width:1.75rem;border-radius:9999px">
+   <svg data-testid="card:{{.Key}}:avatar-unassigned-icon" viewBox="0 0 20 20"
+        fill="currentColor" aria-hidden="true" class="h-4 w-4 text-slate-400">
+     <path d="M10 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM3 18a7 7 0 0 1 14 0H3Z"/>
+   </svg>
+ </span>{{end}}
 {{end}}
 
 {{/* avatar-initials is the tinted initials circle used as a card's assignee

@@ -137,7 +137,7 @@ func TestBoardStripScrollsHorizontallyOnly(t *testing.T) {
 
 // avatarFixture is an active-sprint (KW29) mix exercising the three assignee
 // states a Board card renders (#68): assigned with a Jira avatar image,
-// assigned without one (initials fallback), and unassigned (neutral circle).
+// assigned without one (initials fallback), and unassigned (person icon).
 func avatarFixture() *jira.FakeClient {
 	active := func(iss jira.Issue) jira.Issue {
 		iss.Type, iss.Status, iss.StatusCategory, iss.ActiveSprint = "Task", "In Progress", "In Progress", "KW29"
@@ -152,7 +152,7 @@ func avatarFixture() *jira.FakeClient {
 
 // TestBoardCardShowsAssigneeAvatar asserts each Board card renders its assignee
 // as a Jira avatar image, falling back to computed initials when no image is
-// present, and a neutral (empty) circle when unassigned.
+// present, and a neutral person-silhouette circle when unassigned.
 func TestBoardCardShowsAssigneeAvatar(t *testing.T) {
 	app := newBoardApp(t, avatarFixture())
 	body := get(t, app.URL+"/board")
@@ -180,9 +180,16 @@ func TestBoardCardShowsAssigneeAvatar(t *testing.T) {
 		t.Errorf("board card DCAI-11 must not render an image without an avatar URL")
 	}
 
-	// Unassigned: a neutral empty circle, no initials and no image.
-	if !strings.Contains(body, `data-testid="card:DCAI-12:avatar-empty"`) {
-		t.Errorf("board card DCAI-12 missing neutral empty circle\n%s", body)
+	// Unassigned: a labelled neutral circle with a decorative person silhouette,
+	// no initials and no image.
+	for _, want := range []string{
+		`data-testid="card:DCAI-12:avatar-empty" aria-label="Unassigned" title="Unassigned"`,
+		`data-testid="card:DCAI-12:avatar-unassigned-icon"`,
+		`aria-hidden="true" class="h-4 w-4 text-slate-400"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("board card DCAI-12 missing unassigned avatar markup %q\n%s", want, body)
+		}
 	}
 	for _, absent := range []string{
 		`data-testid="card:DCAI-12:avatar-img"`,

@@ -243,7 +243,7 @@ func TestDailyUnassigned(t *testing.T) {
 
 // TestDailyCardAvatars: each Daily card shows the assignee avatar the way the
 // Board does (#114) — the public Jira avatar image when captured, the computed
-// initials fallback alongside it, and a neutral empty circle when unassigned.
+// initials fallback alongside it, and a neutral person icon when unassigned.
 // The plain assignee-name span is gone.
 func TestDailyCardAvatars(t *testing.T) {
 	loc := berlin(t)
@@ -271,9 +271,14 @@ func TestDailyCardAvatars(t *testing.T) {
 		!strings.Contains(body, `>AS</span>`) {
 		t.Errorf("DCAI-1 should carry the computed initials fallback:\n%s", body)
 	}
-	// Unassigned: the neutral empty circle, no initials.
-	if !strings.Contains(body, `data-testid="card:DCAI-4:avatar-empty"`) {
-		t.Errorf("unassigned DCAI-4 should render the neutral empty circle:\n%s", body)
+	// Unassigned: the labelled neutral person-silhouette circle, no initials.
+	for _, want := range []string{
+		`data-testid="card:DCAI-4:avatar-empty" aria-label="Unassigned" title="Unassigned"`,
+		`data-testid="card:DCAI-4:avatar-unassigned-icon"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("unassigned DCAI-4 should render %q:\n%s", want, body)
+		}
 	}
 	if strings.Contains(body, `data-testid="card:DCAI-4:avatar-initials"`) {
 		t.Errorf("unassigned DCAI-4 must not render an initials circle:\n%s", body)
@@ -422,6 +427,10 @@ func TestDailyDefaultsToAll(t *testing.T) {
 		if !strings.Contains(body, `title="`+name+`" aria-label="`+name+`"`) {
 			t.Errorf("avatar chip %q should retain its title and aria-label:\n%s", name, body)
 		}
+	}
+	// The Unassigned filter chip reuses card-avatar, including its person icon.
+	if !strings.Contains(body, `data-testid="card:__unassigned__:avatar-unassigned-icon"`) {
+		t.Errorf("the Unassigned filter chip should render the shared person icon:\n%s", body)
 	}
 	// Nothing is pressed by default (zero selected = all).
 	for _, v := range []string{"alice", "bob", "__unassigned__"} {
