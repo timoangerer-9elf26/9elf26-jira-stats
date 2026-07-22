@@ -23,7 +23,21 @@
   {{template "nav-link" (dict "Href" "/velocity" "Label" "Velocity" "Key" "velocity" "Active" .)}}
   <span class="grow"></span>
   {{template "resync-control" .}}
+  {{if authEnabled}}{{template "logout-control" .}}{{end}}
 </nav>
+{{end}}
+
+{{/* logout-control is the shared nav's logout button, rendered only when the
+     shared login is active (see the authEnabled guard in "nav"). It POSTs to
+     /logout as a plain form so the 302 to /login is a full-page navigation and
+     link prefetching can't trigger a logout. Takes no data. */}}
+{{define "logout-control"}}
+<form method="post" action="/logout" class="flex items-center">
+  <button type="submit" data-testid="logout-button"
+          class="inline-flex items-center rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">
+    Log out
+  </button>
+</form>
 {{end}}
 
 {{/* resync-control is the shared full-resync widget in the nav: the button that

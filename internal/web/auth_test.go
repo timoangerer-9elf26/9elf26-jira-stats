@@ -249,6 +249,86 @@ func TestStaticReachableWhileLoggedOut(t *testing.T) {
 	}
 }
 
+func TestLogoutButtonShownWhenAuthEnabled(t *testing.T) {
+	app := newAuthApp(t)
+
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar}
+	form := url.Values{"email": {testAuthEmail}, "password": {testAuthPassword}}
+	if _, err := client.PostForm(app.URL+"/login", form); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	resp, err := client.Get(app.URL + "/sprint")
+	if err != nil {
+		t.Fatalf("GET /sprint: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `data-testid="logout-button"`) {
+		t.Fatalf("logged-in /sprint did not render the logout button")
+	}
+	if !strings.Contains(string(body), `action="/logout"`) {
+		t.Fatalf("logout control did not post to /logout")
+	}
+}
+
+func TestLogoutButtonHiddenWhenAuthDisabled(t *testing.T) {
+	// Built WITHOUT WithAuth: there is no session to end, so the nav must not
+	// offer a logout control (it would dead-end at the login pass-through).
+	app := newTestApp(t, jira.NewFakeClient())
+
+	if body := get(t, app.URL+"/sprint"); strings.Contains(body, `data-testid="logout-button"`) {
+		t.Fatalf("auth-disabled /sprint rendered a logout button")
+	}
+}
+
+func TestPostLogoutRevokesSession(t *testing.T) {
+	app := newAuthApp(t)
+
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{
+		Jar:           jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	form := url.Values{"email": {testAuthEmail}, "password": {testAuthPassword}}
+	if _, err := client.PostForm(app.URL+"/login", form); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	base, _ := url.Parse(app.URL)
+	var session *http.Cookie
+	for _, c := range jar.Cookies(base) {
+		if c.Name == sessionCookie {
+			session = c
+		}
+	}
+	if session == nil {
+		t.Fatalf("expected a session cookie after login")
+	}
+
+	// The nav button POSTs to /logout; it must redirect to /login and revoke.
+	resp, err := client.PostForm(app.URL+"/logout", url.Values{})
+	if err != nil {
+		t.Fatalf("POST /logout: %v", err)
+	}
+	resp.Body.Close()
+	if loc := resp.Header.Get("Location"); loc != "/login" {
+		t.Fatalf("POST /logout: Location = %q, want /login", loc)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/sprint", nil)
+	req.AddCookie(session)
+	replay, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("replay GET /sprint: %v", err)
+	}
+	replay.Body.Close()
+	if replay.StatusCode != http.StatusFound {
+		t.Fatalf("revoked session GET /sprint: status %d, want 302 redirect", replay.StatusCode)
+	}
+}
+
 func TestAuthDisabledBypass(t *testing.T) {
 	// Built WITHOUT WithAuth: this is the AUTH_DISABLED / local-dev case, where
 	// the middleware is a pass-through and every route is reachable directly.
