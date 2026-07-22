@@ -20,10 +20,12 @@ const dailyTitleFormat = "Mon 2 Jan"
 // granularity, no timezone), used to parse and render the custom From/Until.
 const dailyInputFormat = "2006-01-02T15:04"
 
-// The Daily assignee-filter query values. "" is treated as "all". These are the
-// dropdown option values; a specific name is passed through verbatim.
+// The Daily assignee-filter query values. "All" is the absence of an assignee
+// param (its option value is empty), so the default — and selecting "All" —
+// carries no assignee. These are the dropdown option values; a specific name is
+// passed through verbatim.
 const (
-	dailyAssigneeAll        = "all"
+	dailyAssigneeAll        = ""
 	dailyAssigneeUnassigned = "unassigned"
 )
 
@@ -172,12 +174,10 @@ func (s *Server) renderDaily(w http.ResponseWriter, r *http.Request, name string
 // dailyView resolves the request query into the page model: the assignee and
 // range controls (with the current selection marked) plus the matching cards.
 func (s *Server) dailyView(q url.Values) (dailyView, error) {
+	// No assignee param means "All" (every assignee) — the default on a fresh load
+	// and what selecting "All" produces. A named assignee (or the unassigned
+	// sentinel) filters the board.
 	assigneeParam := q.Get("assignee")
-	if assigneeParam == "" {
-		// No explicit choice: default to the configured "me" (a display name), or
-		// "All" when me is unconfigured. An explicit choice (incl. "all") overrides.
-		assigneeParam = s.defaultAssignee()
-	}
 
 	sprint, hasSprint, err := s.rollups.ActiveSprintWindow()
 	if err != nil {
@@ -211,8 +211,8 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 			Value: name, Label: name, Selected: match,
 		})
 	}
-	// The filter resolved to a named assignee not on the active sprint (e.g. a
-	// configured "me" who has no sprint work). Surface them as a selected option
+	// The filter resolved to a named assignee not on the active sprint (an explicit
+	// ?assignee= for someone with no sprint work). Surface them as a selected option
 	// so the dropdown reflects the actual scope rather than silently showing All.
 	if !represented {
 		view.Assignees = append(view.Assignees, dailyAssigneeOption{
@@ -303,15 +303,6 @@ func dailyMovementKind(m store.DailyMovement) string {
 	default:
 		return "advanced"
 	}
-}
-
-// defaultAssignee is the Daily assignee filter when the request carries no
-// explicit choice: the configured "me" display name, or "all" when me is unset.
-func (s *Server) defaultAssignee() string {
-	if s.me != "" {
-		return s.me
-	}
-	return dailyAssigneeAll
 }
 
 // dailyRangeSelection resolves the Daily range controls from the request query,
@@ -483,12 +474,12 @@ func isWeekend(d time.Weekday) bool {
 	return d == time.Saturday || d == time.Sunday
 }
 
-// dailyStoreAssignee maps a dropdown value to the store filter argument: "all"
-// (or empty) means all assignees (""), "unassigned" the no-assignee sentinel,
-// and any other value an exact name match.
+// dailyStoreAssignee maps a dropdown value to the store filter argument: empty
+// ("All") means all assignees (""), "unassigned" the no-assignee sentinel, and
+// any other value an exact name match.
 func dailyStoreAssignee(param string) string {
 	switch param {
-	case "", dailyAssigneeAll:
+	case dailyAssigneeAll:
 		return ""
 	case dailyAssigneeUnassigned:
 		return store.UnassignedAssignee

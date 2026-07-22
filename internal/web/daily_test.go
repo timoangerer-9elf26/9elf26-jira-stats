@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
-	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/web"
 )
 
 // dailyIssue builds an active-sprint (unless active=false) Task/Bug/Story with a
@@ -136,7 +135,7 @@ func TestDailyYesterdayPreset(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
 
-	body := get(t, app.URL+"/daily/results?assignee=all&preset=yesterday")
+	body := get(t, app.URL+"/daily/results?preset=yesterday")
 
 	// Yesterday (Wed 15) holds DCAI-2 and DCAI-3.
 	for _, key := range []string{"DCAI-2", "DCAI-3"} {
@@ -156,7 +155,7 @@ func TestDailyDayBeforeYesterdayPreset(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
 
-	body := get(t, app.URL+"/daily/results?assignee=all&preset=day-before-yesterday")
+	body := get(t, app.URL+"/daily/results?preset=day-before-yesterday")
 
 	// day-before-yesterday (Tue 14) holds only DCAI-9.
 	if !strings.Contains(body, `data-key="DCAI-9"`) {
@@ -176,7 +175,7 @@ func TestDailyCustomRange(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
 
-	body := get(t, app.URL+"/daily/results?assignee=all&from=2026-07-14T00:00&to=2026-07-16T00:00")
+	body := get(t, app.URL+"/daily/results?from=2026-07-14T00:00&to=2026-07-16T00:00")
 
 	for _, key := range []string{"DCAI-2", "DCAI-3", "DCAI-9"} {
 		if !strings.Contains(body, `data-key="`+key+`"`) {
@@ -206,7 +205,7 @@ func TestDailyInvalidCustomRange(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
 
-	body := get(t, app.URL+"/daily/results?assignee=all&from=2026-07-16T10:00&to=2026-07-16T08:00")
+	body := get(t, app.URL+"/daily/results?from=2026-07-16T10:00&to=2026-07-16T08:00")
 
 	if !strings.Contains(body, `data-testid="daily-range-error"`) {
 		t.Errorf("invalid range should show the inline error:\n%s", body)
@@ -256,7 +255,7 @@ func TestDailyCardAvatars(t *testing.T) {
 		Issues:  []jira.Issue{withAvatar, unassigned},
 	}, now)
 
-	body := get(t, app.URL+"/daily/results?assignee=all&preset=today")
+	body := get(t, app.URL+"/daily/results?preset=today")
 
 	// Assigned-with-avatar: the image (sourced from the Daily query) plus its
 	// hidden initials fallback ("AS").
@@ -290,7 +289,7 @@ func TestDailyEmptyState(t *testing.T) {
 			time.Date(2026, time.July, 1, 9, 0, 0, 0, loc)),
 	}}, now)
 
-	body := get(t, app.URL+"/daily/results?assignee=all&preset=today")
+	body := get(t, app.URL+"/daily/results?preset=today")
 	// The five workflow columns always render, even when the board is empty.
 	if !strings.Contains(body, `data-testid="daily-board"`) {
 		t.Errorf("board should still render its columns when empty:\n%s", body)
@@ -371,91 +370,70 @@ func presetSelected(html, key string) bool {
 	return strings.Contains(html[start:start+end], `aria-pressed="true"`)
 }
 
-// TestDailyDefaultsToMe: opening Daily with no assignee param selects the
-// configured "me" (a Jira display name) — the dropdown marks me selected and
-// the results are scoped to me, not "All".
-func TestDailyDefaultsToMe(t *testing.T) {
+// TestDailyDefaultsToAll: opening Daily with no assignee param selects "All"
+// (its option carries an empty value, so the default — and selecting All —
+// produces no assignee param) and marks no named assignee selected (#135).
+func TestDailyDefaultsToAll(t *testing.T) {
 	client, now := dailyFixture(t)
-	app := newTestAppAt(t, client, now, web.WithMe("alice"))
+	app := newTestAppAt(t, client, now)
 
 	body := get(t, app.URL+"/daily") // no assignee param
 
-	if !strings.Contains(body, `value="alice" selected`) {
-		t.Errorf("me (alice) should be selected by default:\n%s", body)
+	if !strings.Contains(body, `<option value="" selected>All</option>`) {
+		t.Errorf("All should be the selected default, with an empty option value:\n%s", body)
 	}
-	if strings.Contains(body, `value="all" selected`) {
-		t.Errorf("All must not be selected when me is the default")
-	}
-	// Scoped to alice: her DCAI-1 shows; bob's DCAI-2 and the unassigned DCAI-4 do not.
-	if !strings.Contains(body, `data-key="DCAI-1"`) {
-		t.Errorf("default me scope should include alice's DCAI-1:\n%s", body)
-	}
-	for _, key := range []string{"DCAI-2", "DCAI-4"} {
-		if strings.Contains(body, `data-key="`+key+`"`) {
-			t.Errorf("default me scope should exclude %s (not alice)", key)
+	for _, name := range []string{"alice", "bob"} {
+		if strings.Contains(body, `value="`+name+`" selected`) {
+			t.Errorf("no named assignee (%s) should be selected by default", name)
 		}
 	}
 }
 
-// TestDailyMeDefaultOverridable: explicitly choosing another assignee or "All"
-// overrides the me default.
-func TestDailyMeDefaultOverridable(t *testing.T) {
+// TestDailyExplicitAssigneeFilters: an explicit ?assignee=<name> scopes the board
+// to that assignee and marks them selected; choosing All (no assignee param)
+// shows every assignee's cards.
+func TestDailyExplicitAssigneeFilters(t *testing.T) {
 	client, now := dailyFixture(t)
-	app := newTestAppAt(t, client, now, web.WithMe("alice"))
+	app := newTestAppAt(t, client, now)
 
-	all := get(t, app.URL+"/daily/results?assignee=all&preset=today")
-	if !strings.Contains(all, `value="all" selected`) {
-		t.Errorf("explicit All should be selected, overriding me:\n%s", all)
+	// Selecting All carries no assignee param and shows every assignee's cards.
+	all := get(t, app.URL+"/daily/results?preset=today")
+	if !strings.Contains(all, `<option value="" selected>All</option>`) {
+		t.Errorf("All should be selected with no assignee param:\n%s", all)
 	}
 	for _, key := range []string{"DCAI-1", "DCAI-4"} {
 		if !strings.Contains(all, `data-key="`+key+`"`) {
-			t.Errorf("explicit All should include %s\n%s", key, all)
+			t.Errorf("All should include %s\n%s", key, all)
 		}
 	}
 
+	// An explicit name scopes to that assignee.
 	bob := get(t, app.URL+"/daily/results?assignee=bob&preset=today")
 	if !strings.Contains(bob, `value="bob" selected`) {
-		t.Errorf("explicit bob should be selected, overriding me:\n%s", bob)
+		t.Errorf("explicit bob should be selected:\n%s", bob)
 	}
 	if strings.Contains(bob, `data-key="DCAI-1"`) {
 		t.Errorf("explicit bob scope should exclude alice's DCAI-1")
 	}
 }
 
-// TestDailyNoMeConfiguredFallsBackToAll: with no me configured, opening Daily
-// with no assignee param keeps the current "All" default (no crash).
-func TestDailyNoMeConfiguredFallsBackToAll(t *testing.T) {
-	client, now := dailyFixture(t)
-	app := newTestAppAt(t, client, now) // no WithMe
-
-	body := get(t, app.URL+"/daily")
-	if !strings.Contains(body, `value="all" selected`) {
-		t.Errorf("with no me configured, All should be the default selection:\n%s", body)
-	}
-	for _, key := range []string{"DCAI-1", "DCAI-4"} {
-		if !strings.Contains(body, `data-key="`+key+`"`) {
-			t.Errorf("All default should include %s\n%s", key, body)
-		}
-	}
-}
-
-// TestDailyMeNotOnActiveSprintStillSelected: a configured me who has no active-
-// sprint work isn't among the sprint assignees, but the default must still show
-// me selected in the dropdown (reflecting the actual scope) rather than silently
-// falling back to All. Covers the not-on-sprint branch of dailyView.
-func TestDailyMeNotOnActiveSprintStillSelected(t *testing.T) {
+// TestDailyExplicitAssigneeNotOnSprintStillSelected: an explicit ?assignee= for
+// someone with no active-sprint work isn't among the sprint assignees, but the
+// dropdown must still surface them as selected (reflecting the actual scope)
+// rather than silently showing All. Covers the not-represented branch.
+func TestDailyExplicitAssigneeNotOnSprintStillSelected(t *testing.T) {
 	client, now := dailyFixture(t)
 	// carol only has DCAI-6, which is not in the active sprint, so carol is not
 	// among the active-sprint assignees.
-	app := newTestAppAt(t, client, now, web.WithMe("carol"))
+	app := newTestAppAt(t, client, now)
 
-	body := get(t, app.URL+"/daily") // no assignee param
+	body := get(t, app.URL+"/daily?assignee=carol")
 
 	if !strings.Contains(body, `value="carol" selected`) {
-		t.Errorf("me (carol) should be selected even though not on the active sprint:\n%s", body)
+		t.Errorf("explicit carol should be selected even though not on the active sprint:\n%s", body)
 	}
-	if strings.Contains(body, `value="all" selected`) {
-		t.Errorf("All must not be selected when me is the default")
+	if strings.Contains(body, `<option value="" selected>All</option>`) {
+		t.Errorf("All must not be selected when carol is explicitly chosen")
 	}
 	// carol's only ticket is out of the active-sprint scope, so no cards show.
 	if strings.Contains(body, `data-key="DCAI-6"`) {
@@ -480,9 +458,9 @@ func dailyDigestFixture(t *testing.T) (*jira.FakeClient, time.Time) {
 // window-end status with an origin badge coloured by its net-movement kind.
 func TestDailyBoardMovementKinds(t *testing.T) {
 	client, now := dailyDigestFixture(t)
-	app := newTestAppAt(t, client, now, web.WithMe("alice"))
+	app := newTestAppAt(t, client, now)
 
-	body := get(t, app.URL+"/daily") // defaults to alice + Today
+	body := get(t, app.URL+"/daily") // defaults to All + Today
 
 	// DCAI-10 finished (In Progress → DONE): Done column, finished-coloured badge.
 	assertColumnHasCard(t, body, "Done", "DCAI-10")
@@ -547,9 +525,9 @@ func TestDailyIgnoresIntraDoneMoves(t *testing.T) {
 		multiDaily("DCAI-22", "Bug",
 			[3]string{"Ready for Release", "In Progress", "a"}),
 	}}
-	app := newTestAppAt(t, client, now, web.WithMe("alice"))
+	app := newTestAppAt(t, client, now)
 
-	body := get(t, app.URL+"/daily") // alice + Today
+	body := get(t, app.URL+"/daily") // All + Today
 
 	// The intra-done-only ticket disappears from the board entirely (#98).
 	if strings.Contains(body, `data-key="DCAI-21"`) {

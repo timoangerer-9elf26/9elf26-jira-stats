@@ -19,12 +19,12 @@ import (
 // builders, so the shape is auditable and the timestamps are computed against the
 // pinned clock in one place.
 //
-// DenseMe is the "me" identity the Daily view should be pinned to for this
-// dataset (its "Tickets I created" panel and default assignee). review-up.sh sets
-// DAILY_ME to this exact string when REVIEW_DATASET=dense — keep the two in sync.
-const DenseMe = "Alexandra Featherstone-Wallington"
+// DenseAlexandra is one dense-dataset assignee: a deliberately long display name
+// that stresses card and control layout. Much of the Daily activity in this
+// fixture is attributed to it so the board stays densely populated.
+const DenseAlexandra = "Alexandra Featherstone-Wallington"
 
-// Dense dataset assignees. One deliberately long name (DenseMe) stresses card
+// Dense dataset assignees. One deliberately long name (DenseAlexandra) stresses card
 // and control layout; the spread gives the Daily assignee control several
 // distinct options.
 const (
@@ -169,19 +169,19 @@ func kw29(key, summary, typ, status, size, assignee, parent string, cl []Changel
 // denseKW29Issues are the active-sprint issues. Between them they populate every
 // Board column, every Sprint cohort×outcome cell (including an excluded
 // pre-finished carry-over and a long Finished drill-down), and a dense Daily
-// digest for DenseMe on the pinned "Today" (Wed 15 Jul, Europe/Berlin) —
+// digest for DenseAlexandra on the pinned "Today" (Wed 15 Jul, Europe/Berlin) —
 // including an intra-done sequence that must be dropped (#98) and created tickets.
 func denseKW29Issues() []Issue {
 	const longSummary = "Investigate intermittent 504s on the checkout aggregation endpoint under peak concurrent sprint-review load and add backpressure with jittered retries"
 	issues := []Issue{
 		// --- Started-with × Finished (a long drill-down list) ---------------------
-		// D1: finishes TODAY → also a Daily "finished" card for DenseMe.
-		kw29("DCAI-D1", "Wire the dense-review dashboard shell and its responsive grid", "Story", stDone, "L", DenseMe, "DCAI-E1", []ChangelogEntry{
+		// D1: finishes TODAY → also a Daily "finished" card for DenseAlexandra.
+		kw29("DCAI-D1", "Wire the dense-review dashboard shell and its responsive grid", "Story", stDone, "L", DenseAlexandra, "DCAI-E1", []ChangelogEntry{
 			clog("cl-D1-1", stReadyToDo, stInProgress, "2026-07-13T09:00:00Z"),
 			clog("cl-D1-2", stInProgress, stDone, "2026-07-15T08:00:00Z"),
 		}),
 		// D2: finished yesterday, currently Ready for Release (Board column).
-		kw29("DCAI-D2", longSummary, "Bug", stReadyForR, "M", DenseMe, "DCAI-E2", []ChangelogEntry{
+		kw29("DCAI-D2", longSummary, "Bug", stReadyForR, "M", DenseAlexandra, "DCAI-E2", []ChangelogEntry{
 			clog("cl-D2-1", stReadyToDo, stInProgress, "2026-07-13T10:00:00Z"),
 			clog("cl-D2-2", stInProgress, stReadyForR, "2026-07-14T10:00:00Z"),
 		}),
@@ -205,13 +205,13 @@ func denseKW29Issues() []Issue {
 			clog("cl-D7-2", stDone, stReleased, "2026-07-14T14:00:00Z"),
 		}),
 		// D8: no-estimate finished (NoEstimate cell, 0 points), finishes TODAY.
-		kw29("DCAI-D8", "Triage the un-estimated spillover ticket before the review", "Task", stDone, "", DenseMe, "DCAI-E3", []ChangelogEntry{
+		kw29("DCAI-D8", "Triage the un-estimated spillover ticket before the review", "Task", stDone, "", DenseAlexandra, "DCAI-E3", []ChangelogEntry{
 			clog("cl-D8-1", stReadyToDo, stInProgress, "2026-07-13T12:00:00Z"),
 			clog("cl-D8-2", stInProgress, stDone, "2026-07-15T09:15:00Z"),
 		}),
 		// D19: finished yesterday, then intra-done hops TODAY (dropped from Daily #98),
 		// currently Released/Deployed (Board column).
-		kw29("DCAI-D19", "Promote the completed migration through the release gate", "Task", stReleased, "M", DenseMe, "DCAI-E2", []ChangelogEntry{
+		kw29("DCAI-D19", "Promote the completed migration through the release gate", "Task", stReleased, "M", DenseAlexandra, "DCAI-E2", []ChangelogEntry{
 			clog("cl-D19-1", stReadyToDo, stInProgress, "2026-07-13T09:00:00Z"),
 			clog("cl-D19-2", stInProgress, stDone, "2026-07-14T09:00:00Z"),
 			clog("cl-D19-3", stDone, stReadyForR, "2026-07-15T09:30:00Z"),
@@ -219,15 +219,15 @@ func denseKW29Issues() []Issue {
 		}),
 
 		// --- Started-with × Open (fills the open Board columns) -------------------
-		// D9: advances TODAY → Daily "advanced" card for DenseMe.
-		kw29("DCAI-D9", "Debounce the resync button and surface freshness inline", "Story", stInProgress, "L", DenseMe, "DCAI-E1", []ChangelogEntry{
+		// D9: advances TODAY → Daily "advanced" card for DenseAlexandra.
+		kw29("DCAI-D9", "Debounce the resync button and surface freshness inline", "Story", stInProgress, "L", DenseAlexandra, "DCAI-E1", []ChangelogEntry{
 			clog("cl-D9-1", stReadyToDo, stInProgress, "2026-07-15T09:00:00Z"),
 		}),
 		kw29("DCAI-D10", "Review the daily digest bucket ordering copy", "Task", stReview, "M", denseBo, "DCAI-E3", nil),
 		kw29("DCAI-D11", "Refine the acceptance-review layout-stress checklist", "Task", stRefinement, "S", denseCarla, "DCAI-E1", nil),
 		kw29("DCAI-D12", "Ready the narrow-viewport screenshot protocol", "Story", stReadyToDo, "", "", "DCAI-E2", nil),
 		// D22: advances TODAY (Refinement → Ready To Do) → Daily "advanced".
-		kw29("DCAI-D22", "Second densely-populated advanced card to fatten the digest", "Task", stReadyToDo, "S", DenseMe, "DCAI-E3", []ChangelogEntry{
+		kw29("DCAI-D22", "Second densely-populated advanced card to fatten the digest", "Task", stReadyToDo, "S", DenseAlexandra, "DCAI-E3", []ChangelogEntry{
 			clog("cl-D22-1", stRefinement, stReadyToDo, "2026-07-15T07:45:00Z"),
 		}),
 		kw29("DCAI-D23", longSummary, "Story", stInProgress, "L", denseDev, "DCAI-E2", nil),
@@ -235,7 +235,7 @@ func denseKW29Issues() []Issue {
 
 		// --- Started-with × Removed (cancelled or reprioritised out) --------------
 		// D13: cancelled TODAY → Daily "pulled back"; Removed via cancellation.
-		kw29("DCAI-D13", "Abandon the duplicate spike after triage", "Bug", stCanceled, "M", DenseMe, "DCAI-E1", []ChangelogEntry{
+		kw29("DCAI-D13", "Abandon the duplicate spike after triage", "Bug", stCanceled, "M", DenseAlexandra, "DCAI-E1", []ChangelogEntry{
 			clog("cl-D13-1", stReadyToDo, stInProgress, "2026-07-13T11:00:00Z"),
 			clog("cl-D13-2", stInProgress, stCanceled, "2026-07-15T10:00:00Z"),
 		}),
@@ -282,10 +282,10 @@ func denseKW29Issues() []Issue {
 		clog("cl-D18-2", stInProgress, stCanceled, "2026-07-14T15:00:00Z"),
 	})
 
-	// --- Daily "Tickets I created" for DenseMe (authored TODAY, not sprint-scoped) ---
+	// --- Tickets authored TODAY by DenseAlexandra (not sprint-scoped) ---
 	created := func(key, summary, typ, size string) Issue {
 		return Issue{Key: key, Type: typ, Summary: summary, Status: stReadyToDo, StatusCategory: "To Do",
-			Size: size, Assignee: DenseMe, Creator: DenseMe, CreatedAt: mustInstant("2026-07-15T07:30:00Z")}
+			Size: size, Assignee: DenseAlexandra, Creator: DenseAlexandra, CreatedAt: mustInstant("2026-07-15T07:30:00Z")}
 	}
 	c20 := created("DCAI-D20", "Draft the layout-stress review protocol amendments and checklist", "Task", "M")
 	c21 := created("DCAI-D21", "File the narrow-viewport regression evidence for the velocity bugs", "Bug", "S")

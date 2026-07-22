@@ -33,13 +33,10 @@ LOG="$STATE_DIR/log"
 
 # REVIEW_DATASET selects the backing fixture. "dense" boots the dense/adversarial
 # dataset (issue #104) that stresses every view's layout; unset (or any other
-# value) keeps the canonical canned dataset, unchanged. For the dense dataset the
-# Daily view is pinned to its "me" identity (DenseMe in internal/jira/densereview.go)
-# so the "Tickets I created" panel and default assignee are populated.
+# value) keeps the canonical canned dataset, unchanged.
 : "${REVIEW_DATASET:=}"
 if [ "$REVIEW_DATASET" = "dense" ]; then
-	: "${DAILY_ME:=Alexandra Featherstone-Wallington}"
-	echo "review-up: REVIEW_DATASET=dense (DAILY_ME=${DAILY_ME})"
+	echo "review-up: REVIEW_DATASET=dense"
 fi
 
 # Always start from a clean slate: stop any prior instance and clear its state so
@@ -69,7 +66,6 @@ DB_PATH="$DB_PATH" \
 SYNC_INTERVAL="1s" \
 REVIEW_NOW="$REVIEW_NOW" \
 REVIEW_DATASET="$REVIEW_DATASET" \
-DAILY_ME="${DAILY_ME:-}" \
 JIRA_BASE_URL="" JIRA_EMAIL="" JIRA_API_TOKEN="" \
 AUTH_DISABLED="${AUTH_DISABLED:-true}" \
 AUTH_EMAIL="${AUTH_EMAIL:-}" AUTH_PASSWORD="${AUTH_PASSWORD:-}" \

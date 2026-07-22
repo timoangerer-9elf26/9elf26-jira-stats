@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
-	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/web"
 )
 
 // denseNow is the pinned review clock the dense dataset is built against
@@ -15,10 +14,10 @@ import (
 var denseNow = time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
 
 // newDenseApp boots the dense/adversarial review dataset (issue #104) under the
-// pinned clock, with the Daily "me" identity the dataset expects.
+// pinned clock. The Daily view defaults to all assignees (#135).
 func newDenseApp(t *testing.T) *testApp {
 	t.Helper()
-	return newTestAppAt(t, jira.NewDenseFakeClient(), denseNow, web.WithMe(jira.DenseMe))
+	return newTestAppAt(t, jira.NewDenseFakeClient(), denseNow)
 }
 
 // TestDenseDatasetStressesAllViews is the guard for the dense review dataset: it
@@ -102,14 +101,14 @@ func TestDenseDatasetStressesAllViews(t *testing.T) {
 	})
 
 	t.Run("daily renders a populated board and drops the intra-done sequence", func(t *testing.T) {
-		body := get(t, app.URL+"/daily") // DenseMe + Today (Wed 15 Jul)
+		body := get(t, app.URL+"/daily") // all assignees + Today (Wed 15 Jul)
 		// The five workflow columns always render.
 		for _, col := range []string{"Refinement", "Ready To Do", "In Progress", "Review / Testing", "Done"} {
 			if !strings.Contains(body, `data-status="`+col+`"`) {
 				t.Errorf("daily: missing board column %q", col)
 			}
 		}
-		// DenseMe's Today activity places cards across the board: D1/D8 finished
+		// DenseAlexandra's Today activity places cards across the board: D1/D8 finished
 		// (Done), D9 advanced (In Progress), D22 advanced (Ready To Do), D13
 		// cancelled (Canceled, rightmost).
 		for _, key := range []string{"DCAI-D1", "DCAI-D8", "DCAI-D9", "DCAI-D22", "DCAI-D13"} {
@@ -131,7 +130,7 @@ func TestDenseDatasetStressesAllViews(t *testing.T) {
 			}
 		}
 		// Several distinct assignees make the Assignee control non-trivial.
-		for _, name := range []string{jira.DenseMe, "Bo", "Carla Mendez-Ortiz", "Devraj Subramaniam", "Ekaterina Vasilyeva"} {
+		for _, name := range []string{jira.DenseAlexandra, "Bo", "Carla Mendez-Ortiz", "Devraj Subramaniam", "Ekaterina Vasilyeva"} {
 			if !strings.Contains(body, name) {
 				t.Errorf("daily: missing assignee option %q", name)
 			}
