@@ -5,7 +5,7 @@ TAILWIND_OUTPUT := internal/web/assets/output.css
 
 .PHONY: help
 help: ## List the available targets.
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-8s %s\n", $$1, $$2}'
 
 # Regenerate the committed Tailwind stylesheet from the templates. Uses the
@@ -26,6 +26,14 @@ generate: ## Run go generate (rebuilds Tailwind CSS via go:generate).
 .PHONY: build
 build: ## Build the single static binary at bin/jira-stats.
 	CGO_ENABLED=0 go build -o bin/jira-stats ./cmd/jira-stats
+
+# Cross-compile the release binary for linux/arm64 (AWS Graviton / t4g). Pure-Go
+# SQLite means CGO_ENABLED=0 cross-compiles cleanly with no C toolchain, and the
+# templates/CSS/HTMX are embedded, so this produces a self-contained aarch64
+# binary at bin/jira-stats-linux-arm64. `make build` (host arch) is unaffected.
+.PHONY: build-arm64
+build-arm64: ## Cross-compile the linux/arm64 release binary (bin/jira-stats-linux-arm64).
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/jira-stats-linux-arm64 ./cmd/jira-stats
 
 .PHONY: test
 test: ## Run the unit/integration test suite.
