@@ -75,41 +75,52 @@ status: accepted
 > Done set `{DONE (This Sprint), Ready for Release, Released / Deployed}`; narrowing
 > the finish line globally was considered and rejected (it would reverse ADR 0002's
 > deliberate inclusion of Ready for Release and shift historical metrics).
+>
+> **Amended by #135 (2026-07): the "me" concept is removed.** The app is deployed
+> for a whole team, so a single configured "me" (the `WithMe` option / `DAILY_ME`
+> env var) no longer makes sense. The Daily assignee filter now **defaults to all
+> assignees** instead of a configured person; "All" is the absence of an
+> `assignee` param (the dropdown still selects individual teammates and the
+> Unassigned sentinel). Everything below that describes a default centred on a
+> configured person is historical context, superseded by this all-assignees
+> default.
 
-We reshape the Daily view from a neutral per-assignee status-change browser into
-a personal morning overview centred on **me** (a single configured Jira display
-name; Daily defaults to it, the dropdown still selects teammates/All). Over a
-recent window it shows a **daily digest** — each moved ticket bucketed by net
-movement into Finished / Advanced / Pulled back — stacked above the existing
-granular per-transition log. See `CONTEXT.md` for the term definitions.
+The original decision (historical; see the #135 amendment above) reshaped the
+Daily view from a neutral per-assignee status-change browser into a personal
+morning overview centred on a single configured Jira display name that Daily
+defaulted to (the dropdown still selecting teammates/All). Over a recent window
+it showed a **daily digest** — each moved ticket bucketed by net movement into
+Finished / Advanced / Pulled back — stacked above the granular per-transition
+log. See `CONTEXT.md` for the term definitions.
 
 ## The non-obvious decisions
 
 ### Attribution is by *current* assignee, not the actor of each move
 
-"What I did" ideally means the status moves *I personally made*. We instead
-filter on the ticket's **current** assignee, so a move made while a ticket was
-mine but later reassigned is credited to the new assignee, not me (and vice
-versa). We accept this misattribution because the truer anchor needs the
-changelog to carry the actor (or assignee-at-instant) of each transition, which
-isn't synced today. A future reader will wonder why handoffs misattribute — this
-is why.
+"What was done" ideally means the status moves a person *personally made*. We
+instead filter on the ticket's **current** assignee, so a move made while a
+ticket was assigned to one person but later reassigned is credited to the new
+assignee, not the previous one. We accept this misattribution because the truer
+anchor needs the changelog to carry the actor (or assignee-at-instant) of each
+transition, which isn't synced today. A future reader will wonder why handoffs
+misattribute — this is why.
 
-### The movement digest is active-sprint-scoped, but "tickets I created" is not
+### The movement digest is active-sprint-scoped, but authored tickets are not
 
 Status movements are counted only for active-sprint work items, keeping Daily on
-the same sprint spine as the rest of the app. The deferred "tickets I created"
-section (see below) is deliberately **not** sprint-scoped — a ticket you
-authored is something you did regardless of whether it landed in the sprint.
-The asymmetry is intentional, not an oversight.
+the same sprint spine as the rest of the app. The deferred authored-tickets
+section (see below) was deliberately **not** sprint-scoped — a ticket someone
+authored is work they did regardless of whether it landed in the sprint. The
+asymmetry is intentional, not an oversight.
 
-### "Me" is keyed on display name for now
+### The assignee filter is keyed on display name
 
-The identity is a configured Jira **display name**, matching what the store
-already holds for assignee — zero sync/schema change. Display names can be
+The assignee filter matches on the Jira **display name**, matching what the
+store already holds for assignee — zero sync/schema change. Display names can be
 renamed or collide, silently breaking the match; acceptable for a single-team
 internal dashboard until the sync is touched, at which point a stabler key
-(`accountId`/email) should replace it.
+(`accountId`/email) should replace it. (The original per-user "me" default that
+this keying served was removed by #135; see the amendment above.)
 
 ## Consequences
 

@@ -45,7 +45,7 @@ func dailyEstimateApp(t *testing.T) (*testApp, *jira.FakeClient) {
 // /board/estimate, while still showing the card's current value.
 func TestDailyEstimatePillIsEditable(t *testing.T) {
 	app, _ := dailyEstimateApp(t)
-	body := get(t, app.URL+"/daily/results?assignee=all&preset=today")
+	body := get(t, app.URL+"/daily/results?preset=today")
 
 	for _, want := range []string{
 		`data-testid="card:DCAI-40:estimate"`,
@@ -84,7 +84,7 @@ func TestDailyEstimateWriteReflectsOnDailyBoard(t *testing.T) {
 	}
 
 	// A fresh Daily load reflects the persisted size (the pill is now L).
-	if reload := get(t, app.URL+"/daily/results?assignee=all&preset=today"); !strings.Contains(reload, `data-testid="card:DCAI-40:size">L<`) {
+	if reload := get(t, app.URL+"/daily/results?preset=today"); !strings.Contains(reload, `data-testid="card:DCAI-40:size">L<`) {
 		t.Errorf("Daily board did not reflect the persisted size L\n%s", reload)
 	}
 }
@@ -110,7 +110,7 @@ func TestDailyEstimateFailureRevertsWithInlineError(t *testing.T) {
 	}
 
 	// The projection is untouched: a fresh Daily load still shows M.
-	if reload := get(t, app.URL+"/daily/results?assignee=all&preset=today"); !strings.Contains(reload, `data-testid="card:DCAI-40:size">M<`) {
+	if reload := get(t, app.URL+"/daily/results?preset=today"); !strings.Contains(reload, `data-testid="card:DCAI-40:size">M<`) {
 		t.Errorf("failed write leaked into the Daily projection (should still be M)\n%s", reload)
 	}
 }

@@ -51,7 +51,8 @@ reconstructed from the sprint-membership history at the window bounds.
 ## Daily view
 
 The morning standup overview, presented as a **board**. For a chosen
-**assignee** — defaulting to **me** — over a **selectable date-time range**, it
+**assignee** — defaulting to **all assignees** — over a **selectable date-time
+range**, it
 shows every active-sprint work item that was **created in the window or had a
 status change within it**, laid out in workflow columns so you can see at a
 glance where each moved and what each is now. This single board is the whole
@@ -83,14 +84,16 @@ The default is **Today** (falling back to Yesterday when Today is disabled).
 Weekend adjustment applies to the working-day presets only — a custom range and
 Last 24h are honoured verbatim.
 
-## Me
+## Assignee filter
 
-The single configured identity the Daily view revolves around, set in config as
-a Jira **display name**. Daily defaults to *me*; every other assignee stays
-selectable from the dropdown. Attribution is by a ticket's *current* assignee —
-so a status move made while a ticket was mine but later reassigned away is
-credited to the new assignee, not me (a known limitation, accepted until the
-sync captures the actor of each transition).
+The Daily view's assignee filter **defaults to all assignees** — a fresh load
+(no `assignee` query param) shows every assignee's work, and selecting **All**
+likewise carries no `assignee` param. The dropdown also selects an individual
+teammate by Jira **display name** or the **Unassigned** sentinel. Attribution is
+by a ticket's *current* assignee — so a status move made while a ticket was
+assigned to one person but later reassigned away is credited to the new assignee
+(a known limitation, accepted until the sync captures the actor of each
+transition).
 
 ## Daily movement
 
