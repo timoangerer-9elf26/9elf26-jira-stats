@@ -169,8 +169,8 @@
 {{/* page-header is the shared title block below the nav. The string argument is
      the per-view subtitle shown under the constant product title. */}}
 {{define "page-header"}}
-<header class="mt-6">
-  <h1 class="text-2xl font-semibold tracking-tight">9elf26 Jira Stats</h1>
+<header class="mt-3">
+  <h1 class="text-xl font-semibold tracking-tight">9elf26 Jira Stats</h1>
   <p class="mt-1 text-sm text-slate-500">{{.}}</p>
 </header>
 {{end}}
@@ -427,6 +427,31 @@
 </div>
 {{end}}
 
+{{/* board-column-header and board-column-cards split the Board column at the
+     sticky seam. The header row must not be descended from the overflow-x card
+     strip: browsers otherwise treat that strip as its vertical sticky
+     container too. Matching fixed widths/gaps plus scrollLeft mirroring in the
+     page keep the two halves aligned horizontally. */}}
+{{define "board-column-header"}}
+<div class="w-72 shrink-0 rounded-t-xl border border-b-0 border-slate-200 bg-slate-100/60 p-3 pb-0">
+  <div class="flex items-baseline justify-between px-1">
+    <h3 class="truncate text-sm font-semibold text-slate-700" title="{{.Status}}">{{.Status}}</h3>
+    <span class="text-xs font-medium text-slate-400 tabular-nums" data-testid="col:{{.Status}}:count">{{len .Cards}}</span>
+  </div>
+</div>
+{{end}}
+
+{{define "board-column-cards"}}
+<div class="flex w-72 shrink-0 flex-col rounded-b-xl border border-t-0 border-slate-200 bg-slate-100/60 p-3"
+     data-testid="board-column" data-status="{{.Status}}">
+  <div class="flex flex-col gap-2">
+    {{range .Cards}}
+      {{template "board-card" .}}
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{/* velocity-bar renders one sprint of the Velocity view as an accessible CSS
      bar (no JS charting library). Takes a velocitySprint (Label = sprint name,
      Points, Percent, Dates). The full-height track marks the sprint even when it
@@ -618,11 +643,17 @@
      data. Takes a dailyView. */}}
 {{define "daily-panel"}}
   {{template "daily-board-style"}}
-  {{template "daily-controls" .}}
   {{if .RangeError}}
-  <p data-testid="daily-range-error" class="mt-6 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 shadow-sm">{{.RangeError}}</p>
+  <div class="sticky top-24 z-20 bg-slate-50">
+    {{template "daily-controls" .}}
+  </div>
+  <p data-testid="daily-range-error" class="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 shadow-sm">{{.RangeError}}</p>
   {{else}}
-  <div id="daily-results" class="mt-6">
+  <div data-testid="daily-chrome" class="sticky top-24 z-20 bg-slate-50">
+    {{template "daily-controls" .}}
+    {{template "daily-board-header" .}}
+  </div>
+  <div id="daily-results">
     {{template "daily-board" .}}
   </div>
   {{end}}
@@ -675,7 +706,7 @@
 <form data-testid="daily-controls"
       hx-target="#daily-panel"
       hx-swap="innerHTML"
-      class="mt-8 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      class="mt-4 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
   <input type="hidden" name="preset" value="{{range .Presets}}{{if .Selected}}{{.Key}}{{end}}{{end}}">
   {{/* The current assignee selection as hidden inputs, so a preset button or a
        From/Until edit (which hx-include [name='assignee']) round-trips the whole
@@ -756,27 +787,43 @@
 </div>
 {{end}}
 
-{{/* daily-board is the Daily results fragment: a destination board of workflow
-     columns (Refinement → Done, always rendered even empty; Canceled last, only
-     when non-empty). Each card lands in the column of its status at the window
-     end. Takes a dailyView (needs .Columns, .SprintName). */}}
-{{define "daily-board"}}
-<div data-testid="daily-results">
+{{/* daily-board-header is the pinned section heading and status row. It stays
+     outside daily-board's overflow ancestor so vertical stickiness remains
+     relative to the window; daily-board mirrors its horizontal scrollLeft here
+     to keep the matching fixed-width columns aligned. */}}
+{{define "daily-board-header"}}
+<div class="mt-3">
   <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Board{{if .SprintName}} — {{.SprintName}}{{end}}</h2>
-  <div class="mt-4 flex gap-4 overflow-x-auto pb-4" style="overflow-y:hidden" data-testid="daily-board">
+  <div id="daily-column-headers" data-testid="daily-column-headers"
+       class="mt-3 flex gap-4 overflow-x-hidden">
     {{range .Columns}}
-    <div class="flex w-72 shrink-0 flex-col rounded-xl border border-slate-200 bg-slate-100/60 p-3"
-         data-testid="daily-column" data-status="{{.Name}}">
+    <div class="w-72 shrink-0 rounded-t-xl border border-b-0 border-slate-200 bg-slate-100/60 p-3 pb-0">
       <div class="flex items-baseline justify-between px-1">
         <h3 class="truncate text-sm font-semibold {{if .Canceled}}text-rose-600{{else}}text-slate-700{{end}}" title="{{.Name}}">{{.Name}}</h3>
         <span class="text-xs font-medium tabular-nums text-slate-400" data-testid="daily-col:{{.Name}}:count">{{len .Cards}}</span>
       </div>
-      <div class="mt-3 flex flex-col gap-2">
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{/* daily-board is the horizontally scrolling card strip. It intentionally has
+     no sticky descendants, so overflow-x cannot capture vertical stickiness.
+     The browser window remains the only vertical scroller. */}}
+{{define "daily-board"}}
+<div class="flex gap-4 overflow-x-auto pb-4"
+     style="overflow-y:hidden"
+     data-testid="daily-board"
+     onscroll="document.getElementById('daily-column-headers').scrollLeft=this.scrollLeft">
+    {{range .Columns}}
+    <div class="flex w-72 shrink-0 flex-col rounded-b-xl border border-t-0 border-slate-200 bg-slate-100/60 p-3"
+         data-testid="daily-column" data-status="{{.Name}}">
+      <div class="flex flex-col gap-2">
         {{range .Cards}}{{template "daily-card" .}}{{end}}
       </div>
     </div>
     {{end}}
-  </div>
 </div>
 {{end}}
 

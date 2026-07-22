@@ -127,12 +127,35 @@ func TestBoardStripScrollsHorizontallyOnly(t *testing.T) {
 	app := newBoardApp(t, boardFixture())
 	body := get(t, app.URL+"/board")
 
-	if !strings.Contains(body, "overflow-x-auto") {
+	if !strings.Contains(body, `data-testid="board-card-strip"`) || !strings.Contains(body, "overflow-x-auto") {
 		t.Errorf("board strip must keep horizontal scrolling (overflow-x-auto)\n%s", body)
 	}
 	if !strings.Contains(body, "overflow-y:hidden") {
 		t.Errorf("board strip must disable vertical scrolling (overflow-y:hidden)\n%s", body)
 	}
+}
+
+// TestBoardStickyChromeIsOutsideHorizontalScroller protects the #143 seam: the
+// page chrome and column-heading row use viewport sticky positioning, while the
+// overflow-x card strip contains no sticky headings (an overflow ancestor would
+// capture their vertical stickiness). The card strip mirrors scrollLeft to the
+// hidden-scrollbar header row so both halves remain horizontally aligned.
+func TestBoardStickyChromeIsOutsideHorizontalScroller(t *testing.T) {
+	app := newBoardApp(t, boardFixture())
+	body := get(t, app.URL+"/board")
+
+	for _, want := range []string{
+		`data-testid="page-chrome" class="sticky top-0`,
+		`data-testid="board-chrome" class="sticky top-24`,
+		`id="board-column-headers" data-testid="board-column-headers"`,
+		`class="mt-3 flex gap-4 overflow-x-hidden"`,
+		`onscroll="document.getElementById('board-column-headers').scrollLeft=this.scrollLeft"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("board sticky layout missing %q\n%s", want, body)
+		}
+	}
+	assertOrder(t, body, `data-testid="board-column-headers"`, `data-testid="board-card-strip"`)
 }
 
 // avatarFixture is an active-sprint (KW29) mix exercising the three assignee
