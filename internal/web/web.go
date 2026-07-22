@@ -195,17 +195,12 @@ func WithVelocitySprints(n int) Option {
 // NewServer parses the embedded templates, loads the display timezone, and
 // wires the routes.
 func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
-	tmpl, err := template.New("").Funcs(templateFuncs()).ParseFS(templatesFS, "templates/*.html")
-	if err != nil {
-		return nil, fmt.Errorf("parse templates: %w", err)
-	}
 	loc, err := time.LoadLocation(displayTimeZone)
 	if err != nil {
 		return nil, fmt.Errorf("load %s: %w", displayTimeZone, err)
 	}
 	s := &Server{
 		rollups:         rollups,
-		templates:       tmpl,
 		mux:             http.NewServeMux(),
 		now:             time.Now,
 		loc:             loc,
@@ -214,6 +209,15 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 	for _, opt := range opts {
 		opt(s)
 	}
+	// Templates are parsed after s is constructed because templateFuncs is now a
+	// method: its authEnabled helper closes over s and reads s.auth at render
+	// time (so the nav shows the logout control only when the shared login is
+	// active). Parse order relative to the options does not matter.
+	tmpl, err := template.New("").Funcs(s.templateFuncs()).ParseFS(templatesFS, "templates/*.html")
+	if err != nil {
+		return nil, fmt.Errorf("parse templates: %w", err)
+	}
+	s.templates = tmpl
 	s.routes()
 	return s, nil
 }
@@ -236,6 +240,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /login", s.handleLogin)
 	s.mux.HandleFunc("POST /login", s.handleLogin)
 	s.mux.HandleFunc("GET /logout", s.handleLogout)
+	s.mux.HandleFunc("POST /logout", s.handleLogout)
 }
 
 // ServeHTTP makes Server an http.Handler, wrapping the mux in the auth
@@ -292,8 +297,13 @@ func humanizeAgo(d time.Duration) string {
 
 // templateFuncs exposes helpers the partials need. dict builds a map so a
 // partial can receive several named values (Go templates take a single arg).
-func templateFuncs() template.FuncMap {
-	return template.FuncMap{"dict": dict}
+// authEnabled reports whether the shared login is active, letting the nav show
+// the logout control only when there is a session to end.
+func (s *Server) templateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"dict":        dict,
+		"authEnabled": func() bool { return s.auth != nil },
+	}
 }
 
 func dict(pairs ...any) (map[string]any, error) {
