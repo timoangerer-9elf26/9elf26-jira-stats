@@ -135,18 +135,17 @@ func TestBoardStripScrollsHorizontallyOnly(t *testing.T) {
 	}
 }
 
-// TestBoardStickyChromeIsOutsideHorizontalScroller protects the #143 seam: the
-// page chrome and column-heading row use viewport sticky positioning, while the
-// overflow-x card strip contains no sticky headings (an overflow ancestor would
-// capture their vertical stickiness). The card strip mirrors scrollLeft to the
-// hidden-scrollbar header row so both halves remain horizontally aligned.
-func TestBoardStickyChromeIsOutsideHorizontalScroller(t *testing.T) {
+// TestBoardUsesOneStickyChromeRegion protects the #143 seam: every fixed row is
+// inside one viewport-sticky page chrome region, while the overflow-x card strip
+// remains below it. The card strip mirrors scrollLeft to the hidden-scrollbar
+// header row so both halves remain horizontally aligned.
+func TestBoardUsesOneStickyChromeRegion(t *testing.T) {
 	app := newBoardApp(t, boardFixture())
 	body := get(t, app.URL+"/board")
 
 	for _, want := range []string{
 		`data-testid="page-chrome" class="sticky top-0`,
-		`data-testid="board-chrome" class="sticky top-24`,
+		`data-testid="board-chrome" class="mt-4`,
 		`id="board-column-headers" data-testid="board-column-headers"`,
 		`class="mt-3 flex gap-4 overflow-x-hidden"`,
 		`onscroll="document.getElementById('board-column-headers').scrollLeft=this.scrollLeft"`,
@@ -154,6 +153,9 @@ func TestBoardStickyChromeIsOutsideHorizontalScroller(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("board sticky layout missing %q\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, `sticky top-24`) || strings.Count(body, `class="sticky top-0`) != 1 {
+		t.Errorf("board should have exactly one sticky chrome region\n%s", body)
 	}
 	assertOrder(t, body, `data-testid="board-column-headers"`, `data-testid="board-card-strip"`)
 }

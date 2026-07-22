@@ -321,18 +321,18 @@ func TestDailyEmptyState(t *testing.T) {
 	}
 }
 
-// TestDailyStickyChromeIsOutsideHorizontalScroller protects the #143 seam on
-// Daily: page header + controls + section/status headings are sticky to the
-// window, outside the overflow-x card strip. Horizontal scrolling is mirrored
-// to the no-scrollbar status row so the two fixed-width column halves align.
-func TestDailyStickyChromeIsOutsideHorizontalScroller(t *testing.T) {
+// TestDailyUsesOneStickyChromeRegion protects the #143 seam on Daily: page
+// header, controls and section/status headings share one viewport-sticky region
+// outside the overflow-x card strip. Horizontal scrolling is mirrored to the
+// no-scrollbar status row so the two fixed-width column halves align.
+func TestDailyUsesOneStickyChromeRegion(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
 	body := get(t, app.URL+"/daily")
 
 	for _, want := range []string{
 		`data-testid="page-chrome" class="sticky top-0`,
-		`data-testid="daily-chrome" class="sticky top-24`,
+		`data-testid="daily-chrome"`,
 		`data-testid="daily-controls"`,
 		`id="daily-column-headers" data-testid="daily-column-headers"`,
 		`class="mt-3 flex gap-4 overflow-x-hidden"`,
@@ -341,6 +341,9 @@ func TestDailyStickyChromeIsOutsideHorizontalScroller(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("daily sticky layout missing %q\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, `sticky top-24`) || strings.Count(body, `class="sticky top-0`) != 1 {
+		t.Errorf("daily should have exactly one sticky chrome region\n%s", body)
 	}
 	assertOrder(t, body, `data-testid="daily-controls"`, `data-testid="daily-column-headers"`, `data-testid="daily-board"`)
 }
@@ -396,35 +399,32 @@ func TestDailyPanelKeepsSelectionAfterSwap(t *testing.T) {
 // marked selected (aria-pressed) in the rendered controls.
 func assigneePressed(html, value string) bool {
 	marker := `data-testid="daily-assignee:` + value + `"`
-	start := strings.Index(html, marker)
-	if start == -1 {
-		return false
-	}
-	end := strings.Index(html[start:], ">")
-	if end == -1 {
-		return false
-	}
-	return strings.Contains(html[start:start+end], `aria-pressed="true"`)
+	return strings.Contains(openingTag(html, marker), `aria-pressed="true"`)
 }
 
 // presetSelected reports whether the preset button for the given key is marked
 // selected (aria-pressed) in the rendered controls.
 func presetSelected(html, key string) bool {
 	marker := `data-testid="daily-preset:` + key + `"`
+	return strings.Contains(openingTag(html, marker), `aria-pressed="true"`)
+}
+
+// openingTag returns the rendered element's opening tag containing marker.
+func openingTag(html, marker string) string {
 	start := strings.Index(html, marker)
 	if start == -1 {
-		return false
+		return ""
 	}
 	end := strings.Index(html[start:], ">")
 	if end == -1 {
-		return false
+		return ""
 	}
-	return strings.Contains(html[start:start+end], `aria-pressed="true"`)
+	return html[start : start+end]
 }
 
 // TestDailyDefaultsToAll: opening Daily with no assignee param selects no chip
 // (zero selected = all), renders an avatar bar with one chip per active-sprint
-// assignee plus a trailing Unassigned chip, and shows no Clear affordance (#136).
+// assignee plus a trailing Unassigned chip, and disables Clear (#136).
 func TestDailyDefaultsToAll(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
@@ -466,9 +466,16 @@ func TestDailyDefaultsToAll(t *testing.T) {
 	if strings.Contains(body, `<select name="assignee"`) {
 		t.Errorf("the single-select assignee dropdown must be gone:\n%s", body)
 	}
-	// With nothing selected there is no Clear affordance.
-	if strings.Contains(body, `data-testid="daily-assignee-clear"`) {
-		t.Errorf("Clear should not show when nothing is selected")
+	// Clear remains in the row so the avatars do not shift, but cannot be pressed.
+	clear := openingTag(body, `data-testid="daily-assignee-clear"`)
+	if !strings.Contains(clear, `disabled aria-disabled="true"`) {
+		t.Errorf("Clear should remain visible and disabled when nothing is selected:\n%s", body)
+	}
+	if strings.Contains(clear, `hx-get=`) {
+		t.Errorf("disabled Clear should not carry an HTMX action:\n%s", body)
+	}
+	if !strings.Contains(clear, `cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300`) {
+		t.Errorf("disabled Clear should use muted, non-interactive styling:\n%s", body)
 	}
 	// Alphabetical order: alice before bob, then the Unassigned chip last.
 	assertOrder(t, body,
@@ -528,12 +535,16 @@ func TestDailyMultiAssigneeUnion(t *testing.T) {
 	if assigneePressed(body, "bob") {
 		t.Errorf("bob's chip must not be pressed:\n%s", body)
 	}
-	// Clear shows once ≥1 is selected.
-	if !strings.Contains(body, `data-testid="daily-assignee-clear"`) {
+	// Clear enables once ≥1 is selected.
+	clear := openingTag(body, `data-testid="daily-assignee-clear"`)
+	if clear == "" {
 		t.Errorf("Clear should show when assignees are selected:\n%s", body)
 	}
-	if !strings.Contains(body, `rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm`) {
+	if !strings.Contains(clear, `cursor-pointer border-slate-200 bg-white text-slate-600 hover:bg-slate-50`) {
 		t.Errorf("Clear should render as a bordered pill button:\n%s", body)
+	}
+	if strings.Contains(clear, `disabled aria-disabled="true"`) {
+		t.Errorf("Clear should be enabled when assignees are selected:\n%s", body)
 	}
 	assertOrder(t, body,
 		`data-testid="daily-assignee:__unassigned__"`,
@@ -571,8 +582,8 @@ func TestDailyClearResetsToAll(t *testing.T) {
 			t.Errorf("after Clear no chip should be pressed, but %q is:\n%s", v, cleared)
 		}
 	}
-	if strings.Contains(cleared, `data-testid="daily-assignee-clear"`) {
-		t.Errorf("Clear should not show once selection is empty")
+	if !strings.Contains(openingTag(cleared, `data-testid="daily-assignee-clear"`), `disabled aria-disabled="true"`) {
+		t.Errorf("Clear should stay visible but disabled once selection is empty:\n%s", cleared)
 	}
 	// The Clear button, when present, targets the bare results path.
 	selected := get(t, app.URL+"/daily/results?assignee=alice&preset=today")
