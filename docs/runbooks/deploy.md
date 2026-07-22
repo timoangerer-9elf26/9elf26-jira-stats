@@ -10,7 +10,7 @@ and the cost research in `docs/research/aws-hosting-internal-tooling.md`.
 |---|---|
 | AWS account | `9elf26-internal-tooling` — `214519213070` (Infrastructure OU) |
 | Region | `eu-central-1` |
-| Instance | `i-0220fc1a6bee863d6` — `t4g.small` (arm64, AL2023), Elastic IP `63.185.210.121` |
+| Instance | `i-0220fc1a6bee863d6` — `t4g.micro` (arm64, AL2023), Elastic IP `63.185.210.121` |
 | App | `jira-stats.service` (systemd), binary `/opt/jira-stats/jira-stats`, binds `127.0.0.1:8080` |
 | Reverse proxy | stock Caddy (`caddy.service`), `/etc/caddy/Caddyfile`, TLS via Let's Encrypt (HTTP-01, auto-renew) |
 | DNS | `jira-stats.in.9elf26.ai` A → `63.185.210.121` in the delegated zone `in.9elf26.ai` (`Z087691143G63LUY1OIN`) |
