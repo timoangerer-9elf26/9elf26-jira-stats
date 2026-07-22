@@ -8,13 +8,14 @@ help: ## List the available targets.
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-8s %s\n", $$1, $$2}'
 
-# Regenerate the committed Tailwind stylesheet from the templates. Uses the
-# Tailwind v4 CLI via npx (Node only needed to build CSS, never to `go build`).
-# The generated output.css is committed and embedded, so `make build` does not
-# depend on this; run `make css` after changing template classes.
+# Regenerate the committed Tailwind stylesheet from the templates. npm ci makes
+# this work from a clean checkout and pins the build through package-lock.json.
+# Node is only needed to build CSS, never to `go build`. The generated output.css
+# is committed and embedded; run `make css` after changing template classes.
 .PHONY: css
-css: ## Rebuild the committed Tailwind stylesheet (requires npx).
-	npx @tailwindcss/cli -i $(TAILWIND_INPUT) -o $(TAILWIND_OUTPUT) --minify
+css: ## Install pinned Tailwind tooling and rebuild the committed stylesheet.
+	npm ci
+	./node_modules/.bin/tailwindcss -i $(TAILWIND_INPUT) -o $(TAILWIND_OUTPUT) --minify
 
 # Equivalent to `make css` via the //go:generate directive in internal/web.
 .PHONY: generate

@@ -23,7 +23,7 @@ const displayTimeZone = "Europe/Berlin"
 // Regenerate the committed Tailwind stylesheet (see also `make css`). Node is
 // only needed to build CSS; `go build` embeds the committed output.css and
 // never invokes Tailwind.
-//go:generate npx @tailwindcss/cli -i assets/input.css -o assets/output.css --minify
+//go:generate make -C ../.. css
 
 //go:embed templates/*.html
 var templatesFS embed.FS
