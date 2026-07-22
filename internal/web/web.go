@@ -115,6 +115,9 @@ type Server struct {
 	velocitySprints int
 	jiraBaseURL     string
 	me              string
+	// auth gates every route behind the shared team login (#122). Nil means
+	// auth is disabled and the middleware is a pass-through.
+	auth *authConfig
 }
 
 // Option configures a Server at construction.
@@ -170,6 +173,15 @@ func WithEstimator(e Estimator) Option {
 	return func(s *Server) { s.estimator = e }
 }
 
+// WithAuth gates the server behind the shared team login (#122), enabling the
+// /login form and session middleware for the given shared credential. Left
+// unset, auth is disabled and every route is served unauthenticated (the
+// local-dev / AUTH_DISABLED case); the caller (run() in main) is responsible
+// for refusing to start a public deployment without it.
+func WithAuth(email, password string) Option {
+	return func(s *Server) { s.auth = newAuthConfig(email, password) }
+}
+
 // WithVelocitySprints overrides how many trailing sprints the Velocity view
 // shows (spec: ~10). Non-positive values are ignored, keeping the default.
 func WithVelocitySprints(n int) Option {
@@ -219,11 +231,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /resync", s.handleResync)
 	s.mux.HandleFunc("GET /resync/status", s.handleResyncStatus)
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(mustSub(assetsFS)))))
+	// Shared-team login (#122). Registered unconditionally; the handlers and the
+	// auth middleware are pass-throughs when auth is disabled (s.auth == nil).
+	s.mux.HandleFunc("GET /login", s.handleLogin)
+	s.mux.HandleFunc("POST /login", s.handleLogin)
+	s.mux.HandleFunc("GET /logout", s.handleLogout)
 }
 
-// ServeHTTP makes Server an http.Handler.
+// ServeHTTP makes Server an http.Handler, wrapping the mux in the auth
+// middleware so every route is gated behind the shared login (#122). The
+// middleware is a pass-through when auth is disabled.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	s.authMiddleware(s.mux).ServeHTTP(w, r)
 }
 
 // handleIndex redirects the root path to the Sprint view. The Now view was

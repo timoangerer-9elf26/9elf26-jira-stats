@@ -68,6 +68,10 @@ func startDashboardEnv(t *testing.T, extraEnv ...string) string {
 		"SYNC_INTERVAL=1s",
 		// Deliberately unset JIRA_* so the binary falls back to the fake.
 		"JIRA_BASE_URL=", "JIRA_EMAIL=", "JIRA_API_TOKEN=",
+		// The shared-team login (#122) fails closed at startup; the smoke tests
+		// exercise the app routes directly, so run with auth disabled (the
+		// local-dev escape hatch), matching how the review launcher boots it.
+		"AUTH_DISABLED=true",
 	)
 	cmd.Env = append(cmd.Env, extraEnv...)
 	if out, err := os.Create(filepath.Join(t.TempDir(), "server.log")); err == nil {
