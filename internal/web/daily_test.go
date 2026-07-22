@@ -405,10 +405,22 @@ func TestDailyDefaultsToAll(t *testing.T) {
 	if !strings.Contains(body, `data-testid="daily-assignee-bar"`) {
 		t.Fatalf("the avatar filter bar should render:\n%s", body)
 	}
+	if strings.Contains(body, `>Assignee</span>`) {
+		t.Errorf("the avatar filter bar should not render an Assignee text label:\n%s", body)
+	}
+	if !strings.Contains(body, `data-testid="daily-assignee-avatars" class="flex flex-wrap items-center"`) {
+		t.Errorf("avatar chips should rely on their own padding and border, with no inter-chip gap:\n%s", body)
+	}
 	// A chip per active-sprint assignee (alice, bob) plus the Unassigned chip.
 	for _, v := range []string{"alice", "bob", "__unassigned__"} {
 		if !strings.Contains(body, `data-testid="daily-assignee:`+v+`"`) {
 			t.Errorf("missing avatar chip for %q:\n%s", v, body)
+		}
+	}
+	// Every chip retains both accessible-name affordances.
+	for _, name := range []string{"alice", "bob", "Unassigned"} {
+		if !strings.Contains(body, `title="`+name+`" aria-label="`+name+`"`) {
+			t.Errorf("avatar chip %q should retain its title and aria-label:\n%s", name, body)
 		}
 	}
 	// Nothing is pressed by default (zero selected = all).
@@ -487,6 +499,13 @@ func TestDailyMultiAssigneeUnion(t *testing.T) {
 	if !strings.Contains(body, `data-testid="daily-assignee-clear"`) {
 		t.Errorf("Clear should show when assignees are selected:\n%s", body)
 	}
+	if !strings.Contains(body, `rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm`) {
+		t.Errorf("Clear should render as a bordered pill button:\n%s", body)
+	}
+	assertOrder(t, body,
+		`data-testid="daily-assignee:__unassigned__"`,
+		`data-testid="daily-assignee-clear"`,
+	)
 }
 
 // TestDailyMultiAssigneeUnionYesterday: a Yesterday selection of alice + bob
