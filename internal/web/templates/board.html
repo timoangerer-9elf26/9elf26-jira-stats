@@ -6,19 +6,14 @@
     <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50">
       {{template "nav" "board"}}
       {{template "page-header" "Board — the active sprint mirrored from Jira, for data-quality validation."}}
-    </div>
-
-    {{template "board-estimate-style"}}
-    {{if .HasSprint}}
-    <section data-testid="board" class="mt-4">
-      <div data-testid="board-chrome" class="sticky top-24 z-20 bg-slate-50">
+      {{if .HasSprint}}
+      <div data-testid="board-chrome" class="mt-4">
         <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500" data-testid="board-heading">Sprint board — {{.SprintName}}</h2>
         {{/* The status row deliberately sits OUTSIDE the horizontal card
-             scroller. An overflow-x ancestor also becomes the sticky element's
-             vertical scroll container in browsers, which prevents viewport
-             stickiness. The card strip mirrors its scrollLeft into this hidden
+             scroller. The card strip mirrors its scrollLeft into this hidden
              horizontal scroller so headings stay aligned without introducing
-             a second visible scrollbar. */}}
+             a second visible scrollbar. All fixed chrome shares this one sticky
+             ancestor, so its internal coordinates cannot shift while scrolling. */}}
         <div id="board-column-headers" data-testid="board-column-headers"
              class="mt-3 flex gap-4 overflow-x-hidden">
           {{range .Columns}}
@@ -26,6 +21,12 @@
           {{end}}
         </div>
       </div>
+      {{end}}
+    </div>
+
+    {{template "board-estimate-style"}}
+    {{if .HasSprint}}
+    <div data-testid="board">
       <div data-testid="board-card-strip"
            class="flex gap-4 overflow-x-auto pb-4"
            style="overflow-y:hidden"
@@ -36,7 +37,7 @@
           <p class="text-sm text-slate-500" data-testid="board-empty">No issues in {{.SprintName}} yet.</p>
         {{end}}
       </div>
-    </section>
+    </div>
     {{else}}
     <div data-testid="board-no-sprint" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
       <p>No active sprint to show. Once a sprint is active in Jira and synced, its board appears here.</p>

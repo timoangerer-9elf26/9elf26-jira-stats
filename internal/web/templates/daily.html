@@ -3,21 +3,10 @@
 {{template "page-head" "Daily — 9elf26 Jira Stats"}}
 <body class="min-h-screen bg-slate-50 text-slate-900">
   <main class="px-4 py-4 sm:px-6">
-    <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50">
-      {{template "nav" "daily"}}
-      {{template "page-header" "Daily — a board of active-sprint tickets created or moved in the window, placed by workflow stage and showing where each came from."}}
-    </div>
-
     {{template "board-estimate-style"}}
-    {{if .HasSprint}}
     <div id="daily-panel">
       {{template "daily-panel" .}}
     </div>
-    {{else}}
-    <div data-testid="daily-no-sprint" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
-      <p>No active sprint to show. Once a sprint is active in Jira and synced, its daily status changes appear here.</p>
-    </div>
-    {{end}}
   </main>
 </body>
 </html>

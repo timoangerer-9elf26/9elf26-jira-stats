@@ -636,23 +636,30 @@
 </span>
 {{end}}
 
-{{/* daily-panel is the swappable Daily unit: the controls (so the selected
-     assignee and range controls re-render to match the choice) plus the board,
-     or the inline range error in place of the board when the custom range is
-     invalid. HTMX swaps the whole panel, keeping the controls in sync with the
-     data. Takes a dailyView. */}}
+{{/* daily-panel is the swappable Daily unit: one sticky region containing all
+     fixed chrome (nav, title, controls, board heading and column headers), then
+     the vertically scrolling board or inline state below it. HTMX swaps the
+     whole unit, keeping both the controls and the one sticky region in sync with
+     the data. Takes a dailyView. */}}
 {{define "daily-panel"}}
   {{template "daily-board-style"}}
-  {{if .RangeError}}
-  <div class="sticky top-24 z-20 bg-slate-50">
-    {{template "daily-controls" .}}
+  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50">
+    {{template "nav" "daily"}}
+    {{template "page-header" "Daily — a board of active-sprint tickets created or moved in the window, placed by workflow stage and showing where each came from."}}
+    {{if .HasSprint}}
+    <div data-testid="daily-chrome">
+      {{template "daily-controls" .}}
+      {{if not .RangeError}}{{template "daily-board-header" .}}{{end}}
+    </div>
+    {{end}}
   </div>
+  {{if not .HasSprint}}
+  <div data-testid="daily-no-sprint" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+    <p>No active sprint to show. Once a sprint is active in Jira and synced, its daily status changes appear here.</p>
+  </div>
+  {{else if .RangeError}}
   <p data-testid="daily-range-error" class="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 shadow-sm">{{.RangeError}}</p>
   {{else}}
-  <div data-testid="daily-chrome" class="sticky top-24 z-20 bg-slate-50">
-    {{template "daily-controls" .}}
-    {{template "daily-board-header" .}}
-  </div>
   <div id="daily-results">
     {{template "daily-board" .}}
   </div>
@@ -747,7 +754,9 @@
 
 {{/* daily-assignee-bar is the Jira-style assignee filter: a row of toggleable
      avatars (one per active-sprint assignee, alphabetical, then an "Unassigned"
-     ghost chip last), plus a Clear affordance shown only when ≥1 is selected.
+     ghost chip last), plus an always-present Clear affordance. Clear is disabled
+     and muted when nothing is selected, which keeps the avatar positions stable
+     as the selection changes.
 
      Each chip is a server-driven toggle: it hx-GETs its ToggleHref — the
      /daily/results URL carrying the assignee set that RESULTS from flipping this
@@ -777,20 +786,20 @@
     </button>
     {{end}}
   </div>
-  {{if .AnySelected}}
   <button type="button" data-testid="daily-assignee-clear"
-          hx-get="/daily/results" hx-include="[name='preset'],[name='from'],[name='to']"
-          class="inline-flex cursor-pointer items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">
+          {{if .AnySelected}}hx-get="/daily/results" hx-include="[name='preset'],[name='from'],[name='to']"{{else}}disabled aria-disabled="true"{{end}}
+          class="inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
+                 {{if .AnySelected}}cursor-pointer border-slate-200 bg-white text-slate-600 hover:bg-slate-50
+                 {{else}}cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300{{end}}">
     Clear
   </button>
-  {{end}}
 </div>
 {{end}}
 
-{{/* daily-board-header is the pinned section heading and status row. It stays
-     outside daily-board's overflow ancestor so vertical stickiness remains
-     relative to the window; daily-board mirrors its horizontal scrollLeft here
-     to keep the matching fixed-width columns aligned. */}}
+{{/* daily-board-header is the section heading and status row within the page's
+     single sticky region. It stays outside daily-board's overflow ancestor;
+     daily-board mirrors its horizontal scrollLeft here to keep the matching
+     fixed-width columns aligned. */}}
 {{define "daily-board-header"}}
 <div class="mt-3">
   <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Board{{if .SprintName}} — {{.SprintName}}{{end}}</h2>

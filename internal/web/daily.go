@@ -149,8 +149,8 @@ type dailyView struct {
 	HasSprint  bool
 	Assignees  []dailyAssigneeAvatar
 	// Selected is the current assignee selection as the values to preserve across a
-	// preset/range change (the hidden ?assignee= inputs). AnySelected drives the
-	// Clear affordance and the "zero selected = all" default.
+	// preset/range change (the hidden ?assignee= inputs). AnySelected enables the
+	// Clear affordance; false is also the "zero selected = all" default.
 	Selected    []string
 	AnySelected bool
 	Presets     []dailyPresetView
@@ -165,9 +165,9 @@ func (s *Server) handleDaily(w http.ResponseWriter, r *http.Request) {
 	s.renderDaily(w, r, "daily.html")
 }
 
-// handleDailyResults renders just the controls+results panel (the HTMX swap
-// target), so the selected assignee and range controls re-render to match the
-// choice — not only the results (cf. the Completed picker fix).
+// handleDailyResults renders the complete Daily panel (the HTMX swap target):
+// its single sticky chrome region plus results, so controls, headings and cards
+// re-render together after a range or assignee change.
 func (s *Server) handleDailyResults(w http.ResponseWriter, r *http.Request) {
 	s.renderDaily(w, r, "daily-panel")
 }
