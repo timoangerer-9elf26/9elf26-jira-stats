@@ -20,14 +20,12 @@ const dailyTitleFormat = "Mon 2 Jan"
 // granularity, no timezone), used to parse and render the custom From/Until.
 const dailyInputFormat = "2006-01-02T15:04"
 
-// The Daily assignee-filter query values. "All" is the absence of an assignee
-// param (its option value is empty), so the default — and selecting "All" —
-// carries no assignee. These are the dropdown option values; a specific name is
-// passed through verbatim.
-const (
-	dailyAssigneeAll        = ""
-	dailyAssigneeUnassigned = "unassigned"
-)
+// dailyAssigneeUnassigned is the URL-safe sentinel value the Unassigned avatar
+// chip carries in an ?assignee= param. It maps to store.UnassignedAssignee (a
+// NUL-prefixed value that cannot travel in a URL) when the filter reaches the
+// store. Zero assignee params means "all"; a named chip carries its display name
+// verbatim.
+const dailyAssigneeUnassigned = "__unassigned__"
 
 // The three working-day preset keys. Each spans one whole calendar day
 // [00:00, next 00:00). Yesterday and day-before-yesterday walk back over
@@ -97,12 +95,22 @@ type dailyColumnView struct {
 // column is appended after these, only when it holds at least one card.
 var dailyBoardOrder = []string{"Refinement", "Ready To Do", "In Progress", "Review / Testing", store.DailyColumnDone}
 
-// dailyAssigneeOption is one entry of the assignee dropdown (All, Unassigned, or
-// a named assignee), with Selected reflecting the current filter.
-type dailyAssigneeOption struct {
-	Value    string
-	Label    string
-	Selected bool
+// dailyAssigneeAvatar is one toggle in the Daily assignee avatar bar: a named
+// active-sprint assignee or the trailing Unassigned chip. Value is the
+// ?assignee= param it carries (the display name, or the unassigned sentinel);
+// Assignee/AvatarURL/Initials are the trio the shared card-avatar partial renders
+// (the Unassigned chip leaves Assignee empty so it draws the neutral circle).
+// Selected marks the chip full-colour + ringed (dimmed otherwise). ToggleHref is
+// the /daily/results URL that flips this chip while preserving the rest of the
+// selection — server-driven, so no client state is needed.
+type dailyAssigneeAvatar struct {
+	Value      string
+	Name       string // tooltip label ("Unassigned" or the display name)
+	Assignee   string // raw name for card-avatar ("" for the Unassigned chip)
+	AvatarURL  string
+	Initials   string
+	Selected   bool
+	ToggleHref string
 }
 
 // dailyPresetView is one working-day preset button: a stable Key for the URL and
@@ -139,12 +147,17 @@ type dailyRangeResult struct {
 type dailyView struct {
 	SprintName string
 	HasSprint  bool
-	Assignees  []dailyAssigneeOption
-	Presets    []dailyPresetView
-	CustomFrom string
-	CustomTo   string
-	RangeError string
-	Columns    []dailyColumnView
+	Assignees  []dailyAssigneeAvatar
+	// Selected is the current assignee selection as the values to preserve across a
+	// preset/range change (the hidden ?assignee= inputs). AnySelected drives the
+	// Clear affordance and the "zero selected = all" default.
+	Selected    []string
+	AnySelected bool
+	Presets     []dailyPresetView
+	CustomFrom  string
+	CustomTo    string
+	RangeError  string
+	Columns     []dailyColumnView
 }
 
 // handleDaily renders the full standalone Daily page.
@@ -174,16 +187,20 @@ func (s *Server) renderDaily(w http.ResponseWriter, r *http.Request, name string
 // dailyView resolves the request query into the page model: the assignee and
 // range controls (with the current selection marked) plus the matching cards.
 func (s *Server) dailyView(q url.Values) (dailyView, error) {
-	// No assignee param means "All" (every assignee) — the default on a fresh load
-	// and what selecting "All" produces. A named assignee (or the unassigned
-	// sentinel) filters the board.
-	assigneeParam := q.Get("assignee")
+	// The selection is the set of repeated ?assignee= params (a display name or the
+	// unassigned sentinel each). Zero selected means "all" — the default on a fresh
+	// load and what Clear produces. Deduped, preserving first-seen order.
+	selected := dedupeAssignees(q["assignee"])
+	selectedSet := make(map[string]bool, len(selected))
+	for _, v := range selected {
+		selectedSet[v] = true
+	}
 
 	sprint, hasSprint, err := s.rollups.ActiveSprintWindow()
 	if err != nil {
 		return dailyView{}, err
 	}
-	view := dailyView{HasSprint: hasSprint}
+	view := dailyView{HasSprint: hasSprint, Selected: selected, AnySelected: len(selected) > 0}
 	if hasSprint {
 		view.SprintName = sprint.Name
 	}
@@ -193,32 +210,26 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 	view.CustomTo = rng.customTo
 	view.RangeError = rng.errMsg
 
-	names, err := s.rollups.ActiveSprintAssignees()
+	assignees, err := s.rollups.ActiveSprintAssignees()
 	if err != nil {
 		return dailyView{}, err
 	}
-	view.Assignees = append(view.Assignees,
-		dailyAssigneeOption{Value: dailyAssigneeAll, Label: "All", Selected: assigneeParam == dailyAssigneeAll},
-		dailyAssigneeOption{Value: dailyAssigneeUnassigned, Label: "Unassigned", Selected: assigneeParam == dailyAssigneeUnassigned},
-	)
-	// Tracks whether the resolved assignee already appears as one of the options
-	// emitted above (distinct from each option's own Selected flag).
-	represented := assigneeParam == dailyAssigneeAll || assigneeParam == dailyAssigneeUnassigned
-	for _, name := range names {
-		match := assigneeParam == name
-		represented = represented || match
-		view.Assignees = append(view.Assignees, dailyAssigneeOption{
-			Value: name, Label: name, Selected: match,
+	// One chip per active-sprint assignee (alphabetical, from the store), then the
+	// trailing Unassigned chip. Each chip's ToggleHref flips just that chip against
+	// the current selection.
+	for _, a := range assignees {
+		view.Assignees = append(view.Assignees, dailyAssigneeAvatar{
+			Value: a.Name, Name: a.Name, Assignee: a.Name,
+			AvatarURL: a.AvatarURL, Initials: avatarInitials(a.Name),
+			Selected:   selectedSet[a.Name],
+			ToggleHref: dailyToggleHref(selected, a.Name, selectedSet[a.Name]),
 		})
 	}
-	// The filter resolved to a named assignee not on the active sprint (an explicit
-	// ?assignee= for someone with no sprint work). Surface them as a selected option
-	// so the dropdown reflects the actual scope rather than silently showing All.
-	if !represented {
-		view.Assignees = append(view.Assignees, dailyAssigneeOption{
-			Value: assigneeParam, Label: assigneeParam, Selected: true,
-		})
-	}
+	view.Assignees = append(view.Assignees, dailyAssigneeAvatar{
+		Value: dailyAssigneeUnassigned, Name: "Unassigned", Assignee: "",
+		Selected:   selectedSet[dailyAssigneeUnassigned],
+		ToggleHref: dailyToggleHref(selected, dailyAssigneeUnassigned, selectedSet[dailyAssigneeUnassigned]),
+	})
 
 	// With no active sprint there is nothing to query; the template shows the
 	// friendly no-sprint state.
@@ -233,12 +244,54 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 	}
 
 	from, to := rng.from, rng.to
-	cards, err := s.rollups.DailyBoard(dailyStoreAssignee(assigneeParam), from, to)
+	cards, err := s.rollups.DailyBoard(dailyStoreAssignees(selected), from, to)
 	if err != nil {
 		return dailyView{}, err
 	}
 	view.Columns = s.dailyBoard(cards)
 	return view, nil
+}
+
+// dedupeAssignees drops empty and duplicate values from the repeated ?assignee=
+// params, preserving first-seen order so the selection (and the hidden inputs
+// that round-trip it) stays stable across swaps.
+func dedupeAssignees(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	var out []string
+	for _, v := range values {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
+
+// dailyToggleHref builds the /daily/results URL that flips one chip against the
+// current selection: removing it when it is already selected, adding it
+// otherwise. The range (preset/from/to) is carried separately via hx-include, so
+// only the resulting ?assignee= set is encoded here; an empty result (deselecting
+// the last chip) is the bare path, i.e. "all".
+func dailyToggleHref(current []string, value string, selected bool) string {
+	var next []string
+	if selected {
+		for _, v := range current {
+			if v != value {
+				next = append(next, v)
+			}
+		}
+	} else {
+		next = append(append(next, current...), value)
+	}
+	if len(next) == 0 {
+		return "/daily/results"
+	}
+	vals := url.Values{}
+	for _, v := range next {
+		vals.Add("assignee", v)
+	}
+	return "/daily/results?" + vals.Encode()
 }
 
 // dailyBoard groups the store's recency-sorted board cards into the fixed
@@ -474,18 +527,22 @@ func isWeekend(d time.Weekday) bool {
 	return d == time.Saturday || d == time.Sunday
 }
 
-// dailyStoreAssignee maps a dropdown value to the store filter argument: empty
-// ("All") means all assignees (""), "unassigned" the no-assignee sentinel, and
-// any other value an exact name match.
-func dailyStoreAssignee(param string) string {
-	switch param {
-	case dailyAssigneeAll:
-		return ""
-	case dailyAssigneeUnassigned:
-		return store.UnassignedAssignee
-	default:
-		return param
+// dailyStoreAssignees maps the selected chip values to the store's union filter:
+// the unassigned sentinel becomes store.UnassignedAssignee, every other value is
+// an exact name match, and an empty selection stays empty (all assignees).
+func dailyStoreAssignees(selected []string) []string {
+	if len(selected) == 0 {
+		return nil
 	}
+	out := make([]string, len(selected))
+	for i, v := range selected {
+		if v == dailyAssigneeUnassigned {
+			out[i] = store.UnassignedAssignee
+		} else {
+			out[i] = v
+		}
+	}
+	return out
 }
 
 // statusDisplay renders a transition's source status, labelling a missing from

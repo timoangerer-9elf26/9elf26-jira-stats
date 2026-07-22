@@ -65,13 +65,15 @@ type Rollups interface {
 	// (Done columns included) for the /board data-quality view.
 	ActiveSprintBoard() (store.Board, error)
 	// DailyBoard returns the /daily board's cards for [from, to): active-sprint
-	// Task/Bug/Story created in the window OR moved in it, filtered by assignee
-	// ("" = all, store.UnassignedAssignee = unassigned, else an exact name), each
-	// placed by its status at the window END and carrying its movement facts.
-	DailyBoard(assignee string, from, to time.Time) ([]store.DailyBoardCard, error)
+	// Task/Bug/Story created in the window OR moved in it, filtered by the union of
+	// the given assignees (empty = all; store.UnassignedAssignee selects the
+	// unassigned tickets, else an exact name), each placed by its status at the
+	// window END and carrying its movement facts.
+	DailyBoard(assignees []string, from, to time.Time) ([]store.DailyBoardCard, error)
 	// ActiveSprintAssignees lists the distinct named assignees of active-sprint
-	// work items, to populate the /daily assignee dropdown.
-	ActiveSprintAssignees() ([]string, error)
+	// work items (each with its captured avatar URL), to populate the /daily
+	// assignee avatar filter bar.
+	ActiveSprintAssignees() ([]store.SprintAssignee, error)
 }
 
 // Resyncer triggers a full rebuild of the SQLite projection from Jira and

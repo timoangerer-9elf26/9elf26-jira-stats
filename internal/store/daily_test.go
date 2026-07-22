@@ -255,8 +255,36 @@ func TestActiveSprintAssigneesDistinctAndScoped(t *testing.T) {
 		t.Fatalf("assignees: want %v, got %v", want, got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if got[i].Name != want[i] {
 			t.Fatalf("assignees: want %v, got %v", want, got)
 		}
+	}
+}
+
+// TestActiveSprintAssigneesCarryAvatarURL: each named assignee carries the avatar
+// URL captured on their tickets (aggregated across their tickets), so the Daily
+// avatar bar can render the image; an assignee with no captured avatar carries "".
+func TestActiveSprintAssigneesCarryAvatarURL(t *testing.T) {
+	loc := berlin(t)
+	st := openTempStore(t)
+	at := time.Date(2026, time.July, 15, 9, 0, 0, 0, loc)
+
+	saveIssueWithAvatar(t, st, "DCAI-1", "Story", "alice", "https://jira.example/avatar/alice.png", at)
+	// bob has a ticket with no avatar captured.
+	saveDaily(t, st, "DCAI-2", "Task", "bob", true, xition{"t2", "Ready to Do", "In Progress", at})
+
+	got, err := st.ActiveSprintAssignees()
+	if err != nil {
+		t.Fatalf("assignees: %v", err)
+	}
+	byName := map[string]string{}
+	for _, a := range got {
+		byName[a.Name] = a.AvatarURL
+	}
+	if byName["alice"] != "https://jira.example/avatar/alice.png" {
+		t.Errorf("alice avatar = %q, want the captured URL", byName["alice"])
+	}
+	if byName["bob"] != "" {
+		t.Errorf("bob avatar = %q, want empty (none captured)", byName["bob"])
 	}
 }
