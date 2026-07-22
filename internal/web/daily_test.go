@@ -321,6 +321,30 @@ func TestDailyEmptyState(t *testing.T) {
 	}
 }
 
+// TestDailyStickyChromeIsOutsideHorizontalScroller protects the #143 seam on
+// Daily: page header + controls + section/status headings are sticky to the
+// window, outside the overflow-x card strip. Horizontal scrolling is mirrored
+// to the no-scrollbar status row so the two fixed-width column halves align.
+func TestDailyStickyChromeIsOutsideHorizontalScroller(t *testing.T) {
+	client, now := dailyFixture(t)
+	app := newTestAppAt(t, client, now)
+	body := get(t, app.URL+"/daily")
+
+	for _, want := range []string{
+		`data-testid="page-chrome" class="sticky top-0`,
+		`data-testid="daily-chrome" class="sticky top-24`,
+		`data-testid="daily-controls"`,
+		`id="daily-column-headers" data-testid="daily-column-headers"`,
+		`class="mt-3 flex gap-4 overflow-x-hidden"`,
+		`onscroll="document.getElementById('daily-column-headers').scrollLeft=this.scrollLeft"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("daily sticky layout missing %q\n%s", want, body)
+		}
+	}
+	assertOrder(t, body, `data-testid="daily-controls"`, `data-testid="daily-column-headers"`, `data-testid="daily-board"`)
+}
+
 func TestDailyNoActiveSprintEmptyState(t *testing.T) {
 	loc := berlin(t)
 	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, loc)
