@@ -7,6 +7,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.}}</title>
   <link rel="stylesheet" href="/static/output.css">
+  <style>
+    /* Tailwind v4's Preflight gives buttons the default cursor; restore the
+       pointer for every enabled button so all current and future buttons get
+       it without each one opting in. Disabled buttons keep the default. */
+    button:not(:disabled) { cursor: pointer; }
+  </style>
   <script src="/static/htmx.min.js"></script>
 </head>
 {{end}}
@@ -33,7 +39,7 @@
      link prefetching can't trigger a logout. Takes no data. */}}
 {{define "logout-control"}}
 <form method="post" action="/logout" class="flex items-center">
-  <button type="submit" data-testid="logout-button"
+  <button type="submit" data-testid="logout-button" style="line-height:1rem"
           class="inline-flex items-center rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">
     Log out
   </button>
