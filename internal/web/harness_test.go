@@ -47,7 +47,7 @@ type testApp struct {
 // newTestApp opens a fresh temp SQLite DB, syncs the given fake Jira into it,
 // and starts the real handlers on an httptest server. The server and DB are
 // cleaned up automatically when the test ends.
-func newTestApp(t *testing.T, client jira.Client) *testApp {
+func newTestApp(t *testing.T, client jira.Client, opts ...web.Option) *testApp {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -61,7 +61,7 @@ func newTestApp(t *testing.T, client jira.Client) *testApp {
 		t.Fatalf("sync: %v", err)
 	}
 
-	srv, err := web.NewServer(st)
+	srv, err := web.NewServer(st, opts...)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

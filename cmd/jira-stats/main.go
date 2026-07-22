@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -66,6 +67,14 @@ func run() error {
 		return err
 	}
 
+	// Fail closed on auth (#122): a public deploy must never be accidentally left
+	// open. AUTH_DISABLED=true turns auth off (local dev) with a loud warning;
+	// otherwise both shared credentials must be set or the server refuses to start.
+	authOpt, err := authOption()
+	if err != nil {
+		return err
+	}
+
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return err
@@ -108,6 +117,10 @@ func run() error {
 	if reviewClock != nil {
 		opts = append(opts, web.WithClock(reviewClock))
 	}
+	// Enable the shared-team login unless AUTH_DISABLED explicitly turned it off.
+	if authOpt != nil {
+		opts = append(opts, authOpt)
+	}
 
 	srv, err := web.NewServer(st, opts...)
 	if err != nil {
@@ -141,6 +154,25 @@ type resyncer struct {
 
 func (r resyncer) Resync() bool    { return r.syncer.TriggerResync(r.ctx) }
 func (r resyncer) Resyncing() bool { return r.syncer.Resyncing() }
+
+// authOption resolves the shared-team login configuration (#122) from the
+// environment, failing closed. AUTH_DISABLED=true returns a nil option (auth
+// off) after logging a loud warning — the explicit local-dev escape hatch.
+// Otherwise both AUTH_EMAIL and AUTH_PASSWORD must be set, yielding the
+// WithAuth option; if either is missing it returns an error so the server
+// refuses to start and a public deploy can never be left open by accident.
+func authOption() (web.Option, error) {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AUTH_DISABLED")), "true") {
+		log.Print("WARNING: AUTH_DISABLED=true — serving with NO authentication; never use this in a public deployment")
+		return nil, nil
+	}
+	email := os.Getenv("AUTH_EMAIL")
+	password := os.Getenv("AUTH_PASSWORD")
+	if email == "" || password == "" {
+		return nil, fmt.Errorf("authentication is not configured: set AUTH_EMAIL and AUTH_PASSWORD, or set AUTH_DISABLED=true for local development")
+	}
+	return web.WithAuth(email, password), nil
+}
 
 // jiraClient builds the live Jira client from environment configuration when
 // credentials are present, and otherwise falls back to the canned fake so the
