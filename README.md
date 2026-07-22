@@ -114,6 +114,24 @@ No manual `export` needed: the binary reads `.env` from the working directory on
 startup. Open <http://localhost:8080/>. With no Jira credentials set (blank
 `JIRA_*`), it serves the built-in canned fake dataset instead of live data.
 
+### Release build for arm64 (AWS Graviton / t4g)
+
+The app is deployed to an arm64 Graviton (`t4g`) instance, so there is a
+dedicated cross-compile target that produces a `linux/arm64` release binary:
+
+```sh
+make build-arm64          # -> bin/jira-stats-linux-arm64
+# or directly:
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/jira-stats-linux-arm64 ./cmd/jira-stats
+```
+
+Because the SQLite driver is pure Go (`CGO_ENABLED=0`) and the templates, CSS,
+and HTMX are embedded, this cross-compiles cleanly from any host with no C
+toolchain and yields a single self-contained aarch64 binary. `make build`
+(host-arch, `bin/jira-stats`) is unaffected and remains the default for local
+work. Verify the output architecture with `file bin/jira-stats-linux-arm64`
+(reports `ARM aarch64 … statically linked`).
+
 For a quick dev loop without building a binary:
 
 ```sh
