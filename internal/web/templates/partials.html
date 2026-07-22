@@ -722,21 +722,21 @@
      multiple selected = union (OR).
 
      Selected chips read full-colour with a ring; unselected are dimmed and
-     greyscale (see daily-avatar-bar-style). The avatar itself reuses the shared
+     greyscale. The avatar itself reuses the shared
      card-avatar partial (image → initials → neutral circle for Unassigned), so
      the image is served from Jira/​/static, never inlined as a data: URI (the
      #ZgotmplZ gotcha). Takes a dailyView (needs .Assignees, .AnySelected). */}}
 {{define "daily-assignee-bar"}}
-{{template "daily-avatar-bar-style"}}
 <div data-testid="daily-assignee-bar" class="flex items-center gap-2">
-  <span class="text-xs font-medium text-slate-500">Assignee</span>
-  <div class="flex flex-wrap items-center gap-1.5">
+  <div data-testid="daily-assignee-avatars" class="flex flex-wrap items-center">
     {{range .Assignees}}
     <button type="button" data-testid="daily-assignee:{{.Value}}"
             title="{{.Name}}" aria-label="{{.Name}}"
             {{if .Selected}}aria-pressed="true"{{end}}
             hx-get="{{.ToggleHref}}" hx-include="[name='preset'],[name='from'],[name='to']"
-            class="daily-avatar{{if .Selected}} daily-avatar--on{{end}}">
+            class="inline-flex cursor-pointer rounded-full border-2 p-0.5 leading-none transition-[filter,opacity,border-color]
+                   {{if .Selected}}border-slate-900 opacity-100
+                   {{else}}border-transparent grayscale opacity-55 hover:grayscale-0 hover:opacity-85{{end}}">
       {{template "card-avatar" (dict "Key" .Value "Assignee" .Assignee "AvatarURL" .AvatarURL "Initials" .Initials)}}
     </button>
     {{end}}
@@ -744,24 +744,11 @@
   {{if .AnySelected}}
   <button type="button" data-testid="daily-assignee-clear"
           hx-get="/daily/results" hx-include="[name='preset'],[name='from'],[name='to']"
-          class="text-xs font-medium text-slate-500 underline underline-offset-2 hover:text-slate-800">
+          class="inline-flex cursor-pointer items-center rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">
     Clear
   </button>
   {{end}}
 </div>
-{{end}}
-
-{{/* daily-avatar-bar-style holds the CSS for the assignee avatar toggles, kept
-     out of the per-chip markup. Unselected chips are dimmed and greyscale;
-     selected chips are full-colour with a slate ring. Inline (not compiled
-     Tailwind) because output.css can't be rebuilt in the workspace. */}}
-{{define "daily-avatar-bar-style"}}
-<style>
-  .daily-avatar { display:inline-flex; padding:2px; border-radius:9999px; background:none; border:2px solid transparent; line-height:0; transition:filter .1s ease, opacity .1s ease, border-color .1s ease; }
-  .daily-avatar:not(.daily-avatar--on) { filter:grayscale(1); opacity:.55; }
-  .daily-avatar:not(.daily-avatar--on):hover { filter:grayscale(0); opacity:.85; }
-  .daily-avatar--on { border-color:#0f172a; filter:none; opacity:1; } /* slate-900 ring */
-</style>
 {{end}}
 
 {{/* daily-board is the Daily results fragment: a destination board of workflow
