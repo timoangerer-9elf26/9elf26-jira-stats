@@ -225,7 +225,7 @@ func TestDailyUnassigned(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
 
-	body := get(t, app.URL+"/daily/results?assignee=unassigned&preset=today")
+	body := get(t, app.URL+"/daily/results?assignee=__unassigned__&preset=today")
 
 	if !strings.Contains(body, `data-key="DCAI-4"`) {
 		t.Errorf("Unassigned/Today should include DCAI-4\n%s", body)
@@ -234,6 +234,10 @@ func TestDailyUnassigned(t *testing.T) {
 		if strings.Contains(body, `data-key="`+key+`"`) {
 			t.Errorf("Unassigned/Today should NOT include assigned %s", key)
 		}
+	}
+	// The Unassigned chip is marked selected.
+	if !assigneePressed(body, "__unassigned__") {
+		t.Errorf("the Unassigned chip should be pressed:\n%s", body)
 	}
 }
 
@@ -339,12 +343,16 @@ func TestDailyPanelKeepsSelectionAfterSwap(t *testing.T) {
 		t.Fatalf("results endpoint must return a partial, got full document:\n%s", body)
 	}
 	// The controls are part of the swapped fragment.
-	if !strings.Contains(body, `data-testid="daily-assignee"`) {
+	if !strings.Contains(body, `data-testid="daily-assignee-bar"`) {
 		t.Fatalf("results fragment must include the controls so they re-render:\n%s", body)
 	}
-	// The selected assignee stays selected.
-	if !strings.Contains(body, `value="bob" selected`) {
-		t.Errorf("bob should stay selected in the assignee dropdown:\n%s", body)
+	// The selected assignee stays selected: its chip is pressed and its value is
+	// carried in a hidden input so a preset/range change round-trips it.
+	if !assigneePressed(body, "bob") {
+		t.Errorf("bob's chip should stay pressed:\n%s", body)
+	}
+	if !strings.Contains(body, `<input type="hidden" name="assignee" value="bob">`) {
+		t.Errorf("bob should be carried in a hidden assignee input:\n%s", body)
 	}
 	// The selected preset stays highlighted; the others do not.
 	if !presetSelected(body, "yesterday") {
@@ -353,6 +361,21 @@ func TestDailyPanelKeepsSelectionAfterSwap(t *testing.T) {
 	if presetSelected(body, "today") {
 		t.Errorf("today preset should NOT be selected after choosing yesterday")
 	}
+}
+
+// assigneePressed reports whether the assignee avatar chip for the given value is
+// marked selected (aria-pressed) in the rendered controls.
+func assigneePressed(html, value string) bool {
+	marker := `data-testid="daily-assignee:` + value + `"`
+	start := strings.Index(html, marker)
+	if start == -1 {
+		return false
+	}
+	end := strings.Index(html[start:], ">")
+	if end == -1 {
+		return false
+	}
+	return strings.Contains(html[start:start+end], `aria-pressed="true"`)
 }
 
 // presetSelected reports whether the preset button for the given key is marked
@@ -370,74 +393,161 @@ func presetSelected(html, key string) bool {
 	return strings.Contains(html[start:start+end], `aria-pressed="true"`)
 }
 
-// TestDailyDefaultsToAll: opening Daily with no assignee param selects "All"
-// (its option carries an empty value, so the default — and selecting All —
-// produces no assignee param) and marks no named assignee selected (#135).
+// TestDailyDefaultsToAll: opening Daily with no assignee param selects no chip
+// (zero selected = all), renders an avatar bar with one chip per active-sprint
+// assignee plus a trailing Unassigned chip, and shows no Clear affordance (#136).
 func TestDailyDefaultsToAll(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
 
 	body := get(t, app.URL+"/daily") // no assignee param
 
-	if !strings.Contains(body, `<option value="" selected>All</option>`) {
-		t.Errorf("All should be the selected default, with an empty option value:\n%s", body)
+	if !strings.Contains(body, `data-testid="daily-assignee-bar"`) {
+		t.Fatalf("the avatar filter bar should render:\n%s", body)
 	}
-	for _, name := range []string{"alice", "bob"} {
-		if strings.Contains(body, `value="`+name+`" selected`) {
-			t.Errorf("no named assignee (%s) should be selected by default", name)
+	// A chip per active-sprint assignee (alice, bob) plus the Unassigned chip.
+	for _, v := range []string{"alice", "bob", "__unassigned__"} {
+		if !strings.Contains(body, `data-testid="daily-assignee:`+v+`"`) {
+			t.Errorf("missing avatar chip for %q:\n%s", v, body)
 		}
 	}
+	// Nothing is pressed by default (zero selected = all).
+	for _, v := range []string{"alice", "bob", "__unassigned__"} {
+		if assigneePressed(body, v) {
+			t.Errorf("no chip should be pressed by default, but %q is", v)
+		}
+	}
+	// The old single-select dropdown is gone.
+	if strings.Contains(body, `<select name="assignee"`) {
+		t.Errorf("the single-select assignee dropdown must be gone:\n%s", body)
+	}
+	// With nothing selected there is no Clear affordance.
+	if strings.Contains(body, `data-testid="daily-assignee-clear"`) {
+		t.Errorf("Clear should not show when nothing is selected")
+	}
+	// Alphabetical order: alice before bob, then the Unassigned chip last.
+	assertOrder(t, body,
+		`data-testid="daily-assignee:alice"`,
+		`data-testid="daily-assignee:bob"`,
+		`data-testid="daily-assignee:__unassigned__"`,
+	)
 }
 
 // TestDailyExplicitAssigneeFilters: an explicit ?assignee=<name> scopes the board
-// to that assignee and marks them selected; choosing All (no assignee param)
-// shows every assignee's cards.
+// to that assignee and marks the chip pressed; zero selected (no assignee param)
+// shows every assignee's cards and presses no chip.
 func TestDailyExplicitAssigneeFilters(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
 
-	// Selecting All carries no assignee param and shows every assignee's cards.
+	// Zero selected carries no assignee param and shows every assignee's cards.
 	all := get(t, app.URL+"/daily/results?preset=today")
-	if !strings.Contains(all, `<option value="" selected>All</option>`) {
-		t.Errorf("All should be selected with no assignee param:\n%s", all)
+	if assigneePressed(all, "alice") || assigneePressed(all, "bob") {
+		t.Errorf("no chip should be pressed with no assignee param:\n%s", all)
 	}
 	for _, key := range []string{"DCAI-1", "DCAI-4"} {
 		if !strings.Contains(all, `data-key="`+key+`"`) {
-			t.Errorf("All should include %s\n%s", key, all)
+			t.Errorf("zero selected should include %s\n%s", key, all)
 		}
 	}
 
-	// An explicit name scopes to that assignee.
+	// An explicit name scopes to that assignee and presses its chip.
 	bob := get(t, app.URL+"/daily/results?assignee=bob&preset=today")
-	if !strings.Contains(bob, `value="bob" selected`) {
-		t.Errorf("explicit bob should be selected:\n%s", bob)
+	if !assigneePressed(bob, "bob") {
+		t.Errorf("explicit bob's chip should be pressed:\n%s", bob)
 	}
 	if strings.Contains(bob, `data-key="DCAI-1"`) {
 		t.Errorf("explicit bob scope should exclude alice's DCAI-1")
 	}
 }
 
-// TestDailyExplicitAssigneeNotOnSprintStillSelected: an explicit ?assignee= for
-// someone with no active-sprint work isn't among the sprint assignees, but the
-// dropdown must still surface them as selected (reflecting the actual scope)
-// rather than silently showing All. Covers the not-represented branch.
-func TestDailyExplicitAssigneeNotOnSprintStillSelected(t *testing.T) {
+// TestDailyMultiAssigneeUnion: two selected chips show the UNION of their tickets
+// (OR semantics), press both chips, and reveal the Clear affordance.
+func TestDailyMultiAssigneeUnion(t *testing.T) {
 	client, now := dailyFixture(t)
-	// carol only has DCAI-6, which is not in the active sprint, so carol is not
-	// among the active-sprint assignees.
 	app := newTestAppAt(t, client, now)
 
-	body := get(t, app.URL+"/daily?assignee=carol")
+	// alice + Unassigned over Today: alice's DCAI-1 and the unassigned DCAI-4.
+	body := get(t, app.URL+"/daily/results?assignee=alice&assignee=__unassigned__&preset=today")
 
-	if !strings.Contains(body, `value="carol" selected`) {
-		t.Errorf("explicit carol should be selected even though not on the active sprint:\n%s", body)
+	for _, key := range []string{"DCAI-1", "DCAI-4"} {
+		if !strings.Contains(body, `data-key="`+key+`"`) {
+			t.Errorf("union (alice OR unassigned) should include %s\n%s", key, body)
+		}
 	}
-	if strings.Contains(body, `<option value="" selected>All</option>`) {
-		t.Errorf("All must not be selected when carol is explicitly chosen")
+	// bob's ticket is out of Today, so it never shows regardless — but a bob-only
+	// ticket must not leak in from an unselected chip. Assert both chips pressed.
+	if !assigneePressed(body, "alice") || !assigneePressed(body, "__unassigned__") {
+		t.Errorf("both alice and Unassigned chips should be pressed:\n%s", body)
 	}
-	// carol's only ticket is out of the active-sprint scope, so no cards show.
-	if strings.Contains(body, `data-key="DCAI-6"`) {
-		t.Errorf("carol's non-sprint DCAI-6 must not appear in the sprint-scoped Daily")
+	if assigneePressed(body, "bob") {
+		t.Errorf("bob's chip must not be pressed:\n%s", body)
+	}
+	// Clear shows once ≥1 is selected.
+	if !strings.Contains(body, `data-testid="daily-assignee-clear"`) {
+		t.Errorf("Clear should show when assignees are selected:\n%s", body)
+	}
+}
+
+// TestDailyMultiAssigneeUnionYesterday: a Yesterday selection of alice + bob
+// unions their tickets (DCAI-3 alice, DCAI-2 bob), proving OR across two named
+// assignees, not just against Unassigned.
+func TestDailyMultiAssigneeUnionYesterday(t *testing.T) {
+	client, now := dailyFixture(t)
+	app := newTestAppAt(t, client, now)
+
+	body := get(t, app.URL+"/daily/results?assignee=alice&assignee=bob&preset=yesterday")
+
+	for _, key := range []string{"DCAI-2", "DCAI-3"} {
+		if !strings.Contains(body, `data-key="`+key+`"`) {
+			t.Errorf("union (alice OR bob) over Yesterday should include %s\n%s", key, body)
+		}
+	}
+}
+
+// TestDailyClearResetsToAll: the Clear affordance hx-GETs /daily/results with no
+// assignee param, which resolves to zero selected (= all) — no chip pressed.
+func TestDailyClearResetsToAll(t *testing.T) {
+	client, now := dailyFixture(t)
+	app := newTestAppAt(t, client, now)
+
+	// The Clear button carries no assignee param (its hx-get is the bare path),
+	// and hitting that path shows all cards with nothing pressed.
+	cleared := get(t, app.URL+"/daily/results?preset=today")
+	for _, v := range []string{"alice", "bob", "__unassigned__"} {
+		if assigneePressed(cleared, v) {
+			t.Errorf("after Clear no chip should be pressed, but %q is:\n%s", v, cleared)
+		}
+	}
+	if strings.Contains(cleared, `data-testid="daily-assignee-clear"`) {
+		t.Errorf("Clear should not show once selection is empty")
+	}
+	// The Clear button, when present, targets the bare results path.
+	selected := get(t, app.URL+"/daily/results?assignee=alice&preset=today")
+	if !strings.Contains(selected, `data-testid="daily-assignee-clear"`) ||
+		!strings.Contains(selected, `hx-get="/daily/results" hx-include`) {
+		t.Errorf("Clear should hx-get the bare /daily/results path:\n%s", selected)
+	}
+}
+
+// TestDailyPresetPreservesAssigneeSelection: a preset button carries the current
+// selection as hidden ?assignee= inputs (hx-included), and each chip's toggle URL
+// preserves the range separately — so switching presets keeps the assignees.
+func TestDailyPresetPreservesAssigneeSelection(t *testing.T) {
+	client, now := dailyFixture(t)
+	app := newTestAppAt(t, client, now)
+
+	body := get(t, app.URL+"/daily/results?assignee=alice&assignee=bob&preset=today")
+
+	// Both selections are carried as hidden inputs the preset buttons hx-include.
+	for _, v := range []string{"alice", "bob"} {
+		if !strings.Contains(body, `<input type="hidden" name="assignee" value="`+v+`">`) {
+			t.Errorf("selection %q should be carried in a hidden input for the preset buttons:\n%s", v, body)
+		}
+	}
+	// The preset buttons hx-include the assignee inputs so the selection survives.
+	if !strings.Contains(body, `hx-get="/daily/results?preset=yesterday" hx-include="[name='assignee']"`) {
+		t.Errorf("preset buttons must hx-include the assignee selection:\n%s", body)
 	}
 }
 
@@ -605,8 +715,9 @@ func TestDailyBoardEmptyForAssigneeWithNoWork(t *testing.T) {
 
 // TestDailyControlsLayout: the controls bar renders the presets in chronological
 // display order (weekday-named day-before → Yesterday → Today) on the far left,
-// then a right-aligned group holding From, Until and the Assignee dropdown in that
-// order (Assignee last in the DOM). The group carries an auto left-margin.
+// then a right-aligned group holding From, Until and the Assignee avatar bar in
+// that order (the avatar bar last in the DOM). The group carries an auto
+// left-margin.
 func TestDailyControlsLayout(t *testing.T) {
 	client, now := dailyFixture(t)
 	app := newTestAppAt(t, client, now)
@@ -621,11 +732,11 @@ func TestDailyControlsLayout(t *testing.T) {
 		`data-testid="daily-preset:today"`,
 		`data-testid="daily-from"`,
 		`data-testid="daily-to"`,
-		`data-testid="daily-assignee"`,
+		`data-testid="daily-assignee-bar"`,
 	)
-	// The Assignee control is right-aligned via an auto left-margin.
+	// The right-aligned group is pushed right via an auto left-margin.
 	if !strings.Contains(body, `margin-left:auto`) {
-		t.Errorf("Assignee control should be pushed right with an auto left-margin:\n%s", body)
+		t.Errorf("the range/assignee group should be pushed right with an auto left-margin:\n%s", body)
 	}
 }
 

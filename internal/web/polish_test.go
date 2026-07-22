@@ -130,10 +130,10 @@ func (failingRollups) ActiveSprintWindow() (store.ActiveSprint, bool, error) {
 func (failingRollups) ActiveSprintBoard() (store.Board, error) {
 	return store.Board{}, errBoom
 }
-func (failingRollups) DailyBoard(_ string, _, _ time.Time) ([]store.DailyBoardCard, error) {
+func (failingRollups) DailyBoard(_ []string, _, _ time.Time) ([]store.DailyBoardCard, error) {
 	return nil, errBoom
 }
-func (failingRollups) ActiveSprintAssignees() ([]string, error) {
+func (failingRollups) ActiveSprintAssignees() ([]store.SprintAssignee, error) {
 	return nil, errBoom
 }
 

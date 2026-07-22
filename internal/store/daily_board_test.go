@@ -67,7 +67,7 @@ func TestDailyBoardPopulationPlacementAndOrigin(t *testing.T) {
 	// Created BEFORE the window and never moved → not in population.
 	saveDailyCreated(t, st, "DCAI-6", "Task", "alice", "Refinement", true, time.Date(2026, time.July, 10, 9, 0, 0, 0, loc))
 
-	cards, err := st.DailyBoard("alice", from, to)
+	cards, err := st.DailyBoard([]string{"alice"}, from, to)
 	if err != nil {
 		t.Fatalf("daily board: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestDailyBoardSnapshotPlacement(t *testing.T) {
 		xition{"t1a", "Ready to Do", "In Progress", at(15, 9)},
 		xition{"t1b", "In Progress", "DONE (This Sprint)", at(16, 9)})
 
-	cards, err := st.DailyBoard("alice", from, to)
+	cards, err := st.DailyBoard([]string{"alice"}, from, to)
 	if err != nil {
 		t.Fatalf("daily board: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestDailyBoardCarriesAssigneeAvatarURL(t *testing.T) {
 	// Unassigned moved ticket: no avatar.
 	saveIssueWithAvatar(t, st, "DCAI-3", "Bug", "", "", at(15, 10))
 
-	cards, err := st.DailyBoard("", from, to)
+	cards, err := st.DailyBoard(nil, from, to)
 	if err != nil {
 		t.Fatalf("daily board: %v", err)
 	}

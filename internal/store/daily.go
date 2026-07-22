@@ -242,22 +242,38 @@ type DailyBoardCard struct {
 // DailyBoard returns the Daily board's cards for [from, to): active-sprint
 // Task/Bug/Story that were created in the window OR had an in-window status
 // change (the same population the digest used, plus created-but-unmoved
-// tickets), filtered by assignee ("" = all, UnassignedAssignee = unassigned,
-// else an exact current-assignee match). Each card is placed by its status at
-// the window END, reconstructed at that instant via statusAtSubquery (so a
-// historical window is a snapshot and a ticket moved after the window still
-// shows in its window-end column); a created-but-unmoved ticket lands in its
-// creation status. The #98 intra-Done drop is preserved (a ticket whose only
-// in-window moves are inside the done set is absent). Cards are returned sorted
-// by most-recent in-window activity first.
-func (s *Store) DailyBoard(assignee string, from, to time.Time) ([]DailyBoardCard, error) {
-	moved, err := s.DailyStatusChanges(assignee, from, to)
-	if err != nil {
-		return nil, err
+// tickets), filtered by the union of the given assignees. An empty/nil slice
+// means all assignees; otherwise each entry scopes to one assignee
+// (UnassignedAssignee = the no-assignee tickets, else an exact current-assignee
+// match) and the board is the OR of them. Because a ticket has exactly one
+// current assignee the per-assignee scopes are disjoint, so the union carries no
+// duplicates. Each card is placed by its status at the window END, reconstructed
+// at that instant via statusAtSubquery (so a historical window is a snapshot and
+// a ticket moved after the window still shows in its window-end column); a
+// created-but-unmoved ticket lands in its creation status. The #98 intra-Done
+// drop is preserved (a ticket whose only in-window moves are inside the done set
+// is absent). Cards are returned sorted by most-recent in-window activity first.
+func (s *Store) DailyBoard(assignees []string, from, to time.Time) ([]DailyBoardCard, error) {
+	// An empty selection is "all assignees" — one unfiltered pass. Otherwise each
+	// selected assignee contributes its own disjoint slice of tickets, accumulated
+	// into the union.
+	scopes := assignees
+	if len(scopes) == 0 {
+		scopes = []string{""}
 	}
-	created, err := s.dailyCreatedInSprint(assignee, from, to)
-	if err != nil {
-		return nil, err
+	var moved []DailyTicket
+	var created []dailyCreatedRow
+	for _, scope := range scopes {
+		m, err := s.DailyStatusChanges(scope, from, to)
+		if err != nil {
+			return nil, err
+		}
+		moved = append(moved, m...)
+		c, err := s.dailyCreatedInSprint(scope, from, to)
+		if err != nil {
+			return nil, err
+		}
+		created = append(created, c...)
 	}
 	statusAt, err := s.statusAtInstant(to)
 	if err != nil {
@@ -448,17 +464,28 @@ const (
 	DailyColumnCanceled = "Canceled"
 )
 
+// SprintAssignee is one named assignee of the active sprint: the display name and
+// the public Jira avatar image URL captured for them ("" when none), the pair the
+// Daily view's assignee avatar bar renders (image → initials fallback).
+type SprintAssignee struct {
+	Name      string
+	AvatarURL string
+}
+
 // ActiveSprintAssignees returns the distinct, non-empty assignees of active-
-// sprint work items (Task/Bug/Story), sorted alphabetically — the named options
-// for the Daily view's assignee dropdown. Unassigned tickets are represented by
-// the caller's separate "Unassigned" option, not here.
-func (s *Store) ActiveSprintAssignees() ([]string, error) {
+// sprint work items (Task/Bug/Story), sorted alphabetically — the named avatars
+// for the Daily view's assignee filter bar, each with its captured avatar URL.
+// Unassigned tickets are represented by the caller's separate "Unassigned" chip,
+// not here. The avatar URL is aggregated (MAX) across the assignee's tickets so a
+// single row carries one representative image even if some tickets captured none.
+func (s *Store) ActiveSprintAssignees() ([]SprintAssignee, error) {
 	const query = `
-		SELECT DISTINCT assignee
+		SELECT assignee, MAX(assignee_avatar_url)
 		FROM issue
 		WHERE active_sprint IS NOT NULL
 		  AND type IN (` + rollupTypes + `)
 		  AND assignee IS NOT NULL AND assignee != ''
+		GROUP BY assignee
 		ORDER BY assignee`
 
 	rows, err := s.db.Query(query)
@@ -467,13 +494,14 @@ func (s *Store) ActiveSprintAssignees() ([]string, error) {
 	}
 	defer rows.Close()
 
-	var assignees []string
+	var assignees []SprintAssignee
 	for rows.Next() {
-		var a string
-		if err := rows.Scan(&a); err != nil {
+		var name string
+		var avatar sql.NullString
+		if err := rows.Scan(&name, &avatar); err != nil {
 			return nil, fmt.Errorf("scan assignee: %w", err)
 		}
-		assignees = append(assignees, a)
+		assignees = append(assignees, SprintAssignee{Name: name, AvatarURL: avatar.String})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate assignees: %w", err)

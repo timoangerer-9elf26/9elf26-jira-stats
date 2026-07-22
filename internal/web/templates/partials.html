@@ -643,11 +643,10 @@
 {{/* daily-controls is the Daily selector: a left group of preset buttons (in
      chronological order: the weekday-named first day → Yesterday → Today, then
      the rolling "Last 24h" rightmost), then a right-aligned group holding the
-     custom From/Until
-     datetime pair and the assignee dropdown, in the order From · Until · Assignee
-     (Assignee rightmost). It is one <form>; each control fires its own HTMX GET
-     that swaps the whole #daily-panel, so the controls always reflect the current
-     selection.
+     custom From/Until datetime pair and the assignee avatar bar, in the order
+     From · Until · Assignee-bar (the bar rightmost). It is one <form>; each
+     control fires its own HTMX GET that swaps the whole #daily-panel, so the
+     controls always reflect the current selection.
 
      The right-align (margin-left:auto) and the wider inter-control gap use inline
      styles rather than Tailwind utilities: output.css is a precompiled build with
@@ -658,16 +657,25 @@
      GETs ?preset=<key> (no from/to) → preset mode. Editing From/Until GETs
      ?assignee&from&to (no preset) → custom mode; both inputs are pre-filled with
      the resolved bounds so editing one keeps the other. A hidden "preset" input
-     carries the current preset key ("" in custom mode) so an assignee change
-     round-trips whichever mode is active (the server prefers preset when present).
+     carries the current preset key ("" in custom mode), and the current assignee
+     selection is mirrored into hidden "assignee" inputs, so a preset/range change
+     hx-includes and round-trips the whole selection unchanged (the server prefers
+     preset when present). The avatar chips are the only controls that MUTATE the
+     assignee set; they carry the resulting set in their own hx-get URL instead of
+     hx-including those hidden inputs.
 
-     Takes a dailyView (needs .Assignees, .Presets, .CustomFrom, .CustomTo). */}}
+     Takes a dailyView (needs .Assignees, .Selected, .AnySelected, .Presets,
+     .CustomFrom, .CustomTo). */}}
 {{define "daily-controls"}}
 <form data-testid="daily-controls"
       hx-target="#daily-panel"
       hx-swap="innerHTML"
       class="mt-8 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
   <input type="hidden" name="preset" value="{{range .Presets}}{{if .Selected}}{{.Key}}{{end}}{{end}}">
+  {{/* The current assignee selection as hidden inputs, so a preset button or a
+       From/Until edit (which hx-include [name='assignee']) round-trips the whole
+       selection unchanged — only the avatar chips themselves mutate it. */}}
+  {{range .Selected}}<input type="hidden" name="assignee" value="{{.}}">{{end}}
   <fieldset data-testid="daily-presets" class="flex flex-wrap gap-2">
     {{range .Presets}}
     <button type="button" data-testid="daily-preset:{{.Key}}" title="{{.Title}}"
@@ -696,19 +704,64 @@
              hx-include="[name='assignee'],[name='from'],[name='to']"
              class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
     </label>
-    <label class="text-xs font-medium text-slate-500">
-      Assignee
-      <select name="assignee" data-testid="daily-assignee"
-              hx-get="/daily/results" hx-trigger="change"
-              hx-include="[name='preset'],[name='from'],[name='to']"
-              class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
-        {{range .Assignees}}
-        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
-        {{end}}
-      </select>
-    </label>
+    {{template "daily-assignee-bar" .}}
   </div>
 </form>
+{{end}}
+
+{{/* daily-assignee-bar is the Jira-style assignee filter: a row of toggleable
+     avatars (one per active-sprint assignee, alphabetical, then an "Unassigned"
+     ghost chip last), plus a Clear affordance shown only when ≥1 is selected.
+
+     Each chip is a server-driven toggle: it hx-GETs its ToggleHref — the
+     /daily/results URL carrying the assignee set that RESULTS from flipping this
+     chip — and swaps the whole #daily-panel, so the bar re-renders with the new
+     selection. The chip URL already encodes the full resulting ?assignee= set, so
+     it hx-includes only the range ([name='preset']/from/to), never the hidden
+     [name='assignee'] inputs (which would double-count). Zero selected = all;
+     multiple selected = union (OR).
+
+     Selected chips read full-colour with a ring; unselected are dimmed and
+     greyscale (see daily-avatar-bar-style). The avatar itself reuses the shared
+     card-avatar partial (image → initials → neutral circle for Unassigned), so
+     the image is served from Jira/​/static, never inlined as a data: URI (the
+     #ZgotmplZ gotcha). Takes a dailyView (needs .Assignees, .AnySelected). */}}
+{{define "daily-assignee-bar"}}
+{{template "daily-avatar-bar-style"}}
+<div data-testid="daily-assignee-bar" class="flex items-center gap-2">
+  <span class="text-xs font-medium text-slate-500">Assignee</span>
+  <div class="flex flex-wrap items-center gap-1.5">
+    {{range .Assignees}}
+    <button type="button" data-testid="daily-assignee:{{.Value}}"
+            title="{{.Name}}" aria-label="{{.Name}}"
+            {{if .Selected}}aria-pressed="true"{{end}}
+            hx-get="{{.ToggleHref}}" hx-include="[name='preset'],[name='from'],[name='to']"
+            class="daily-avatar{{if .Selected}} daily-avatar--on{{end}}">
+      {{template "card-avatar" (dict "Key" .Value "Assignee" .Assignee "AvatarURL" .AvatarURL "Initials" .Initials)}}
+    </button>
+    {{end}}
+  </div>
+  {{if .AnySelected}}
+  <button type="button" data-testid="daily-assignee-clear"
+          hx-get="/daily/results" hx-include="[name='preset'],[name='from'],[name='to']"
+          class="text-xs font-medium text-slate-500 underline underline-offset-2 hover:text-slate-800">
+    Clear
+  </button>
+  {{end}}
+</div>
+{{end}}
+
+{{/* daily-avatar-bar-style holds the CSS for the assignee avatar toggles, kept
+     out of the per-chip markup. Unselected chips are dimmed and greyscale;
+     selected chips are full-colour with a slate ring. Inline (not compiled
+     Tailwind) because output.css can't be rebuilt in the workspace. */}}
+{{define "daily-avatar-bar-style"}}
+<style>
+  .daily-avatar { display:inline-flex; padding:2px; border-radius:9999px; background:none; border:2px solid transparent; line-height:0; transition:filter .1s ease, opacity .1s ease, border-color .1s ease; }
+  .daily-avatar:not(.daily-avatar--on) { filter:grayscale(1); opacity:.55; }
+  .daily-avatar:not(.daily-avatar--on):hover { filter:grayscale(0); opacity:.85; }
+  .daily-avatar--on { border-color:#0f172a; filter:none; opacity:1; } /* slate-900 ring */
+</style>
 {{end}}
 
 {{/* daily-board is the Daily results fragment: a destination board of workflow
