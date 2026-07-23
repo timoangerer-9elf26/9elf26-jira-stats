@@ -175,6 +175,16 @@
 </header>
 {{end}}
 
+{{/* version-footer is the small, unobtrusive build-identity marker shown at the
+     bottom of every main view (docs/adr/0006): it answers "which build is this?"
+     at a glance. buildVersion reads the server's stamped version (the same value
+     GET /version serves); an unstamped local build reads "dev". Takes no data. */}}
+{{define "version-footer"}}
+<footer class="mt-10 border-t border-slate-200 pt-3 text-center text-xs text-slate-400">
+  <span data-testid="version-footer">{{buildVersion}}</span>
+</footer>
+{{end}}
+
 {{/* app-error is the friendly full-page error state shown when a rollup query
      fails, so a broken read renders a clear message instead of a bare 500. */}}
 {{define "app-error"}}

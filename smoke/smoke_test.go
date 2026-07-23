@@ -23,11 +23,28 @@ import (
 	"time"
 )
 
-// buildBinary compiles the dashboard into a temp dir and returns its path.
+// buildBinary compiles the dashboard into a temp dir and returns its path. It
+// leaves the build unstamped (a plain `go build`), so the binary reports the
+// "dev" version default (docs/adr/0006) — matching what a bare local build does.
 func buildBinary(t *testing.T) string {
 	t.Helper()
+	return buildBinaryLdflags(t, "")
+}
+
+// buildBinaryLdflags compiles the dashboard, optionally stamping the release
+// version via -ldflags (empty = unstamped). This is the same -X path the
+// Makefile's build targets use, so it exercises the real version-stamping chain
+// end-to-end (docs/adr/0006).
+func buildBinaryLdflags(t *testing.T, version string) string {
+	t.Helper()
 	bin := filepath.Join(t.TempDir(), "jira-stats")
-	cmd := exec.Command("go", "build", "-o", bin, "../cmd/jira-stats")
+	args := []string{"build"}
+	if version != "" {
+		args = append(args, "-ldflags",
+			"-X 'github.com/timoangerer-9elf26/9elf26-jira-stats/internal/version.Version="+version+"'")
+	}
+	args = append(args, "-o", bin, "../cmd/jira-stats")
+	cmd := exec.Command("go", args...)
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build failed: %v\n%s", err, out)
@@ -58,7 +75,15 @@ func startDashboard(t *testing.T) string {
 // the extras override the defaults set here.
 func startDashboardEnv(t *testing.T, extraEnv ...string) string {
 	t.Helper()
-	bin := buildBinary(t)
+	return launchBinary(t, buildBinary(t), extraEnv...)
+}
+
+// launchBinary boots an already-built binary against the fake Jira (no creds),
+// waits until it serves, and returns its base URL. Splitting this out from the
+// build lets callers launch a binary stamped a particular way (see the version
+// smoke test).
+func launchBinary(t *testing.T, bin string, extraEnv ...string) string {
+	t.Helper()
 	addr := freePort(t)
 
 	cmd := exec.Command(bin)
@@ -158,6 +183,7 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 		{"/sprint/cell?row=total&col=total", ""},
 		{"/daily/results", ""},
 		{"/resync/status", ""},
+		{"/version", "dev"}, // unstamped build reports the "dev" default
 		{"/static/output.css", ""},
 		{"/static/htmx.min.js", ""},
 	}
@@ -201,6 +227,28 @@ func TestReviewNowPinsDateViews(t *testing.T) {
 		t.Fatalf("GET /velocity: got status %d, want 200", code)
 	} else if want := `data-sprint="KW29"`; !strings.Contains(body, want) {
 		t.Fatalf("/velocity: body missing active-sprint bar label %q", want)
+	}
+}
+
+// TestVersionStampIsServedAndShownInFooter builds the binary stamped with a
+// release version via -ldflags (the real Makefile path) and asserts the running
+// app reports it: GET /version returns exactly the stamped string, and the same
+// value appears in a main view's footer (docs/adr/0006). This exercises the full
+// stamp → endpoint → footer chain the deploy health check relies on.
+func TestVersionStampIsServedAndShownInFooter(t *testing.T) {
+	const want = "v2026.07.23.142 (a1b2c3d)"
+	base := launchBinary(t, buildBinaryLdflags(t, want))
+
+	if code, body := get(t, base+"/version"); code != http.StatusOK {
+		t.Fatalf("GET /version: got status %d, want 200", code)
+	} else if body != want {
+		t.Fatalf("GET /version: body = %q, want %q", body, want)
+	}
+
+	if code, body := get(t, base+"/sprint"); code != http.StatusOK {
+		t.Fatalf("GET /sprint: got status %d, want 200", code)
+	} else if !strings.Contains(body, want) {
+		t.Fatalf("/sprint: footer missing stamped version %q", want)
 	}
 }
 

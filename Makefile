@@ -1,6 +1,15 @@
 TAILWIND_INPUT  := internal/web/assets/input.css
 TAILWIND_OUTPUT := internal/web/assets/output.css
 
+# Release version stamped into the binary via -ldflags (docs/adr/0006). CI's
+# release job overrides VERSION with the CalVer tag + short SHA; a bare local
+# build derives a git-based identity, falling back to "dev" outside a checkout.
+# A plain `go build` (no make) is intentionally left unstamped and reports the
+# "dev" default from internal/version.
+MODULE  := github.com/timoangerer-9elf26/9elf26-jira-stats
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X '$(MODULE)/internal/version.Version=$(VERSION)'
+
 .DEFAULT_GOAL := help
 
 .PHONY: help
@@ -26,7 +35,7 @@ generate: ## Run go generate (rebuilds Tailwind CSS via go:generate).
 # needs no Node and produces a CGO-free binary at bin/jira-stats.
 .PHONY: build
 build: ## Build the single static binary at bin/jira-stats.
-	CGO_ENABLED=0 go build -o bin/jira-stats ./cmd/jira-stats
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/jira-stats ./cmd/jira-stats
 
 # Cross-compile the release binary for linux/arm64 (AWS Graviton / t4g). Pure-Go
 # SQLite means CGO_ENABLED=0 cross-compiles cleanly with no C toolchain, and the
@@ -34,7 +43,7 @@ build: ## Build the single static binary at bin/jira-stats.
 # binary at bin/jira-stats-linux-arm64. `make build` (host arch) is unaffected.
 .PHONY: build-arm64
 build-arm64: ## Cross-compile the linux/arm64 release binary (bin/jira-stats-linux-arm64).
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/jira-stats-linux-arm64 ./cmd/jira-stats
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o bin/jira-stats-linux-arm64 ./cmd/jira-stats
 
 .PHONY: test
 test: ## Run the unit/integration test suite.
