@@ -146,6 +146,13 @@ Canceled.
   (This Sprint) in the flow — it is a done state, not open.
 - **Canceled** — abandoned; excluded from both open and finished counts.
 
+> **"Released / Deployed" here is a *Jira ticket status*, not shipping the app.**
+> It names a point in the DCAI workflow (a ticket's work is out the door). It is
+> unrelated to *releasing/deploying the jira-stats app itself* — that pipeline
+> uses **Release** (a versioned build artifact) and **Deploy** (shipping an
+> artifact to the instance) as separate terms, defined in
+> `docs/adr/0006-automated-release-and-deploy-pipeline.md`. Don't conflate the two.
+
 Open/finished are decided by these explicit buckets, **not** Jira's
 `status_category`. Observed in live Jira, the category does not match the DCAI
 buckets: **Canceled is category `Done`** (a category-based "finished" would
