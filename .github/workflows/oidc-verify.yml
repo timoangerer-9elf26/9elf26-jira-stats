@@ -1,0 +1,92 @@
+# Proves the GitHub OIDC → AWS deploy-role federation works and is scoped
+# correctly (docs/adr/0006, #153). Manual-only: run it from `main` after the
+# one-time IAM setup (OIDC provider + jira-stats-github-deploy role) exists in
+# the internal-tooling account. It assumes the role via OIDC (no stored keys),
+# proves federation with sts:GetCallerIdentity, exercises the two things a deploy
+# actually needs (S3 artifact read/write, SSM SendCommand + GetCommandInvocation
+# to the one instance), and asserts an out-of-scope call is denied — so the role
+# is neither too narrow nor too broad.
+#
+# The trust policy is scoped to this repo on `main`, so this workflow only
+# federates when dispatched from the main branch (the same path the real deploy
+# and the rollback dispatch use).
+name: OIDC verify
+
+on:
+  workflow_dispatch:
+
+# Least privilege: only the OIDC token minting is needed; no write to repo.
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  DEPLOY_ROLE_ARN: arn:aws:iam::214519213070:role/jira-stats-github-deploy
+  ARTIFACT_BUCKET: jira-stats-artifacts-214519213070
+  INSTANCE_ID: i-0220fc1a6bee863d6
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assume the deploy role via GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: oidc-verify-${{ github.run_id }}
+
+      - name: Prove federation (sts:GetCallerIdentity)
+        run: aws sts get-caller-identity
+
+      - name: Artifact bucket is readable + writable
+        run: |
+          set -euo pipefail
+          key="oidc-verify/${{ github.run_id }}.txt"
+          echo "oidc-verify ${{ github.run_id }}" > /tmp/probe.txt
+          echo "PutObject s3://$ARTIFACT_BUCKET/$key"
+          aws s3api put-object --bucket "$ARTIFACT_BUCKET" --key "$key" --body /tmp/probe.txt >/dev/null
+          echo "GetObject s3://$ARTIFACT_BUCKET/$key"
+          aws s3api get-object --bucket "$ARTIFACT_BUCKET" --key "$key" /tmp/probe-out.txt >/dev/null
+          diff /tmp/probe.txt /tmp/probe-out.txt
+
+      - name: Can SendCommand + read result on the app instance
+        run: |
+          set -euo pipefail
+          cmd_id=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "oidc-verify ${{ github.run_id }}" \
+            --parameters 'commands=["echo oidc-verify-ok"]' \
+            --query 'Command.CommandId' --output text)
+          echo "CommandId=$cmd_id — waiting for completion"
+          # SSM needs a moment to register the invocation before it is queryable.
+          for _ in $(seq 1 30); do
+            status=$(aws ssm get-command-invocation \
+              --command-id "$cmd_id" --instance-id "$INSTANCE_ID" \
+              --query 'Status' --output text 2>/dev/null || echo Pending)
+            echo "status=$status"
+            case "$status" in
+              Success) exit 0 ;;
+              Failed|Cancelled|TimedOut|Undeliverable|Terminated)
+                echo "SSM command ended in $status"; exit 1 ;;
+            esac
+            sleep 5
+          done
+          echo "SSM command did not reach Success in time"; exit 1
+
+      - name: Out-of-scope call is denied (least-privilege proof)
+        run: |
+          set -euo pipefail
+          # The role has no EC2 permissions; this MUST fail with AccessDenied.
+          if aws ec2 describe-instances --region "$AWS_REGION" >/tmp/ec2.out 2>/tmp/ec2.err; then
+            echo "SECURITY: ec2:DescribeInstances unexpectedly succeeded — role is too broad"
+            cat /tmp/ec2.out
+            exit 1
+          fi
+          if grep -qi "UnauthorizedOperation\|AccessDenied\|not authorized" /tmp/ec2.err; then
+            echo "OK: out-of-scope call denied as expected"
+          else
+            echo "ec2:DescribeInstances failed for an unexpected reason:"; cat /tmp/ec2.err; exit 1
+          fi
