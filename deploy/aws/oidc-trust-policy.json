@@ -1,0 +1,21 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "GitHubOIDCFromThisRepoOnMain",
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::214519213070:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:timoangerer-9elf26/9elf26-jira-stats:ref:refs/heads/main"
+        }
+      }
+    }
+  ]
+}
