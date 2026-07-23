@@ -63,6 +63,14 @@ jobs:
     # Only what's needed to push the tag ref and create the Release; nothing more.
     permissions:
       contents: write
+    # Expose what was released so the deploy job can (a) identify the artifact by
+    # tag and (b) health-check the running binary. `version` is the FULL stamped
+    # build identity ("<tag> (<short-sha>)") that /version reports verbatim — see
+    # the deploy job's health-check comment for why the check compares to this,
+    # not to `tag` alone.
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.stamp.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -79,13 +87,20 @@ jobs:
           DATE=$(date -u +'%Y.%m.%d')
           echo "tag=v${DATE}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
 
+      # The exact string stamped into the binary and served verbatim by /version.
+      # Computed once here and exported as a job output so the deploy job's health
+      # check can assert against the precise bytes that will be running.
+      - name: Compute stamped version
+        id: stamp
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          echo "version=${{ steps.tag.outputs.tag }} (${SHORT_SHA})" >> "$GITHUB_OUTPUT"
+
       # Build the arm64 binary exactly once, stamped with the tag + short SHA so
       # the running binary's /version reports precisely what was released. This
       # same file is attached to the Release below ("what we tested = released").
       - name: Build stamped arm64 binary
-        run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          make build-arm64 VERSION="${{ steps.tag.outputs.tag }} (${SHORT_SHA})"
+        run: make build-arm64 VERSION="${{ steps.stamp.outputs.version }}"
 
       # Create the tag ref (at this commit) and the GitHub Release with the
       # binary attached, in one step. Pushing the tag does NOT retrigger CI: the
@@ -100,3 +115,79 @@ jobs:
             --target "${{ github.sha }}" \
             --title "${{ steps.tag.outputs.tag }}" \
             --notes "Automated release of ${{ github.sha }} (docs/adr/0006)."
+
+  # Deploy the JUST-RELEASED artifact to the single production instance and prove
+  # the new version is live (docs/adr/0006, issue #155). Runs only after `release`
+  # (which itself needs build-and-test), and only on push:main — never on PRs.
+  #
+  # BUILD-ONCE is the core invariant: this job downloads the exact binary the
+  # `release` job attached to the GitHub Release and ships those bytes verbatim.
+  # It never runs `make build-arm64`/`go build` — "what we tested = released =
+  # running."
+  deploy:
+    needs: release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Serialize deploys: two merges landing seconds apart QUEUE rather than
+    # overlap (cancel-in-progress: false), so no half-finished SSM push gets
+    # clobbered and the later commit ends up live (docs/adr/0006).
+    concurrency:
+      group: deploy-prod
+      cancel-in-progress: false
+    # id-token: mint the short-lived GitHub OIDC token to assume the AWS deploy
+    # role (no stored keys). contents: read the Release asset via GITHUB_TOKEN.
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # Assume the narrowly-scoped deploy role (#153) via OIDC — NOT the broad
+      # OrganizationAccountAccessRole (that is the human/manual break-glass path).
+      # Exports short-lived AWS_* creds into the job env; deploy.sh detects them
+      # and skips its assume-role step.
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::214519213070:role/jira-stats-github-deploy
+          aws-region: eu-central-1
+
+      # Build-once: fetch the exact artifact the release job attached to the
+      # GitHub Release for this tag. These are the released bytes — no rebuild.
+      - name: Download released artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p bin
+          gh release download "${{ needs.release.outputs.tag }}" \
+            --pattern jira-stats-linux-arm64 \
+            --output bin/jira-stats-linux-arm64
+          chmod 0755 bin/jira-stats-linux-arm64
+
+      # Ship + restart via the SAME script a human uses manually. It uploads to
+      # S3 keyed by tag (releases/<tag>/...) and installs+restarts over SSM. AWS
+      # creds are already in the env, so deploy.sh skips assume-role.
+      - name: Deploy released artifact
+        run: scripts/deploy.sh "${{ needs.release.outputs.tag }}" bin/jira-stats-linux-arm64
+
+      # Post-deploy health check. NOTE: /version serves the FULL stamped build
+      # identity verbatim — "<tag> (<short-sha>)", NOT the bare tag (issue #155,
+      # docs/adr/0006; internal/version.Version stamped in #152). So we assert
+      # equality against the exact stamped string the release job exported
+      # (needs.release.outputs.version), not against the tag alone — a "== tag"
+      # check would falsely fail on every real deploy. This proves the full path
+      # (cert + Caddy + app) AND that the NEW binary — not a silently unchanged
+      # old one — is live. A mismatch OR an unreachable endpoint fails the job.
+      - name: Health check /version
+        env:
+          EXPECTED: ${{ needs.release.outputs.version }}
+        run: |
+          echo "expecting /version == '${EXPECTED}'"
+          got=$(curl -fsS --retry 5 --retry-all-errors --retry-delay 5 \
+            https://jira-stats.in.9elf26.ai/version)
+          echo "got '${got}'"
+          if [ "$got" != "$EXPECTED" ]; then
+            echo "::error::version mismatch — deployed binary is not serving the released version"
+            exit 1
+          fi
+          echo "health check passed — ${EXPECTED} is live"
