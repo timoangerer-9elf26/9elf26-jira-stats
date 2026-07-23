@@ -49,3 +49,54 @@ jobs:
       # fake Jira, assert every route serves. No credentials or services needed.
       - name: Smoke tests
         run: go test -tags smoke -count=1 ./smoke/
+
+  # Cut a release on every merge to main (docs/adr/0006). Gated behind
+  # build-and-test via `needs`, so a red build never releases, and behind the
+  # push:main event filter so PRs (which also run build-and-test) don't release.
+  # Builds the version-stamped arm64 binary ONCE and publishes it as a GitHub
+  # Release keyed on a CalVer tag — the immutable artifact the deploy step
+  # consumes. No AWS here: this job only touches GitHub, via GITHUB_TOKEN.
+  release:
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Only what's needed to push the tag ref and create the Release; nothing more.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          check-latest: true
+
+      # CalVer tag: vYYYY.MM.DD.<run_number> (docs/adr/0006). Unique per run even
+      # for several merges the same day, sorts by recency, needs no bump logic.
+      - name: Compute release tag
+        id: tag
+        run: |
+          DATE=$(date -u +'%Y.%m.%d')
+          echo "tag=v${DATE}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      # Build the arm64 binary exactly once, stamped with the tag + short SHA so
+      # the running binary's /version reports precisely what was released. This
+      # same file is attached to the Release below ("what we tested = released").
+      - name: Build stamped arm64 binary
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          make build-arm64 VERSION="${{ steps.tag.outputs.tag }} (${SHORT_SHA})"
+
+      # Create the tag ref (at this commit) and the GitHub Release with the
+      # binary attached, in one step. Pushing the tag does NOT retrigger CI: the
+      # triggers are push:branches[main] + pull_request, neither of which a tag
+      # ref matches — so there's no recursion.
+      - name: Create tag + GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            bin/jira-stats-linux-arm64 \
+            --target "${{ github.sha }}" \
+            --title "${{ steps.tag.outputs.tag }}" \
+            --notes "Automated release of ${{ github.sha }} (docs/adr/0006)."
