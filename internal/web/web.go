@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
+	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/version"
 )
 
 // displayTimeZone is the timezone all date maths and week labels use (spec:
@@ -116,6 +117,10 @@ type Server struct {
 	loc             *time.Location
 	velocitySprints int
 	jiraBaseURL     string
+	// version is the build identity reported by GET /version and the UI footer
+	// (docs/adr/0006). It defaults to the stamped internal/version.Version and is
+	// overridable via WithVersion so tests can assert an injected value.
+	version string
 	// auth gates every route behind the shared team login (#122). Nil means
 	// auth is disabled and the middleware is a pass-through.
 	auth *authConfig
@@ -175,6 +180,19 @@ func WithAuth(email, password string) Option {
 	return func(s *Server) { s.auth = newAuthConfig(email, password) }
 }
 
+// WithVersion overrides the build identity reported by GET /version and shown
+// in the UI footer (docs/adr/0006). Left unset, the server reports the value
+// stamped into internal/version.Version at build time ("dev" for an unstamped
+// build). An empty string is ignored, keeping the default. Tests use this to
+// assert the endpoint and footer surface an injected value.
+func WithVersion(v string) Option {
+	return func(s *Server) {
+		if v != "" {
+			s.version = v
+		}
+	}
+}
+
 // WithVelocitySprints overrides how many trailing sprints the Velocity view
 // shows (spec: ~10). Non-positive values are ignored, keeping the default.
 func WithVelocitySprints(n int) Option {
@@ -198,6 +216,7 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 		now:             time.Now,
 		loc:             loc,
 		velocitySprints: defaultVelocitySprints,
+		version:         version.Version,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -225,6 +244,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /sprint/results", s.handleSprintResults)
 	s.mux.HandleFunc("GET /sprint/cell", s.handleSprintCell)
 	s.mux.HandleFunc("GET /velocity", s.handleVelocity)
+	s.mux.HandleFunc("GET /version", s.handleVersion)
 	s.mux.HandleFunc("POST /resync", s.handleResync)
 	s.mux.HandleFunc("GET /resync/status", s.handleResyncStatus)
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(mustSub(assetsFS)))))
@@ -247,6 +267,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // removed (#66); Sprint is the default landing page.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/sprint", http.StatusFound)
+}
+
+// handleVersion serves the build identity as plain text with no authentication
+// (see isPublicPath), so the deploy health check (docs/adr/0006) can confirm
+// which build is live without a session. The body is exactly s.version, so a
+// caller can assert equality against the tag it deployed.
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprint(w, s.version)
 }
 
 // renderError renders the shared friendly error page for a failed rollup query,
@@ -294,8 +323,9 @@ func humanizeAgo(d time.Duration) string {
 // the logout control only when there is a session to end.
 func (s *Server) templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"dict":        dict,
-		"authEnabled": func() bool { return s.auth != nil },
+		"dict":         dict,
+		"authEnabled":  func() bool { return s.auth != nil },
+		"buildVersion": func() string { return s.version },
 	}
 }
 

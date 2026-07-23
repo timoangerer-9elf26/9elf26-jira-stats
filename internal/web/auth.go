@@ -108,9 +108,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 }
 
 // isPublicPath reports whether a path is reachable without a session: the login
-// and logout endpoints, and the static assets that the login page itself needs.
+// and logout endpoints, the static assets that the login page itself needs, and
+// the unauthenticated /version build-identity endpoint the deploy health check
+// hits (docs/adr/0006).
 func isPublicPath(path string) bool {
-	return path == "/login" || path == "/logout" || strings.HasPrefix(path, "/static/")
+	return path == "/login" || path == "/logout" || path == "/version" ||
+		strings.HasPrefix(path, "/static/")
 }
 
 // requestAuthenticated reports whether the request carries a valid session

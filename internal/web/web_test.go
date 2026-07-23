@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
+	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/web"
 )
 
 // TestRootRedirectsToSprint asserts the root path is a redirect to the Sprint
@@ -51,6 +52,34 @@ func TestServesEmbeddedAssetsWithoutCDN(t *testing.T) {
 }
 
 // assertOrder fails unless each needle appears in body in the given order.
+// TestVersionEndpointReportsInjectedValue asserts GET /version serves the
+// injected build identity unauthenticated (docs/adr/0006 health check) and that
+// the same value surfaces in a main view's footer.
+func TestVersionEndpointReportsInjectedValue(t *testing.T) {
+	const want = "v2026.07.23.142 (a1b2c3d)"
+	app := newTestApp(t, jira.NewFakeClient(), web.WithVersion(want))
+
+	resp, err := http.Get(app.URL + "/version")
+	if err != nil {
+		t.Fatalf("GET /version: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /version: status %d, want 200", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /version body: %v", err)
+	}
+	if got := string(body); got != want {
+		t.Fatalf("GET /version body = %q, want %q", got, want)
+	}
+
+	if page := get(t, app.URL+"/sprint"); !strings.Contains(page, want) {
+		t.Fatalf("version footer marker %q not found in /sprint page:\n%s", want, page)
+	}
+}
+
 func assertOrder(t *testing.T, body string, needles ...string) {
 	t.Helper()
 	prev := -1
