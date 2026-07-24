@@ -61,6 +61,16 @@ smoke: ## Build the binary and run end-to-end smoke tests.
 .PHONY: check
 check: test smoke ## Run all tests + smoke tests (CI / pre-deploy gate).
 
+# Re-apply the source-controlled deploy-role policy to the live IAM role, so
+# reconciling drift is one `make` away instead of copy-pasting the put-role-policy
+# block out of deploy/aws/README.md (issue #174). A local guard validates the JSON
+# (parses + carries every expected Sid) BEFORE any AWS call, so a malformed edit
+# fails offline. The apply itself needs admin IAM creds in the internal-tooling
+# account (CI can't touch IAM by design), so a human runs this.
+.PHONY: apply-deploy-policy
+apply-deploy-policy: ## Re-apply deploy/aws/deploy-role-policy.json to the deploy IAM role (needs tooling-account creds).
+	@scripts/apply-deploy-policy.sh
+
 .PHONY: run
 run: ## Run the dashboard locally (falls back to fake Jira without creds).
 	go run ./cmd/jira-stats
