@@ -240,7 +240,10 @@
   {{template "card-status" .}}
   <div class="mt-2 flex items-center justify-between gap-2">
     {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "")}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
-    {{template "card-avatar" .}}
+    <span class="flex min-w-0 items-center gap-2">
+      {{if .Activity}}<span class="shrink-0 text-xs tabular-nums text-slate-400" data-testid="card:{{.Key}}:activity">{{.Activity}}</span>{{end}}
+      {{template "card-avatar" .}}
+    </span>
   </div>
 {{if .Href}}</a>{{else}}</div>{{end}}
 {{end}}
@@ -933,6 +936,29 @@
                  {{if .On}}border-slate-900 bg-slate-900 text-white hover:bg-slate-800
                  {{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
     No estimates
+  </button>
+</div>
+{{end}}
+
+{{/* active-24h-toggle is the compact Board active-in-24h filter control (#159): a
+     single toggle that lenses the Board onto cards active in the rolling
+     [now − 24h, now) window (created in it or moved in it, intra-Done housekeeping
+     ignored — the Daily "active" rule). It is a server-driven toggle like the
+     no-estimate one: it hx-GETs its ToggleHref (the results URL encoding the state
+     that RESULTS from flipping it) and swaps the caller's panel, so the control
+     re-renders pressed or not. The href already carries its own resulting state, so
+     it hx-includes only the OTHER filters (via IncludeAttr), never its own param.
+     On reads as a filled dark pill with aria-pressed; off is a plain outlined
+     pill. Takes an active24hToggleView (Prefix, On, ToggleHref, IncludeAttr). */}}
+{{define "active-24h-toggle"}}
+<div data-testid="{{.Prefix}}" class="flex items-center">
+  <button type="button" data-testid="{{.Prefix}}-toggle"
+          {{if .On}}aria-pressed="true"{{end}}
+          hx-get="{{.ToggleHref}}" {{.IncludeAttr}}
+          class="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
+                 {{if .On}}border-slate-900 bg-slate-900 text-white hover:bg-slate-800
+                 {{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
+    Active in last 24h
   </button>
 </div>
 {{end}}

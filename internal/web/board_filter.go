@@ -3,6 +3,7 @@ package web
 import (
 	"html/template"
 	"net/url"
+	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 )
@@ -57,10 +58,14 @@ func (s *Server) boardFilters(q url.Values) ([]boardFilter, error) {
 	if err != nil {
 		return nil, err
 	}
+	active24h, err := s.active24hBoardFilter(q)
+	if err != nil {
+		return nil, err
+	}
 	return []boardFilter{
 		assignee,
 		noEstimate,
-		// #159: s.active24hBoardFilter(q)
+		active24h,
 	}, nil
 }
 
@@ -236,6 +241,84 @@ func noEstimateToggleHref(basePath string, on bool) string {
 		return basePath // toggling an on filter off yields the bare path
 	}
 	return basePath + "?" + noEstimateParam + "=" + noEstimateOn
+}
+
+// active24hParam is the URL/query key carrying the active-in-24h toggle state.
+// The toggle is on iff this param equals active24hOn.
+const (
+	active24hParam  = "active-24h"
+	active24hOn     = "1"
+	active24hWindow = 24 * time.Hour
+)
+
+// active24hToggleView is the model for the compact "Active in last 24h" toggle
+// control (#159): a single server-driven toggle that lenses the Board onto cards
+// active in the rolling [now − 24h, now) window. On is the current state;
+// ToggleHref is the results URL that flips it; IncludeAttr preserves every OTHER
+// filter on the swap (it replaces only its own param, like the assignee and
+// no-estimate controls). Prefix is the data-testid stem.
+type active24hToggleView struct {
+	Prefix      string
+	On          bool
+	ToggleHref  string
+	IncludeAttr template.HTMLAttr
+}
+
+// active24hBoardFilter builds the Board's active-in-24h toggle from the query: the
+// compact control, a Keep predicate that (when on) hides any card whose
+// latest-activity instant falls outside the rolling [now − 24h, now) window, and
+// the round-trip param. Default off (no param) shows every card, so it composes
+// with the assignee and no-estimate filters as a plain intersection via keepCard.
+//
+// "Active" reuses the Daily rule end to end: each card's LatestActivity is already
+// the latest non-intra-Done status change (or its creation instant) computed by
+// the shared store primitive, so a card whose only 24h activity was intra-Done
+// housekeeping has an earlier LatestActivity and is hidden, and a card created in
+// the window shows. Because the window always ends at now, "active in the window"
+// is exactly "LatestActivity in [now − 24h, now)". now is the server clock (s.now)
+// so a pinned test clock makes the window deterministic.
+func (s *Server) active24hBoardFilter(q url.Values) (boardFilter, error) {
+	on := q.Get(active24hParam) == active24hOn
+
+	toggle := active24hToggleView{
+		Prefix:     "board-active-24h",
+		On:         on,
+		ToggleHref: active24hToggleHref("/board/results", on),
+		// The toggle encodes its own resulting state in ToggleHref, so it must NOT
+		// re-include its own hidden param (which would fight the href), but it MUST
+		// preserve every other filter.
+		IncludeAttr: filterIncludeExceptSelf(active24hParam),
+	}
+
+	var params []boardFilterParam
+	if on {
+		params = append(params, boardFilterParam{Name: active24hParam, Value: active24hOn})
+	}
+
+	now := s.now()
+	from := now.Add(-active24hWindow)
+	keep := func(card store.BoardCard) bool {
+		if !on {
+			return true // off = show all cards
+		}
+		// Active iff the card's latest activity is in the rolling [now − 24h, now)
+		// window. A zero instant (no status change and no creation instant) is never
+		// active. The upper bound is half-open to mirror every other window in the app.
+		a := card.LatestActivity
+		return !a.IsZero() && !a.Before(from) && a.Before(now)
+	}
+
+	return boardFilter{Control: "active-24h-toggle", Data: toggle, Params: params, Keep: keep}, nil
+}
+
+// active24hToggleHref returns the results URL (rooted at basePath) that flips the
+// toggle: turning it on adds ?active-24h=1, turning it off drops back to the bare
+// path. Only its own param is encoded; other filters ride along via hx-include.
+func active24hToggleHref(basePath string, on bool) string {
+	if on {
+		return basePath // toggling an on filter off yields the bare path
+	}
+	return basePath + "?" + active24hParam + "=" + active24hOn
 }
 
 // assigneeToggleHref builds the results URL (rooted at basePath) that flips one
