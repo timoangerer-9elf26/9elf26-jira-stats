@@ -199,6 +199,25 @@ func latestChange(t DailyTicket) time.Time {
 	return t.Changes[len(t.Changes)-1].TransitionedAt
 }
 
+// latestActivity is the shared "latest activity by the Daily rule" primitive used
+// by both the Daily board and the Board's active-in-24h filter (#159): the instant
+// of a card's most recent status change that is not intra-Done housekeeping,
+// falling back to the creation instant when no such change survives. It filters
+// the given (time-ascending) changes through dropIntraDoneChanges — the one
+// authoritative intra-Done rule — so a card whose only moves are inside the Done
+// set reports its creation instant, and a housekeeping-only card never looks
+// freshly active. createdAt is the fallback (may be zero when unknown, yielding a
+// zero instant that reads as "no activity"). Both views feed it their own change
+// set — Daily its in-window changes, the Board the card's whole history — so the
+// two can never drift on what counts as activity.
+func latestActivity(changes []DailyStatusChange, createdAt time.Time) time.Time {
+	kept := dropIntraDoneChanges(changes)
+	if len(kept) == 0 {
+		return createdAt
+	}
+	return kept[len(kept)-1].TransitionedAt
+}
+
 // DailyBoardCard is one ticket on the Daily board (issue #112): an active-sprint
 // Task/Bug/Story that was created in the window OR moved in it, resolved to the
 // facts a board card renders. Placement is by EndStatus (status at the window
@@ -310,7 +329,9 @@ func (s *Store) DailyBoard(assignees []string, from, to time.Time) ([]DailyBoard
 		c.StartStatus = tk.StartStatus()
 		c.Moves = len(tk.Changes)
 		c.Movement = tk.Movement()
-		c.LatestActivity = latestChange(tk)
+		// tk.Changes are already the surviving in-window changes; route through the
+		// shared primitive so the Daily timestamp and the Board's share one rule.
+		c.LatestActivity = latestActivity(tk.Changes, time.Time{})
 		c.Column = dailyBoardColumn(endStatus(tk.Key, tk.EndStatus()))
 	}
 	for _, ct := range created {
@@ -321,7 +342,7 @@ func (s *Store) DailyBoard(assignees []string, from, to time.Time) ([]DailyBoard
 			// status, timestamp/sort on the creation instant, carry no movement kind.
 			c.Summary, c.Assignee, c.Size, c.Type = ct.summary, ct.assignee, ct.size, ct.typ
 			c.AssigneeAvatarURL = ct.assigneeAvatarURL
-			c.LatestActivity = ct.createdAt
+			c.LatestActivity = latestActivity(nil, ct.createdAt)
 			c.Column = dailyBoardColumn(endStatus(ct.Key, ct.status))
 		}
 	}

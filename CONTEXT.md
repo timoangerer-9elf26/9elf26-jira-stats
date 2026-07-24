@@ -109,9 +109,12 @@ scoped to open work: every workflow column renders left-to-right in
 [status order](#ticket-status-buckets) — the four open columns and the
 Done-category ones (DONE (This Sprint), Ready for Release, Released / Deployed) —
 each always present, even when empty. Each **card** carries the key (linking to
-Jira), a type badge, the parent-epic pill, the assignee **avatar**, and the
+Jira), a type badge, the parent-epic pill, the assignee **avatar**, the
 **[editable estimate](#estimate-edit)** (the Board is one of the two write
-surfaces). Triage and Canceled tickets are excluded.
+surfaces), and a subtle **latest-activity timestamp** (its most recent activity
+by the [active rule](#active-in-24h-filter)). Unlike the [Daily view](#daily-view)
+card it carries no origin badge or movement-kind colour — the Board keeps its
+snapshot presentation. Triage and Canceled tickets are excluded.
 
 ## Board filters
 
@@ -121,8 +124,8 @@ filtering is a within-column narrowing, not a re-layout. Filter state is
 **URL-encoded and bookmarkable** (each filter owns its query params) and applies
 by swapping the board fragment, with no full-page reload. Multiple filters
 **compose** (a card must pass every active filter). The filters are the shared
-[Assignee filter](#assignee-filter) and the [No-estimate filter](#no-estimate-filter);
-the active-in-24h filter joins the same chrome later.
+[Assignee filter](#assignee-filter), the [No-estimate filter](#no-estimate-filter)
+and the [Active-in-24h filter](#active-in-24h-filter).
 
 ## No-estimate filter
 
@@ -133,6 +136,25 @@ estimate), hiding every card that carries an S/M/L. Like the other Board filters
 it never removes a column, its `no-estimate=1` state is URL-encoded and
 bookmarkable, and it composes with the [Assignee filter](#assignee-filter) as a
 plain intersection (assignee ∩ no-estimate).
+
+## Active-in-24h filter
+
+A compact **"Active in last 24h"** toggle in the [Board filters](#board-filters)
+chrome — a standup lens onto what just moved. It **defaults off** (every card
+shows); when **on** the Board shows only cards **active** in the rolling
+`[now − 24h, now)` window (never weekend-adjusted). A card is **active** by the
+same rule the [Daily view](#daily-view) uses: it was **created in the window** or
+had a **status change within it**, with moves whose *both* endpoints are in the
+[Done set](#ticket-status-buckets) ignored as post-completion housekeeping (see
+[Daily movement](#daily-movement)). Two consequences follow: a card whose only
+24h activity was an intra-Done housekeeping move is **hidden** when the filter is
+on, and because Canceled is off-board a ticket cancelled in the window does not
+appear. Each card carries this as a single **latest-activity instant** — its most
+recent non-housekeeping status change, or its creation instant — which is also
+the timestamp shown on every card. Like the other Board filters it never removes a
+column, its `active-24h=1` state is URL-encoded and bookmarkable, and it composes
+with the [Assignee](#assignee-filter) and [No-estimate](#no-estimate-filter)
+filters as a plain intersection (assignee ∩ no-estimate ∩ active-in-24h).
 
 ## Daily movement
 

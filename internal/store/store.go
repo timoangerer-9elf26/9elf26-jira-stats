@@ -1371,6 +1371,13 @@ type BoardCard struct {
 	// card renders EpicName as a pill coloured from EpicColor.
 	EpicName  string
 	EpicColor string
+	// LatestActivity is the instant of the card's most recent activity by the Daily
+	// rule (#159): its latest non-intra-Done status change, or its creation instant
+	// when no such change exists — see latestActivity. It drives the Board card's
+	// subtle latest-activity timestamp and the active-in-24h filter. Zero when the
+	// card has neither a status change nor a recorded creation instant. Populated
+	// only by ActiveSprintBoard; the Sprint drill-down leaves it zero.
+	LatestActivity time.Time
 }
 
 // BoardColumn is one workflow-status column of the sprint board and the
@@ -1423,6 +1430,14 @@ func (s *Store) ActiveSprintBoard() (Board, error) {
 		  AND i.type IN (` + rollupTypes + `)
 		ORDER BY i.key`
 
+	// Per-card latest-activity by the Daily rule (#159), keyed by issue key, so
+	// every card carries its activity instant and the active-in-24h filter has one
+	// source of truth with the Daily view.
+	activity, err := s.boardCardActivity()
+	if err != nil {
+		return Board{}, err
+	}
+
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return Board{}, fmt.Errorf("active sprint board: %w", err)
@@ -1456,6 +1471,7 @@ func (s *Store) ActiveSprintBoard() (Board, error) {
 		card.AssigneeAvatarURL = avatarURL.String // "" when NULL (no avatar)
 		card.EpicName = epicName.String           // "" when no parent epic
 		card.EpicColor = epicColor.String         // "" when the epic's colour is unset
+		card.LatestActivity = activity[card.Key]  // zero when no activity/creation instant
 		norm := normalizeStatus(status)
 		switch i, seededHere := seededIndex[norm]; {
 		case boardExcludedStatuses[norm]:
@@ -1480,4 +1496,75 @@ func (s *Store) ActiveSprintBoard() (Board, error) {
 		board.Columns = append(board.Columns, BoardColumn{Status: status, Cards: extraByStatus[status]})
 	}
 	return board, nil
+}
+
+// boardCardActivity computes each active-sprint card's latest-activity instant by
+// the shared Daily rule (#159), returning a key→instant map. For every
+// active-sprint rollup card it gathers the card's whole status-transition history
+// (LEFT JOIN, so a card that never moved still appears) plus its creation instant,
+// then delegates to latestActivity — the same primitive the Daily board uses — so
+// the two views agree on what counts as activity: the latest non-intra-Done status
+// change, or the creation instant when none survives. A card with neither maps to
+// the zero instant (reads as "no activity"). Because the Board's window always
+// ends at now, active-in-24h reduces to "latest-activity in [now−24h, now)", which
+// the web filter derives from this instant.
+func (s *Store) boardCardActivity() (map[string]time.Time, error) {
+	const query = `
+		SELECT i.key, i.created_at, t.from_status, t.to_status, t.transitioned_at
+		FROM issue i
+		LEFT JOIN status_transition t
+		       ON t.issue_key = i.key AND t.field = 'status'
+		WHERE i.active_sprint IS NOT NULL
+		  AND i.type IN (` + rollupTypes + `)
+		ORDER BY i.key, t.transitioned_at`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("board card activity: %w", err)
+	}
+	defer rows.Close()
+
+	// Group the ascending-by-time rows into one card per key, preserving each
+	// card's creation instant and its oldest-first changes.
+	type acc struct {
+		createdAt time.Time
+		changes   []DailyStatusChange
+	}
+	byKey := map[string]*acc{}
+	for rows.Next() {
+		var key string
+		var createdStr, fromStatus, toStatus, atStr sql.NullString
+		if err := rows.Scan(&key, &createdStr, &fromStatus, &toStatus, &atStr); err != nil {
+			return nil, fmt.Errorf("scan board activity row: %w", err)
+		}
+		a, seen := byKey[key]
+		if !seen {
+			a = &acc{}
+			if createdStr.Valid && createdStr.String != "" {
+				if a.createdAt, err = time.Parse(time.RFC3339, createdStr.String); err != nil {
+					return nil, fmt.Errorf("parse created_at %q: %w", createdStr.String, err)
+				}
+			}
+			byKey[key] = a
+		}
+		// A card with no transitions still yields one LEFT JOIN row whose transition
+		// columns are NULL; skip it so the card keeps an empty change set.
+		if !atStr.Valid {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339, atStr.String)
+		if err != nil {
+			return nil, fmt.Errorf("parse transitioned_at %q: %w", atStr.String, err)
+		}
+		a.changes = append(a.changes, DailyStatusChange{From: fromStatus.String, To: toStatus.String, TransitionedAt: at})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate board activity rows: %w", err)
+	}
+
+	out := make(map[string]time.Time, len(byKey))
+	for key, a := range byKey {
+		out[key] = latestActivity(a.changes, a.createdAt)
+	}
+	return out, nil
 }

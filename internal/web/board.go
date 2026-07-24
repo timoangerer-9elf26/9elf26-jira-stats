@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 )
@@ -43,6 +44,11 @@ type boardCard struct {
 	// pill knows the current selection and the value to revert to. It is only
 	// consumed when Editable.
 	RawSize string
+	// Activity is the card's latest-activity timestamp in the compact Daily format
+	// ("20.7. 19:10"), set only on the Board (#159) from BoardCard.LatestActivity;
+	// "" when the card has no recorded activity or on the Sprint drill-down, in
+	// which case no timestamp renders.
+	Activity string
 }
 
 // boardColumn is one workflow-status column and its cards.
@@ -125,6 +131,7 @@ func (s *Server) boardView(q url.Values) (boardView, error) {
 				Initials:     avatarInitials(c.Assignee),
 				EpicName:     c.EpicName,
 				EpicColorHex: epicPillColor(c.EpicColor),
+				Activity:     boardActivityLabel(c.LatestActivity, s.loc),
 			})
 		}
 		view.Columns = append(view.Columns, boardColumn{Status: col.Status, Cards: cards})
@@ -138,6 +145,17 @@ func (s *Server) boardView(q url.Values) (boardView, error) {
 		view.HasSprint = true
 	}
 	return view, nil
+}
+
+// boardActivityLabel formats a card's latest-activity instant as the compact
+// timestamp the Board card shows (#159), reusing the Daily board's format so the
+// two surfaces read identically. A zero instant (a card with no status change and
+// no recorded creation instant) yields "" so no timestamp renders.
+func boardActivityLabel(latest time.Time, loc *time.Location) string {
+	if latest.IsZero() {
+		return ""
+	}
+	return latest.In(loc).Format(dailyTimeFormat)
 }
 
 // sizeDisplay renders a stored T-shirt label for a card: the letter as-is, or
