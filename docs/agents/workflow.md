@@ -8,9 +8,16 @@ New work does **not** go straight to `main`. Each **bigger feature or set of bug
 
 1. **Its own branch** off `main` (e.g. `feature/…`, `fix/…`, `chore/…`, `docs/…`).
 2. **A PR against `main`** — `gh pr create --base main`. Link the GitHub issues it addresses (the issue tracker is GitHub — see [issue-tracker.md](./issue-tracker.md)).
-3. **A squash merge**, deleting the branch after (`gh pr merge <n> --squash --delete-branch`).
+3. **A squash merge on green**, deleting the branch after.
 
-PRs exist mainly for **traceability** — one reviewable unit per feature — not as a human-review gate. The agent driving the work **manages its own merges**: open the PR, confirm it's green, merge it.
+PRs exist mainly for **traceability** — one reviewable unit per feature — not as a human-review gate. The agent driving the work **enables auto-merge on green** rather than polling CI and merging by hand: open the PR, then hand it off to GitHub-native auto-merge so it lands the moment the required `build-and-test` check passes.
+
+```sh
+gh auth switch --user timoangerer-9elf26      # repo-admin scope for the merge
+gh pr merge <n> --auto --squash --delete-branch
+```
+
+`--auto` arms the merge; GitHub holds the PR until the `require-ci-green` ruleset's `build-and-test` check reports green, then squash-merges and deletes the branch automatically — no polling loop, no manual merge step. (The repo has `allow_auto_merge` enabled, which `--auto` requires.) If a check goes red, the PR simply stays open until you push a fix. If auto-merge is ever unavailable, fall back to the manual flow: wait for green (`gh pr checks <n>`), then `gh pr merge <n> --squash --delete-branch`.
 
 Group small, unrelated one-offs into a single PR rather than making a PR per trivial change. Docs-only or tooling-only changes still follow the same flow.
 
