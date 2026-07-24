@@ -237,6 +237,7 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", s.handleIndex)
 	s.mux.HandleFunc("GET /board", s.handleBoard)
+	s.mux.HandleFunc("GET /board/results", s.handleBoardResults)
 	s.mux.HandleFunc("POST /board/estimate", s.handleBoardEstimate)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
@@ -326,7 +327,27 @@ func (s *Server) templateFuncs() template.FuncMap {
 		"dict":         dict,
 		"authEnabled":  func() bool { return s.auth != nil },
 		"buildVersion": func() string { return s.version },
+		// render executes a named partial and returns its HTML, so a caller can
+		// dispatch on a template name resolved at render time — html/template's
+		// {{template}} needs a static name. The Board filter chrome uses it to range
+		// over its pluggable filters, each naming its own control partial (#157).
+		"render": s.renderPartial,
+		// attr wraps a trusted, code-controlled literal as a full HTML attribute
+		// (e.g. an hx-include selector with quotes/brackets that attribute escaping
+		// would mangle). Only ever fed constant strings from the handlers — never
+		// user input.
+		"attr": func(s string) template.HTMLAttr { return template.HTMLAttr(s) },
 	}
+}
+
+// renderPartial executes a named template against data and returns the result as
+// trusted HTML, backing the "render" func's dynamic-partial dispatch.
+func (s *Server) renderPartial(name string, data any) (template.HTML, error) {
+	var buf strings.Builder
+	if err := s.templates.ExecuteTemplate(&buf, name, data); err != nil {
+		return "", err
+	}
+	return template.HTML(buf.String()), nil
 }
 
 func dict(pairs ...any) (map[string]any, error) {

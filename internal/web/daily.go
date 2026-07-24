@@ -274,24 +274,7 @@ func dedupeAssignees(values []string) []string {
 // only the resulting ?assignee= set is encoded here; an empty result (deselecting
 // the last chip) is the bare path, i.e. "all".
 func dailyToggleHref(current []string, value string, selected bool) string {
-	var next []string
-	if selected {
-		for _, v := range current {
-			if v != value {
-				next = append(next, v)
-			}
-		}
-	} else {
-		next = append(append(next, current...), value)
-	}
-	if len(next) == 0 {
-		return "/daily/results"
-	}
-	vals := url.Values{}
-	for _, v := range next {
-		vals.Add("assignee", v)
-	}
-	return "/daily/results?" + vals.Encode()
+	return assigneeToggleHref("/daily/results", current, value, selected)
 }
 
 // dailyBoard groups the store's recency-sorted board cards into the fixed

@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
@@ -51,38 +52,66 @@ type boardColumn struct {
 }
 
 // boardView is the /board page model: the active sprint's columns plus its name
-// (empty when no active sprint is known, driving the friendly empty state).
+// (empty when no active sprint is known, driving the friendly empty state) and
+// the resolved filter chrome (#157). Filters hide non-matching cards; the column
+// set is always the full fixed board — filtering never removes a column.
 type boardView struct {
 	Columns    []boardColumn
 	SprintName string
 	HasSprint  bool
+	// Filters is the resolved, ordered filter chrome. The template ranges over it
+	// to render each control and its hidden round-trip inputs, so adding a filter
+	// needs no template plumbing change (see board_filter.go).
+	Filters []boardFilter
 }
 
-// handleBoard renders the sprint Kanban board for the active sprint.
+// handleBoard renders the full standalone Board page.
 func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
-	view, err := s.boardView()
+	s.renderBoard(w, r, "board.html")
+}
+
+// handleBoardResults renders the Board panel fragment (the HTMX swap target): the
+// filter chrome plus the filtered board, so a filter change re-renders the
+// controls, the column-header counts and the cards together without a full-page
+// reload. Parallels /daily/results.
+func (s *Server) handleBoardResults(w http.ResponseWriter, r *http.Request) {
+	s.renderBoard(w, r, "board-panel")
+}
+
+func (s *Server) renderBoard(w http.ResponseWriter, r *http.Request, name string) {
+	view, err := s.boardView(r.URL.Query())
 	if err != nil {
 		s.renderError(w)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "board.html", view); err != nil {
+	if err := s.templates.ExecuteTemplate(w, name, view); err != nil {
 		http.Error(w, "failed to render page", http.StatusInternalServerError)
 	}
 }
 
 // boardView projects the store board into the page model, resolving each card's
-// Jira link and the active-sprint name shown in the heading.
-func (s *Server) boardView() (boardView, error) {
+// Jira link and the active-sprint name, then applies the query's filters: a card
+// failing any filter is hidden, but every column is kept (filtering hides cards,
+// never columns).
+func (s *Server) boardView(q url.Values) (boardView, error) {
+	filters, err := s.boardFilters(q)
+	if err != nil {
+		return boardView{}, err
+	}
+
 	board, err := s.rollups.ActiveSprintBoard()
 	if err != nil {
 		return boardView{}, err
 	}
 
-	view := boardView{Columns: make([]boardColumn, 0, len(board.Columns))}
+	view := boardView{Columns: make([]boardColumn, 0, len(board.Columns)), Filters: filters}
 	for _, col := range board.Columns {
 		cards := make([]boardCard, 0, len(col.Cards))
 		for _, c := range col.Cards {
+			if !keepCard(filters, c) {
+				continue // hidden by a filter; the column still renders
+			}
 			cards = append(cards, boardCard{
 				Key:          c.Key,
 				Summary:      c.Summary,
