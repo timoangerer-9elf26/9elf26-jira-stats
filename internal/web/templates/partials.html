@@ -476,7 +476,7 @@
      controls, the column-header counts and the cards together, keeping the sticky
      region in sync with the data. Mirrors daily-panel. Takes a boardView. */}}
 {{define "board-panel"}}
-  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50">
+  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50 pt-4">
     {{template "nav" "board"}}
     {{template "page-header" "Board — the active sprint mirrored from Jira, for data-quality validation."}}
     {{if .HasSprint}}
@@ -736,7 +736,7 @@
      the data. Takes a dailyView. */}}
 {{define "daily-panel"}}
   {{template "daily-board-style"}}
-  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50">
+  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50 pt-4">
     {{template "nav" "daily"}}
     {{template "page-header" "Daily — a board of active-sprint tickets created or moved in the window, placed by workflow stage and showing where each came from."}}
     {{if .HasSprint}}
