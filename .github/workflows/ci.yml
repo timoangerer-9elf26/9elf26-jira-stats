@@ -185,7 +185,7 @@ jobs:
       # Exports short-lived AWS_* creds into the job env; deploy.sh detects them
       # and skips its assume-role step.
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::214519213070:role/jira-stats-github-deploy
           aws-region: eu-central-1
