@@ -56,10 +56,20 @@ test: ## Run the unit/integration test suite.
 smoke: ## Build the binary and run end-to-end smoke tests.
 	go test -tags smoke -count=1 ./smoke/
 
-# The pre-ship gate: unit/integration tests plus smoke tests. Run this in CI /
-# before deploying.
+# Regenerate the committed stylesheet and fail if it differs from what's checked
+# in, so a stale output.css is caught locally instead of only on CI. This is the
+# single source of truth for the freshness assertion: CI's "Verify generated
+# Tailwind CSS is current" step calls `make verify-css` rather than duplicating
+# these lines, so the local gate and CI can't drift (issue #172).
+.PHONY: verify-css
+verify-css: css ## Rebuild the stylesheet and fail if output.css is out of date.
+	git diff --exit-code -- $(TAILWIND_OUTPUT)
+
+# The pre-ship gate: verify the generated CSS is current, then unit/integration
+# tests plus smoke tests. Mirrors CI so a stale output.css fails locally too
+# (issue #172). Run this in CI / before deploying.
 .PHONY: check
-check: test smoke ## Run all tests + smoke tests (CI / pre-deploy gate).
+check: verify-css test smoke ## Verify generated CSS is current + run all tests + smoke tests (CI / pre-deploy gate).
 
 # Re-apply the source-controlled deploy-role policy to the live IAM role, so
 # reconciling drift is one `make` away instead of copy-pasting the put-role-policy
