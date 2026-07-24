@@ -527,6 +527,12 @@
 <form data-testid="board-filters"
       hx-target="#board-panel" hx-swap="innerHTML"
       class="mt-3 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+  {{/* Always-present filter-param anchor. A control that replaces its own param
+       hx-includes the OTHER filters via [data-filterparam]:not([name='<own>']);
+       with no filter active that selector would match nothing and HTMX logs a
+       no-match error. This valueless marker guarantees a match (contributing no
+       form value) — the Board analogue of Daily's always-present preset input. */}}
+  <span data-filterparam hidden></span>
   {{range .Filters}}{{range .Params}}<input type="hidden" data-filterparam name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
   {{range .Filters}}{{render .Control .Data}}{{end}}
 </form>
