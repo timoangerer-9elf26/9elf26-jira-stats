@@ -53,11 +53,25 @@ func (s *Server) boardFilters(q url.Values) ([]boardFilter, error) {
 	if err != nil {
 		return nil, err
 	}
+	noEstimate, err := s.noEstimateBoardFilter(q)
+	if err != nil {
+		return nil, err
+	}
 	return []boardFilter{
 		assignee,
-		// #158: s.noEstimateBoardFilter(q)
+		noEstimate,
 		// #159: s.active24hBoardFilter(q)
 	}, nil
+}
+
+// filterIncludeExceptSelf builds the hx-include attribute a self-encoding control
+// carries so a swap preserves EVERY other filter but not its own param: the
+// control already encodes its own resulting state in its toggle URL, so
+// re-including its own hidden inputs would double-count. Selecting
+// [data-filterparam] except the control's own param does this generically (by
+// attribute), so a newly added filter is preserved without touching this control.
+func filterIncludeExceptSelf(param string) template.HTMLAttr {
+	return template.HTMLAttr(`hx-include="[data-filterparam]:not([name='` + param + `'])"`)
 }
 
 // keepCard reports whether a card survives ALL filters (logical AND), so
@@ -125,10 +139,8 @@ func (s *Server) assigneeBoardFilter(q url.Values) (boardFilter, error) {
 		ClearHref:   "/board/results",
 		// The chips already encode the full resulting ?assignee= set in their own
 		// URL, so they must NOT re-include the sibling assignee hidden inputs (which
-		// would double-count) — but they must preserve EVERY other filter. Selecting
-		// all filter params except assignee does exactly that, generically, so a new
-		// filter is picked up without touching this control.
-		IncludeAttr: template.HTMLAttr(`hx-include="[data-filterparam]:not([name='assignee'])"`),
+		// would double-count) — but they must preserve EVERY other filter.
+		IncludeAttr: filterIncludeExceptSelf("assignee"),
 	}
 	// One chip per active-sprint assignee (alphabetical, from the store), then the
 	// trailing Unassigned sentinel chip. Each ToggleHref flips just that chip.
@@ -162,6 +174,68 @@ func (s *Server) assigneeBoardFilter(q url.Values) (boardFilter, error) {
 	}
 
 	return boardFilter{Control: "assignee-bar", Data: bar, Params: params, Keep: keep}, nil
+}
+
+// noEstimateParam is the URL/query key carrying the no-estimate toggle state.
+// The toggle is on iff this param equals noEstimateOn.
+const (
+	noEstimateParam = "no-estimate"
+	noEstimateOn    = "1"
+)
+
+// noEstimateToggleView is the model for the compact "No estimates" toggle
+// control (#158): a single server-driven toggle that lenses the Board onto
+// unsized cards (a data-quality view for finding unestimated tickets). On is the
+// current state; ToggleHref is the results URL that flips it; IncludeAttr
+// preserves every OTHER filter on the swap (it replaces only its own param, like
+// the assignee bar). Prefix is the data-testid stem.
+type noEstimateToggleView struct {
+	Prefix      string
+	On          bool
+	ToggleHref  string
+	IncludeAttr template.HTMLAttr
+}
+
+// noEstimateBoardFilter builds the Board's no-estimate toggle from the query: the
+// compact control, a Keep predicate that (when on) hides any card carrying an
+// estimate, and the round-trip param. Default off (no param) shows every card, so
+// it composes with the assignee filter as a plain intersection via keepCard.
+func (s *Server) noEstimateBoardFilter(q url.Values) (boardFilter, error) {
+	on := q.Get(noEstimateParam) == noEstimateOn
+
+	toggle := noEstimateToggleView{
+		Prefix:     "board-no-estimate",
+		On:         on,
+		ToggleHref: noEstimateToggleHref("/board/results", on),
+		// The toggle encodes its own resulting state in ToggleHref, so it must NOT
+		// re-include its own hidden param (which would fight the href), but it MUST
+		// preserve every other filter.
+		IncludeAttr: filterIncludeExceptSelf(noEstimateParam),
+	}
+
+	var params []boardFilterParam
+	if on {
+		params = append(params, boardFilterParam{Name: noEstimateParam, Value: noEstimateOn})
+	}
+
+	keep := func(card store.BoardCard) bool {
+		if !on {
+			return true // off = show all cards
+		}
+		return card.Size == "" // on = only cards with no estimate
+	}
+
+	return boardFilter{Control: "no-estimate-toggle", Data: toggle, Params: params, Keep: keep}, nil
+}
+
+// noEstimateToggleHref returns the results URL (rooted at basePath) that flips the
+// toggle: turning it on adds ?no-estimate=1, turning it off drops back to the bare
+// path. Only its own param is encoded; other filters ride along via hx-include.
+func noEstimateToggleHref(basePath string, on bool) string {
+	if on {
+		return basePath // toggling an on filter off yields the bare path
+	}
+	return basePath + "?" + noEstimateParam + "=" + noEstimateOn
 }
 
 // assigneeToggleHref builds the results URL (rooted at basePath) that flips one

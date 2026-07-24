@@ -167,6 +167,132 @@ func TestBoardPageRoundTripsAssigneeSelection(t *testing.T) {
 	assertAllColumnsRender(t, body)
 }
 
+// boardNoEstimateFixture is an active-sprint mix of sized and unsized cards
+// across two assignees plus one unassigned card, so the no-estimate toggle and
+// its intersection with the assignee filter can be exercised end to end.
+func boardNoEstimateFixture() *jira.FakeClient {
+	active := func(iss jira.Issue) jira.Issue {
+		iss.Type, iss.StatusCategory, iss.ActiveSprint = "Task", "In Progress", "KW29"
+		iss.Status = "In Progress"
+		return iss
+	}
+	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
+		active(jira.Issue{Key: "DCAI-20", Summary: "Ada sized", Assignee: "Ada Lovelace", Size: "M"}),
+		active(jira.Issue{Key: "DCAI-21", Summary: "Ada unsized", Assignee: "Ada Lovelace"}),   // no estimate
+		active(jira.Issue{Key: "DCAI-22", Summary: "Grace unsized", Assignee: "Grace Hopper"}), // no estimate
+		active(jira.Issue{Key: "DCAI-23", Summary: "Grace sized", Assignee: "Grace Hopper", Size: "L"}),
+		active(jira.Issue{Key: "DCAI-24", Summary: "Nobody unsized"}), // unassigned, no estimate
+	}}
+}
+
+// AC1: /board renders a compact "No estimates" toggle in the filter chrome,
+// default off (not pressed) on a fresh load.
+func TestBoardRendersNoEstimateToggle(t *testing.T) {
+	app := newBoardApp(t, boardNoEstimateFixture())
+	body := get(t, app.URL+"/board")
+
+	for _, want := range []string{
+		`data-testid="board-no-estimate"`,
+		`data-testid="board-no-estimate-toggle"`,
+		"No estimates",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("board chrome missing no-estimate toggle marker %q\n%s", want, body)
+		}
+	}
+	// Fresh load: toggle off (no control pressed), so every card shows.
+	if strings.Contains(body, `aria-pressed="true"`) {
+		t.Errorf("fresh /board must have the no-estimate toggle off\n%s", body)
+	}
+	for _, key := range []string{"DCAI-20", "DCAI-21", "DCAI-22", "DCAI-23", "DCAI-24"} {
+		if !strings.Contains(body, key) {
+			t.Errorf("fresh /board should show all cards, missing %q", key)
+		}
+	}
+}
+
+// AC2: with the toggle on, only cards with no estimate render; every column
+// stays rendered (cards hidden, not columns).
+func TestBoardNoEstimateHidesSizedCards(t *testing.T) {
+	app := newBoardApp(t, boardNoEstimateFixture())
+	body := get(t, app.URL+"/board/results?no-estimate=1")
+
+	assertAllColumnsRender(t, body) // columns stay put
+	for _, want := range []string{`data-key="DCAI-21"`, `data-key="DCAI-22"`, `data-key="DCAI-24"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("no-estimate=1 should keep unsized card %q\n%s", want, body)
+		}
+	}
+	for _, absent := range []string{`data-key="DCAI-20"`, `data-key="DCAI-23"`} {
+		if strings.Contains(body, absent) {
+			t.Errorf("no-estimate=1 should hide sized card %q", absent)
+		}
+	}
+}
+
+// AC3: toggle state is URL-encoded, bookmarkable (round-trips on the full page),
+// and the pressed control round-trips as a hidden filter param.
+func TestBoardNoEstimateRoundTrips(t *testing.T) {
+	app := newBoardApp(t, boardNoEstimateFixture())
+
+	// The fresh toggle points at ?no-estimate=1 (turn on); when on it points back
+	// at the bare path (turn off).
+	off := get(t, app.URL+"/board")
+	if !strings.Contains(off, `hx-get="/board/results?no-estimate=1"`) {
+		t.Errorf("off toggle should turn on via ?no-estimate=1\n%s", off)
+	}
+
+	on := get(t, app.URL+"/board/results?no-estimate=1")
+	// No assignee is selected in this fixture, so the only pressed control is the
+	// no-estimate toggle.
+	if !strings.Contains(on, `aria-pressed="true"`) {
+		t.Errorf("on toggle should be marked pressed\n%s", on)
+	}
+	if !strings.Contains(on, `hx-get="/board/results"`) {
+		t.Errorf("on toggle should turn off via the bare path\n%s", on)
+	}
+	if !strings.Contains(on, `data-filterparam name="no-estimate" value="1"`) {
+		t.Errorf("on state should round-trip as a hidden filter param\n%s", on)
+	}
+
+	// Bookmarked full page round-trips the toggle too.
+	page := get(t, app.URL+"/board?no-estimate=1")
+	if !strings.Contains(page, `data-filterparam name="no-estimate" value="1"`) {
+		t.Errorf("/board should round-trip the bookmarked toggle\n%s", page)
+	}
+	if strings.Contains(page, `data-key="DCAI-20"`) {
+		t.Errorf("/board?no-estimate=1 should hide the sized card")
+	}
+}
+
+// AC4: the no-estimate toggle composes with the assignee filter — both active is
+// the intersection (Ada's cards ∩ no-estimate = only Ada's unsized card).
+func TestBoardNoEstimateComposesWithAssignee(t *testing.T) {
+	app := newBoardApp(t, boardNoEstimateFixture())
+	body := get(t, app.URL+"/board/results?assignee="+url.QueryEscape("Ada Lovelace")+"&no-estimate=1")
+
+	assertAllColumnsRender(t, body)
+	// Only Ada's unsized card survives the intersection.
+	if !strings.Contains(body, `data-key="DCAI-21"`) {
+		t.Errorf("assignee=Ada ∩ no-estimate should keep DCAI-21\n%s", body)
+	}
+	for _, absent := range []string{
+		`data-key="DCAI-20"`, // Ada, but sized
+		`data-key="DCAI-22"`, // unsized, but Grace
+		`data-key="DCAI-23"`, // Grace, sized
+		`data-key="DCAI-24"`, // unsized, but unassigned
+	} {
+		if strings.Contains(body, absent) {
+			t.Errorf("assignee=Ada ∩ no-estimate should hide %q", absent)
+		}
+	}
+	// Both controls round-trip so the swapped panel keeps the combined state.
+	if !strings.Contains(body, `data-filterparam name="assignee" value="Ada Lovelace"`) ||
+		!strings.Contains(body, `data-filterparam name="no-estimate" value="1"`) {
+		t.Errorf("intersection should round-trip both filters\n%s", body)
+	}
+}
+
 // The chips are server-driven toggles that point at /board/results and encode the
 // resulting selection, exactly like Daily's — so no client state is needed.
 func TestBoardAssigneeChipsToggleViaBoardResults(t *testing.T) {

@@ -120,9 +120,19 @@ cards but never removes a column** — the full fixed board always renders, so
 filtering is a within-column narrowing, not a re-layout. Filter state is
 **URL-encoded and bookmarkable** (each filter owns its query params) and applies
 by swapping the board fragment, with no full-page reload. Multiple filters
-**compose** (a card must pass every active filter). The first filter is the
-shared [Assignee filter](#assignee-filter); the no-estimate toggle and the
-active-in-24h filter join the same chrome later.
+**compose** (a card must pass every active filter). The filters are the shared
+[Assignee filter](#assignee-filter) and the [No-estimate filter](#no-estimate-filter);
+the active-in-24h filter joins the same chrome later.
+
+## No-estimate filter
+
+A compact **"No estimates"** toggle in the [Board filters](#board-filters) chrome
+— a data-quality lens for finding unsized tickets. It **defaults off** (every
+card shows); when **on** the Board shows only cards whose **size is unset** (no
+estimate), hiding every card that carries an S/M/L. Like the other Board filters
+it never removes a column, its `no-estimate=1` state is URL-encoded and
+bookmarkable, and it composes with the [Assignee filter](#assignee-filter) as a
+plain intersection (assignee ∩ no-estimate).
 
 ## Daily movement
 
