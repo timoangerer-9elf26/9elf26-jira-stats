@@ -15,7 +15,7 @@ what gets applied, and `.github/workflows/oidc-verify.yml` proves it works.
 | OIDC provider | `token.actions.githubusercontent.com` (audience `sts.amazonaws.com`) |
 | Role | `jira-stats-github-deploy` |
 | Trust | this repo on `main` only — `oidc-trust-policy.json` |
-| Permissions | S3 artifact read/write + SSM SendCommand/GetCommandInvocation to the one instance — `deploy-role-policy.json` |
+| Permissions | S3 artifact read/write + list/delete (retention pruning, #156) + SSM SendCommand/GetCommandInvocation to the one instance — `deploy-role-policy.json` |
 
 The role is deliberately **narrower** than the human deploy path (which assumes
 the broad `OrganizationAccountAccessRole`). CI never touches the management
@@ -70,7 +70,8 @@ gh run watch   # or: gh run list --workflow "OIDC verify"
 ```
 
 Green means: `sts:GetCallerIdentity` federated (no stored keys), the artifact
-bucket is read/write, `ssm:SendCommand` + `GetCommandInvocation` reach the
+bucket is read/write **and** list/delete under `releases/` (the retention-pruning
+permissions, #156), `ssm:SendCommand` + `GetCommandInvocation` reach the
 instance, **and** an out-of-scope call (`ec2:DescribeInstances`) is correctly
 denied — i.e. the role is neither too narrow nor too broad.
 
