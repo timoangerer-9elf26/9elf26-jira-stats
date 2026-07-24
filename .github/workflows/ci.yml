@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  # One-click rollback (docs/adr/0006, issue #156): dispatch from `main` with a
+  # prior release tag to redeploy that exact stored artifact from S3 — no rebuild.
+  # The deploy job reuses the same ship + health-check path as an automatic
+  # deploy; build-and-test and release are skipped (there is nothing to build).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to roll back to (e.g. v2026.07.23.142). Must be one of the retained releases."
+        required: true
+        type: string
 
 # Cancel a superseded run when new commits arrive on the same ref, so pushing
 # several commits to a PR in quick succession doesn't leave stale runs churning.
@@ -14,6 +24,10 @@ concurrency:
 
 jobs:
   build-and-test:
+    # A rollback (workflow_dispatch) redeploys an already-tested artifact, so
+    # there is nothing to build or test — skip straight to deploy. On push/PR
+    # this always runs (the required-status-check gate on `main` depends on it).
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,10 +104,17 @@ jobs:
       # The exact string stamped into the binary and served verbatim by /version.
       # Computed once here and exported as a job output so the deploy job's health
       # check can assert against the precise bytes that will be running.
+      #
+      # --short=7 PINS the abbreviation length. Plain `--short` auto-scales the
+      # length with the repo's object count, so a rollback reconstructing this
+      # string months later (deploy job, issue #156) could abbreviate the same
+      # commit to a different width and false-fail the health check. A fixed width
+      # makes the stamp reproducible from the tag alone; the rollback path uses the
+      # identical `--short=7`.
       - name: Compute stamped version
         id: stamp
         run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
           echo "version=${{ steps.tag.outputs.tag }} (${SHORT_SHA})" >> "$GITHUB_OUTPUT"
 
       # Build the arm64 binary exactly once, stamped with the tag + short SHA so
@@ -116,31 +137,50 @@ jobs:
             --title "${{ steps.tag.outputs.tag }}" \
             --notes "Automated release of ${{ github.sha }} (docs/adr/0006)."
 
-  # Deploy the JUST-RELEASED artifact to the single production instance and prove
-  # the new version is live (docs/adr/0006, issue #155). Runs only after `release`
-  # (which itself needs build-and-test), and only on push:main — never on PRs.
+  # Deploy a released artifact to the single production instance and prove the
+  # new version is live (docs/adr/0006, issues #155/#156). Two entry points, ONE
+  # ship + health-check path (no divergent second code path):
+  #   * push:main — deploy the artifact the `release` job just produced, after
+  #     `release` (which itself needs build-and-test) is green.
+  #   * workflow_dispatch — roll back to the `tag` input's prior artifact.
+  # Never runs on PRs.
   #
-  # BUILD-ONCE is the core invariant: this job downloads the exact binary the
-  # `release` job attached to the GitHub Release and ships those bytes verbatim.
-  # It never runs `make build-arm64`/`go build` — "what we tested = released =
-  # running."
+  # BUILD-ONCE is the core invariant: this job downloads an already-built binary
+  # (from the GitHub Release on a normal deploy, or from S3 on a rollback) and
+  # ships those bytes verbatim. It never runs `make build-arm64`/`go build` —
+  # "what we tested = released = running."
   deploy:
     needs: release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # `release` is skipped on workflow_dispatch, so !cancelled() is required for
+    # deploy to run in that case; on push we additionally gate on release success.
+    # Both entry points require `main`: the OIDC trust policy only federates on
+    # refs/heads/main (a dispatch from any other branch would fail at assume-role
+    # anyway), and this makes that intent explicit + fails fast.
+    if: |
+      !cancelled() && github.ref == 'refs/heads/main' && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' && needs.release.result == 'success')
+      )
     runs-on: ubuntu-latest
-    # Serialize deploys: two merges landing seconds apart QUEUE rather than
-    # overlap (cancel-in-progress: false), so no half-finished SSM push gets
-    # clobbered and the later commit ends up live (docs/adr/0006).
+    # Serialize deploys: two merges (or a merge and a rollback) landing seconds
+    # apart QUEUE rather than overlap (cancel-in-progress: false), so no
+    # half-finished SSM push gets clobbered and the later one ends up live
+    # (docs/adr/0006).
     concurrency:
       group: deploy-prod
       cancel-in-progress: false
     # id-token: mint the short-lived GitHub OIDC token to assume the AWS deploy
-    # role (no stored keys). contents: read the Release asset via GITHUB_TOKEN.
+    # role (no stored keys). contents: write — read the Release asset AND delete
+    # stale Release assets during retention pruning (issue #156).
     permissions:
       id-token: write
-      contents: read
+      contents: write
     steps:
+      # fetch-depth: 0 pulls full history + all tags so a rollback can resolve
+      # the target tag's commit and reconstruct its stamped /version string.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # Assume the narrowly-scoped deploy role (#153) via OIDC — NOT the broad
       # OrganizationAccountAccessRole (that is the human/manual break-glass path).
@@ -152,35 +192,74 @@ jobs:
           role-to-assume: arn:aws:iam::214519213070:role/jira-stats-github-deploy
           aws-region: eu-central-1
 
-      # Build-once: fetch the exact artifact the release job attached to the
-      # GitHub Release for this tag. These are the released bytes — no rebuild.
+      # Resolve the single (tag, expected-version) pair the rest of the job uses,
+      # so both entry points converge onto ONE ship + health-check path:
+      #   * push        — take them straight from the release job's outputs.
+      #   * rollback    — TAG is the dispatch input; reconstruct the stamped
+      #                   version ("<tag> (<short-sha>)") from the tag's commit
+      #                   with the SAME pinned `--short=7` the release job stamped
+      #                   with, so the reconstructed string matches byte-for-byte.
+      #                   Tags are kept forever, so this always resolves for a
+      #                   retained release.
+      - name: Resolve target tag + expected version
+        id: target
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+            if ! git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              echo "::error::unknown tag '${tag}' — not a release tag in this repo"
+              exit 1
+            fi
+            short_sha=$(git rev-parse --short=7 "${tag}^{commit}")
+            version="${tag} (${short_sha})"
+          else
+            tag="${{ needs.release.outputs.tag }}"
+            version="${{ needs.release.outputs.version }}"
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "resolved tag=${tag} version=${version}"
+
+      # Build-once: fetch the exact already-built binary for this tag. On a normal
+      # deploy it comes from the GitHub Release the release job attached; on a
+      # rollback it comes straight from S3 (releases/<tag>/...) — the prior
+      # artifact, no rebuild, which is the reason the last-5 window exists.
       - name: Download released artifact
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.target.outputs.tag }}
         run: |
+          set -euo pipefail
           mkdir -p bin
-          gh release download "${{ needs.release.outputs.tag }}" \
-            --pattern jira-stats-linux-arm64 \
-            --output bin/jira-stats-linux-arm64
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            aws s3 cp \
+              "s3://jira-stats-artifacts-214519213070/releases/${TAG}/jira-stats-linux-arm64" \
+              bin/jira-stats-linux-arm64
+          else
+            gh release download "${TAG}" \
+              --pattern jira-stats-linux-arm64 \
+              --output bin/jira-stats-linux-arm64
+          fi
           chmod 0755 bin/jira-stats-linux-arm64
 
       # Ship + restart via the SAME script a human uses manually. It uploads to
       # S3 keyed by tag (releases/<tag>/...) and installs+restarts over SSM. AWS
       # creds are already in the env, so deploy.sh skips assume-role.
       - name: Deploy released artifact
-        run: scripts/deploy.sh "${{ needs.release.outputs.tag }}" bin/jira-stats-linux-arm64
+        run: scripts/deploy.sh "${{ steps.target.outputs.tag }}" bin/jira-stats-linux-arm64
 
       # Post-deploy health check. NOTE: /version serves the FULL stamped build
       # identity verbatim — "<tag> (<short-sha>)", NOT the bare tag (issue #155,
       # docs/adr/0006; internal/version.Version stamped in #152). So we assert
-      # equality against the exact stamped string the release job exported
-      # (needs.release.outputs.version), not against the tag alone — a "== tag"
+      # equality against the exact stamped string resolved above
+      # (steps.target.outputs.version), not against the tag alone — a "== tag"
       # check would falsely fail on every real deploy. This proves the full path
       # (cert + Caddy + app) AND that the NEW binary — not a silently unchanged
       # old one — is live. A mismatch OR an unreachable endpoint fails the job.
       - name: Health check /version
         env:
-          EXPECTED: ${{ needs.release.outputs.version }}
+          EXPECTED: ${{ steps.target.outputs.version }}
         run: |
           echo "expecting /version == '${EXPECTED}'"
           got=$(curl -fsS --retry 5 --retry-all-errors --retry-delay 5 \
@@ -191,3 +270,13 @@ jobs:
             exit 1
           fi
           echo "health check passed — ${EXPECTED} is live"
+
+      # Retention (docs/adr/0006, issue #156): only after a healthy deploy, prune
+      # the heavy release artifacts — GitHub Release binary assets AND the S3
+      # artifact binaries — to the newest 5. Git tags are kept forever; an older
+      # build can always be rebuilt from its tag. Runs on both the push and the
+      # rollback path, so the retained window always reflects the last 5 deploys.
+      - name: Prune old release artifacts (keep last 5)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/prune-artifacts.sh

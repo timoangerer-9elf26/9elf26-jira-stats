@@ -11,6 +11,23 @@
       "Resource": "arn:aws:s3:::jira-stats-artifacts-214519213070/*"
     },
     {
+      "Sid": "ArtifactBucketRetentionDelete",
+      "Effect": "Allow",
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::jira-stats-artifacts-214519213070/releases/*"
+    },
+    {
+      "Sid": "ArtifactBucketListForRetention",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::jira-stats-artifacts-214519213070",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "releases/*"
+        }
+      }
+    },
+    {
       "Sid": "SendDeployCommandToTheOneInstance",
       "Effect": "Allow",
       "Action": "ssm:SendCommand",

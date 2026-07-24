@@ -40,16 +40,25 @@ jobs:
       - name: Prove federation (sts:GetCallerIdentity)
         run: aws sts get-caller-identity
 
-      - name: Artifact bucket is readable + writable
+      - name: Artifact bucket is readable + writable + listable + prunable
         run: |
           set -euo pipefail
-          key="oidc-verify/${{ github.run_id }}.txt"
+          # Put/Get proves read+write; List+Delete prove the retention-pruning
+          # permissions the deploy job needs (issue #156). The probe object lives
+          # under releases/ so the prefix-scoped ListBucket grant applies, and we
+          # delete it at the end (also cleaning up after ourselves).
+          key="releases/oidc-verify/${{ github.run_id }}.txt"
           echo "oidc-verify ${{ github.run_id }}" > /tmp/probe.txt
           echo "PutObject s3://$ARTIFACT_BUCKET/$key"
           aws s3api put-object --bucket "$ARTIFACT_BUCKET" --key "$key" --body /tmp/probe.txt >/dev/null
           echo "GetObject s3://$ARTIFACT_BUCKET/$key"
           aws s3api get-object --bucket "$ARTIFACT_BUCKET" --key "$key" /tmp/probe-out.txt >/dev/null
           diff /tmp/probe.txt /tmp/probe-out.txt
+          echo "ListBucket prefix=releases/"
+          aws s3api list-objects-v2 --bucket "$ARTIFACT_BUCKET" --prefix "releases/" \
+            --query "Contents[?Key=='$key'].Key" --output text | grep -qx "$key"
+          echo "DeleteObject s3://$ARTIFACT_BUCKET/$key"
+          aws s3api delete-object --bucket "$ARTIFACT_BUCKET" --key "$key" >/dev/null
 
       - name: Can SendCommand + read result on the app instance
         run: |
