@@ -96,15 +96,62 @@ func (a *authConfig) revokeSession(token string) {
 // (/login, /logout, /static/). It is a pass-through when auth is disabled
 // (s.auth == nil). An unauthenticated request to a protected route is
 // redirected to /login?next=<original path+query>.
+//
+// HTMX requests are handled specially: HTMX rides on XHR, which transparently
+// follows a 302 and would swap the entire login document into whatever fragment
+// target the call was aimed at (the broken login overlay). So when the request
+// is HTMX (HX-Request: true) we answer 200 with an HX-Redirect header, which
+// tells HTMX to perform a real full-page browser navigation to /login instead.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.auth == nil || isPublicPath(r.URL.Path) || s.requestAuthenticated(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if r.Header.Get("HX-Request") == "true" {
+			w.Header().Set("HX-Redirect", htmxLoginRedirect(r.Header.Get("HX-Current-URL")))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		dest := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
 		http.Redirect(w, r, dest, http.StatusFound)
 	})
+}
+
+// htmxLoginRedirect builds the HX-Redirect target for an unauthenticated HTMX
+// request. It preserves the originating page — the browser's HX-Current-URL,
+// sanitized through safeNext — as the login ?next=, so the user lands back on
+// the view they were on after re-login. When the header is missing or doesn't
+// sanitize to a safe app-local path it falls back to a bare /login (which
+// itself lands on /sprint).
+func htmxLoginRedirect(currentURL string) string {
+	if next := safeCurrentURL(currentURL); next != "" {
+		return "/login?next=" + url.QueryEscape(next)
+	}
+	return "/login"
+}
+
+// safeCurrentURL reduces an HX-Current-URL header (a full browser URL) to a safe
+// app-local path+query, or "" when it's missing or unsafe. It reuses safeNext:
+// safeNext returns the input unchanged only when it is a safe local path, so a
+// value that survives the round-trip is safe; anything else (empty, malformed,
+// off-origin, protocol-relative) collapses to "".
+func safeCurrentURL(currentURL string) string {
+	if currentURL == "" {
+		return ""
+	}
+	u, err := url.Parse(currentURL)
+	if err != nil {
+		return ""
+	}
+	path := u.EscapedPath()
+	if u.RawQuery != "" {
+		path += "?" + u.RawQuery
+	}
+	if safeNext(path) != path {
+		return ""
+	}
+	return path
 }
 
 // isPublicPath reports whether a path is reachable without a session: the login
