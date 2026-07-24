@@ -69,6 +69,115 @@ func TestLoggedOutRedirectsToLoginWithNext(t *testing.T) {
 	}
 }
 
+func TestUnauthenticatedHTMXGetsHXRedirectNotBody(t *testing.T) {
+	app := newAuthApp(t)
+	client := noRedirectClient()
+
+	// The always-on poller hits a protected route carrying the HTMX headers.
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/resync/status", nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Current-URL", "http://example.com/board?epic=ABC")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /resync/status (HTMX): %v", err)
+	}
+	defer resp.Body.Close()
+
+	// A 200 + HX-Redirect (full-page navigation), NOT a 302 that XHR follows
+	// into a login-document body swapped over the fragment.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("HTMX unauth: status %d, want 200", resp.StatusCode)
+	}
+	// The originating page rides along via HX-Current-URL -> ?next=.
+	if got := resp.Header.Get("HX-Redirect"); got != "/login?next=%2Fboard%3Fepic%3DABC" {
+		t.Fatalf("HTMX unauth: HX-Redirect = %q, want /login?next=%%2Fboard%%3Fepic%%3DABC", got)
+	}
+	if resp.Header.Get("Location") != "" {
+		t.Fatalf("HTMX unauth: should not send a 302 Location, got %q", resp.Header.Get("Location"))
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "Sign in") {
+		t.Fatalf("HTMX unauth: response body should not carry the login document")
+	}
+}
+
+func TestUnauthenticatedHTMXFallsBackToBareLogin(t *testing.T) {
+	app := newAuthApp(t)
+	client := noRedirectClient()
+
+	cases := map[string]string{
+		"missing HX-Current-URL":     "",
+		"protocol-relative (unsafe)": "http://example.com//evil.com/x",
+		"off-origin path is dropped": "not a url ::::",
+	}
+	for name, currentURL := range cases {
+		t.Run(name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodGet, app.URL+"/resync/status", nil)
+			req.Header.Set("HX-Request", "true")
+			if currentURL != "" {
+				req.Header.Set("HX-Current-URL", currentURL)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("GET /resync/status (HTMX): %v", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("HTMX unauth: status %d, want 200", resp.StatusCode)
+			}
+			if got := resp.Header.Get("HX-Redirect"); got != "/login" {
+				t.Fatalf("HTMX unauth fallback: HX-Redirect = %q, want bare /login", got)
+			}
+		})
+	}
+}
+
+func TestUnauthenticatedNonHTMXStill302(t *testing.T) {
+	app := newAuthApp(t)
+	client := noRedirectClient()
+
+	// No HX-Request header: a normal full-page navigation keeps today's 302.
+	resp, err := client.Get(app.URL + "/board")
+	if err != nil {
+		t.Fatalf("GET /board: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("non-HTMX unauth: status %d, want 302", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc != "/login?next=%2Fboard" {
+		t.Fatalf("non-HTMX unauth: Location = %q, want /login?next=%%2Fboard", loc)
+	}
+	if resp.Header.Get("HX-Redirect") != "" {
+		t.Fatalf("non-HTMX unauth: should not send HX-Redirect, got %q", resp.Header.Get("HX-Redirect"))
+	}
+}
+
+func TestAuthDisabledHTMXPassthrough(t *testing.T) {
+	// Built WITHOUT WithAuth: the middleware is a pass-through even for HTMX
+	// requests, so a protected route serves its real 200 with no HX-Redirect.
+	app := newTestApp(t, jira.NewFakeClient())
+	client := noRedirectClient()
+
+	req, _ := http.NewRequest(http.MethodGet, app.URL+"/resync/status", nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Current-URL", "http://example.com/board")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /resync/status (HTMX, auth disabled): %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("auth-disabled HTMX: status %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("HX-Redirect"); got != "" {
+		t.Fatalf("auth-disabled HTMX: should not send HX-Redirect, got %q", got)
+	}
+}
+
 func TestSuccessfulLoginSetsCookieAndRedirects(t *testing.T) {
 	app := newAuthApp(t)
 	client := noRedirectClient()
