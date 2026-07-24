@@ -48,6 +48,50 @@ anchoring Started-with / Added on the sprint's own start (not a calendar Monday)
 is what keeps a carry-over at a sprint boundary in Started-with. *Membership* is
 reconstructed from the sprint-membership history at the window bounds.
 
+## Board view
+
+The active sprint **mirrored from Jira** as a Kanban board, cards laid out in
+**current-status** columns. Originally a read-only **data-quality validation**
+snapshot; it is becoming the intended **standup surface** via its
+[filters](#board-filters), while keeping its own presentation. The long-term
+direction is for the Board to absorb the [Daily view](#daily-view)'s role, but
+the two coexist until the Board is proven — see `docs/adr/0008`.
+
+The **columns** are the workflow stages left-to-right: Refinement → Ready To Do →
+In Progress → Review / Testing → DONE (This Sprint) → Ready for Release →
+Released / Deployed. **Triage and Canceled are kept off-board** (no column, no
+card). Unlike the Daily board, the **Done set is three separate columns here**,
+not one collapsed Done — the Board shows exactly where a done ticket sits.
+
+Each **card** is the [board card](#estimate-edit) (key linking to Jira, type
+badge, title, an **editable estimate**, the assignee **avatar**, and the parent
+**epic pill**) placed in its **current** status column, plus a subtle
+**latest-activity timestamp**. The Board deliberately carries **no movement
+chrome** — no origin badge, no [movement-kind](#daily-movement) colour — because
+it is a snapshot, not a movement view; those stay Daily-only.
+
+## Board filters
+
+Three **composable** filters on the [Board view](#board-view), all default
+**OFF** (so a fresh `/board` still opens as the full snapshot). Filtering
+**hides cards, never columns** — the board's shape stays stable as filters
+toggle. Selection lives in the **URL** and swaps a board fragment, built as
+reusable filter scaffolding for other views later.
+
+The three filters (see `docs/adr/0008-board-standup-filters.md`):
+
+- **Assignee** — the [Daily view's](#assignee-filter) exact multi-select avatar
+  control, reused here; defaults to all assignees.
+- **No-estimate** — shows only cards **without** an estimate, to surface work
+  that still needs sizing.
+- **Active in last 24h** — reuses Daily's [active rule](#daily-movement): a card
+  qualifies if it was **created in the window** or had a **status change within
+  it**, with moves whose *both* endpoints are in the [Done set](#ticket-status-buckets)
+  ignored — so an intra-Done housekeeping move (e.g. DONE (This Sprint) → Ready
+  for Release) leaves a card **hidden** despite the column change. Because
+  Canceled stays off-board, a ticket cancelled in the window does not appear
+  under this lens.
+
 ## Daily view
 
 The morning standup overview, presented as a **board**. For a chosen
@@ -86,75 +130,14 @@ Last 24h are honoured verbatim.
 
 ## Assignee filter
 
-The assignee filter **defaults to all assignees** — a fresh load (no `assignee`
-query param) shows every assignee's work, and selecting **All** likewise carries
-no `assignee` param. It selects individual teammates by Jira **display name** (a
-repeatable `assignee` param, so a multi-select is a union/OR) or the
-**Unassigned** sentinel. Attribution is by a ticket's *current* assignee — so a
-status move made while a ticket was assigned to one person but later reassigned
-away is credited to the new assignee (a known limitation, accepted until the sync
-captures the actor of each transition).
-
-The [Daily view](#daily-view) and the [Board](#board-view) share **the same
-control** — a multi-select avatar bar of active-sprint assignees plus the
-Unassigned chip, with server-driven toggle chips. On the Daily view it drives the
-board's window query; on the Board it is one of the [Board filters](#board-filters),
-hiding non-matching cards while every column stays put.
-
-## Board view
-
-The active sprint mirrored from Jira as a per-status **Kanban board**, for
-data-quality validation. Unlike the [Sprint view](#sprint-view), it is *not*
-scoped to open work: every workflow column renders left-to-right in
-[status order](#ticket-status-buckets) — the four open columns and the
-Done-category ones (DONE (This Sprint), Ready for Release, Released / Deployed) —
-each always present, even when empty. Each **card** carries the key (linking to
-Jira), a type badge, the parent-epic pill, the assignee **avatar**, the
-**[editable estimate](#estimate-edit)** (the Board is one of the two write
-surfaces), and a subtle **latest-activity timestamp** (its most recent activity
-by the [active rule](#active-in-24h-filter)). Unlike the [Daily view](#daily-view)
-card it carries no origin badge or movement-kind colour — the Board keeps its
-snapshot presentation. Triage and Canceled tickets are excluded.
-
-## Board filters
-
-The Board's set of **filters** over its cards. A filter **hides non-matching
-cards but never removes a column** — the full fixed board always renders, so
-filtering is a within-column narrowing, not a re-layout. Filter state is
-**URL-encoded and bookmarkable** (each filter owns its query params) and applies
-by swapping the board fragment, with no full-page reload. Multiple filters
-**compose** (a card must pass every active filter). The filters are the shared
-[Assignee filter](#assignee-filter), the [No-estimate filter](#no-estimate-filter)
-and the [Active-in-24h filter](#active-in-24h-filter).
-
-## No-estimate filter
-
-A compact **"No estimates"** toggle in the [Board filters](#board-filters) chrome
-— a data-quality lens for finding unsized tickets. It **defaults off** (every
-card shows); when **on** the Board shows only cards whose **size is unset** (no
-estimate), hiding every card that carries an S/M/L. Like the other Board filters
-it never removes a column, its `no-estimate=1` state is URL-encoded and
-bookmarkable, and it composes with the [Assignee filter](#assignee-filter) as a
-plain intersection (assignee ∩ no-estimate).
-
-## Active-in-24h filter
-
-A compact **"Active in last 24h"** toggle in the [Board filters](#board-filters)
-chrome — a standup lens onto what just moved. It **defaults off** (every card
-shows); when **on** the Board shows only cards **active** in the rolling
-`[now − 24h, now)` window (never weekend-adjusted). A card is **active** by the
-same rule the [Daily view](#daily-view) uses: it was **created in the window** or
-had a **status change within it**, with moves whose *both* endpoints are in the
-[Done set](#ticket-status-buckets) ignored as post-completion housekeeping (see
-[Daily movement](#daily-movement)). Two consequences follow: a card whose only
-24h activity was an intra-Done housekeeping move is **hidden** when the filter is
-on, and because Canceled is off-board a ticket cancelled in the window does not
-appear. Each card carries this as a single **latest-activity instant** — its most
-recent non-housekeeping status change, or its creation instant — which is also
-the timestamp shown on every card. Like the other Board filters it never removes a
-column, its `active-24h=1` state is URL-encoded and bookmarkable, and it composes
-with the [Assignee](#assignee-filter) and [No-estimate](#no-estimate-filter)
-filters as a plain intersection (assignee ∩ no-estimate ∩ active-in-24h).
+The Daily view's assignee filter **defaults to all assignees** — a fresh load
+(no `assignee` query param) shows every assignee's work, and selecting **All**
+likewise carries no `assignee` param. The dropdown also selects an individual
+teammate by Jira **display name** or the **Unassigned** sentinel. Attribution is
+by a ticket's *current* assignee — so a status move made while a ticket was
+assigned to one person but later reassigned away is credited to the new assignee
+(a known limitation, accepted until the sync captures the actor of each
+transition).
 
 ## Daily movement
 
