@@ -1,7 +1,12 @@
 # Proves the GitHub OIDC → AWS deploy-role federation works and is scoped
-# correctly (docs/adr/0006, #153). Manual-only: run it from `main` after the
-# one-time IAM setup (OIDC provider + jira-stats-github-deploy role) exists in
-# the internal-tooling account. It assumes the role via OIDC (no stored keys),
+# correctly (docs/adr/0006, #153). Runs from `main` after the one-time IAM setup
+# (OIDC provider + jira-stats-github-deploy role) exists in the internal-tooling
+# account — either manually (workflow_dispatch) or automatically as drift
+# detection when a push to `main` touches deploy/aws/ (#175), so an unapplied
+# policy edit fails loudly right after merge instead of waiting for the next
+# deploy. It stays main-only because the OIDC trust policy federates on `main`
+# only (branches/PRs can't assume the role). It assumes the role via OIDC (no
+# stored keys),
 # proves federation with sts:GetCallerIdentity, exercises the two things a deploy
 # actually needs (S3 artifact read/write, SSM SendCommand + GetCommandInvocation
 # to the one instance), and asserts an out-of-scope call is denied — so the role
@@ -13,7 +18,17 @@
 name: OIDC verify
 
 on:
+  # Manual runs (e.g. after the one-time IAM setup, or on demand).
   workflow_dispatch:
+  # Drift detection: a change to the deploy IAM policy/trust landing on main
+  # re-verifies the live role against the checked-in policy. main-only so the
+  # OIDC trust policy (federated on main) can still be assumed. Never make this
+  # a required status check — a paths filter on a required workflow leaves it
+  # Pending and wedges merges (docs/research/pr-merge-gate-ci.md).
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/aws/**'
 
 # Least privilege: only the OIDC token minting is needed; no write to repo.
 permissions:
@@ -99,3 +114,12 @@ jobs:
           else
             echo "ec2:DescribeInstances failed for an unexpected reason:"; cat /tmp/ec2.err; exit 1
           fi
+
+      - name: Remediation hint on drift
+        # A failure here on a deploy/aws/ push means the live role has drifted
+        # from the checked-in policy. Point the operator at the one-hop fix so
+        # detect → remediate is a single step (#174, #175).
+        if: failure()
+        run: |
+          echo "::error title=OIDC deploy-role drift::The live jira-stats-github-deploy role does not match deploy/aws/. Re-apply the checked-in policy with 'make apply-deploy-policy' (scripts/apply-deploy-policy.sh), then re-run this workflow."
+          echo "Remediation: make apply-deploy-policy"
