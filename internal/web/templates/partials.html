@@ -462,6 +462,82 @@
 </div>
 {{end}}
 
+{{/* board-panel is the swappable Board unit (#157): the one sticky chrome region
+     (nav, title, filter chrome, board heading and column headers) plus the
+     horizontally scrolling card strip below it, or the no-sprint state. HTMX
+     swaps this whole unit into #board-panel so a filter change re-renders the
+     controls, the column-header counts and the cards together, keeping the sticky
+     region in sync with the data. Mirrors daily-panel. Takes a boardView. */}}
+{{define "board-panel"}}
+  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50">
+    {{template "nav" "board"}}
+    {{template "page-header" "Board — the active sprint mirrored from Jira, for data-quality validation."}}
+    {{if .HasSprint}}
+    <div data-testid="board-chrome" class="mt-4">
+      <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500" data-testid="board-heading">Sprint board — {{.SprintName}}</h2>
+      {{template "board-filters" .}}
+      {{/* The status row deliberately sits OUTSIDE the horizontal card scroller.
+           The card strip mirrors its scrollLeft into this hidden horizontal
+           scroller so headings stay aligned without a second visible scrollbar.
+           All fixed chrome shares this one sticky ancestor, so its internal
+           coordinates cannot shift while scrolling. */}}
+      <div id="board-column-headers" data-testid="board-column-headers"
+           class="mt-3 flex gap-4 overflow-x-hidden">
+        {{range .Columns}}
+          {{template "board-column-header" .}}
+        {{end}}
+      </div>
+    </div>
+    {{end}}
+  </div>
+
+  {{if .HasSprint}}
+  <div data-testid="board">
+    <div data-testid="board-card-strip"
+         class="flex gap-4 overflow-x-auto pb-4"
+         style="overflow-y:hidden"
+         onscroll="document.getElementById('board-column-headers').scrollLeft=this.scrollLeft">
+      {{range .Columns}}
+        {{template "board-column-cards" .}}
+      {{else}}
+        <p class="text-sm text-slate-500" data-testid="board-empty">No issues in {{.SprintName}} yet.</p>
+      {{end}}
+    </div>
+  </div>
+  {{else}}
+  <div data-testid="board-no-sprint" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+    <p>No active sprint to show. Once a sprint is active in Jira and synced, its board appears here.</p>
+  </div>
+  {{end}}
+{{end}}
+
+{{/* board-filters is the reusable Board filter chrome region (#157): one <form>
+     that targets #board-panel and, on any control change, swaps the whole panel
+     via HTMX so filter state stays URL-encoded and bookmarkable without a
+     full-page reload.
+
+     It is filter-AGNOSTIC. It re-emits every registered filter's current params
+     as hidden inputs marked data-filterparam (so a change to one filter round-
+     trips the others), then renders each filter's own control partial by name
+     (via the render func — html/template can't take a dynamic {{template}} name).
+     Adding a filter (#158 no-estimate, #159 active-in-24h) means appending to the
+     boardFilters registry and shipping its control partial; this region does not
+     change. Takes a boardView (needs .Filters). */}}
+{{define "board-filters"}}
+<form data-testid="board-filters"
+      hx-target="#board-panel" hx-swap="innerHTML"
+      class="mt-3 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+  {{/* Always-present filter-param anchor. A control that replaces its own param
+       hx-includes the OTHER filters via [data-filterparam]:not([name='<own>']);
+       with no filter active that selector would match nothing and HTMX logs a
+       no-match error. This valueless marker guarantees a match (contributing no
+       form value) — the Board analogue of Daily's always-present preset input. */}}
+  <span data-filterparam hidden></span>
+  {{range .Filters}}{{range .Params}}<input type="hidden" data-filterparam name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
+  {{range .Filters}}{{render .Control .Data}}{{end}}
+</form>
+{{end}}
+
 {{/* velocity-bar renders one sprint of the Velocity view as an accessible CSS
      bar (no JS charting library). Takes a velocitySprint (Label = sprint name,
      Points, Percent, Dates). The full-height track marks the sprint even when it
@@ -780,15 +856,47 @@
      greyscale. The avatar itself reuses the shared
      card-avatar partial (image → initials → neutral circle for Unassigned), so
      the image is served from Jira/​/static, never inlined as a data: URI (the
-     #ZgotmplZ gotcha). Takes a dailyView (needs .Assignees, .AnySelected). */}}
+     #ZgotmplZ gotcha). Takes a dailyView (needs .Assignees, .AnySelected).
+
+     The bar itself is the shared "assignee-bar" partial (also used by the Board
+     filter, #157): daily-assignee-bar just adapts the dailyView into that
+     partial's model — the testid prefix, the Clear target and the hx-include that
+     preserves the range controls when a chip toggles. */}}
 {{define "daily-assignee-bar"}}
-<div data-testid="daily-assignee-bar" class="flex items-center gap-2">
-  <div data-testid="daily-assignee-avatars" class="flex flex-wrap items-center">
-    {{range .Assignees}}
-    <button type="button" data-testid="daily-assignee:{{.Value}}"
+{{template "assignee-bar" (dict
+    "Prefix" "daily-assignee"
+    "Chips" .Assignees
+    "AnySelected" .AnySelected
+    "ClearHref" "/daily/results"
+    "IncludeAttr" (attr "hx-include=\"[name='preset'],[name='from'],[name='to']\""))}}
+{{end}}
+
+{{/* assignee-bar is the shared multi-select assignee avatar bar used by both the
+     Daily view and the Board filter (#157): a row of toggleable avatars (one per
+     active-sprint assignee, alphabetical, then an "Unassigned" ghost chip last),
+     plus an always-present Clear affordance (disabled and muted when nothing is
+     selected, keeping the avatar positions stable).
+
+     Each chip is a server-driven toggle: it hx-GETs its ToggleHref — the results
+     URL carrying the assignee set that RESULTS from flipping this chip — and swaps
+     the caller's panel, so the bar re-renders with the new selection. The chip URL
+     already encodes the full resulting ?assignee= set, so it hx-includes only the
+     OTHER controls (via the caller's IncludeAttr), never its own assignee inputs
+     (which would double-count). Zero selected = all; multiple = union (OR).
+
+     Selected chips read full-colour with a ring; unselected are dimmed and
+     greyscale. The avatar reuses the shared card-avatar partial (image → initials
+     → neutral circle for Unassigned), served from Jira/​/static, never inlined as
+     a data: URI (the #ZgotmplZ gotcha). Takes an assigneeBarView (Prefix, Chips,
+     AnySelected, ClearHref, IncludeAttr). */}}
+{{define "assignee-bar"}}
+<div data-testid="{{.Prefix}}-bar" class="flex items-center gap-2">
+  <div data-testid="{{.Prefix}}-avatars" class="flex flex-wrap items-center">
+    {{range .Chips}}
+    <button type="button" data-testid="{{$.Prefix}}:{{.Value}}"
             title="{{.Name}}" aria-label="{{.Name}}"
             {{if .Selected}}aria-pressed="true"{{end}}
-            hx-get="{{.ToggleHref}}" hx-include="[name='preset'],[name='from'],[name='to']"
+            hx-get="{{.ToggleHref}}" {{$.IncludeAttr}}
             class="inline-flex cursor-pointer rounded-full border-2 p-0.5 leading-none transition-[filter,opacity,border-color]
                    {{if .Selected}}border-slate-900 opacity-100
                    {{else}}border-transparent grayscale opacity-55 hover:grayscale-0 hover:opacity-85{{end}}">
@@ -796,8 +904,8 @@
     </button>
     {{end}}
   </div>
-  <button type="button" data-testid="daily-assignee-clear"
-          {{if .AnySelected}}hx-get="/daily/results" hx-include="[name='preset'],[name='from'],[name='to']"{{else}}disabled aria-disabled="true"{{end}}
+  <button type="button" data-testid="{{.Prefix}}-clear"
+          {{if .AnySelected}}hx-get="{{.ClearHref}}" {{.IncludeAttr}}{{else}}disabled aria-disabled="true"{{end}}
           class="inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
                  {{if .AnySelected}}cursor-pointer border-slate-200 bg-white text-slate-600 hover:bg-slate-50
                  {{else}}cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300{{end}}">

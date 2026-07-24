@@ -95,24 +95,6 @@ type dailyColumnView struct {
 // column is appended after these, only when it holds at least one card.
 var dailyBoardOrder = []string{"Refinement", "Ready To Do", "In Progress", "Review / Testing", store.DailyColumnDone}
 
-// dailyAssigneeAvatar is one toggle in the Daily assignee avatar bar: a named
-// active-sprint assignee or the trailing Unassigned chip. Value is the
-// ?assignee= param it carries (the display name, or the unassigned sentinel);
-// Assignee/AvatarURL/Initials are the trio the shared card-avatar partial renders
-// (the Unassigned chip leaves Assignee empty so it draws the neutral circle).
-// Selected marks the chip full-colour + ringed (dimmed otherwise). ToggleHref is
-// the /daily/results URL that flips this chip while preserving the rest of the
-// selection — server-driven, so no client state is needed.
-type dailyAssigneeAvatar struct {
-	Value      string
-	Name       string // tooltip label ("Unassigned" or the display name)
-	Assignee   string // raw name for card-avatar ("" for the Unassigned chip)
-	AvatarURL  string
-	Initials   string
-	Selected   bool
-	ToggleHref string
-}
-
 // dailyPresetView is one working-day preset button: a stable Key for the URL and
 // testids, a display Label (the day-before button's is its full weekday name), a
 // Title showing the concrete date it maps to (hover disambiguation), plus
@@ -147,7 +129,7 @@ type dailyRangeResult struct {
 type dailyView struct {
 	SprintName string
 	HasSprint  bool
-	Assignees  []dailyAssigneeAvatar
+	Assignees  []assigneeChip
 	// Selected is the current assignee selection as the values to preserve across a
 	// preset/range change (the hidden ?assignee= inputs). AnySelected enables the
 	// Clear affordance; false is also the "zero selected = all" default.
@@ -218,17 +200,17 @@ func (s *Server) dailyView(q url.Values) (dailyView, error) {
 	// trailing Unassigned chip. Each chip's ToggleHref flips just that chip against
 	// the current selection.
 	for _, a := range assignees {
-		view.Assignees = append(view.Assignees, dailyAssigneeAvatar{
+		view.Assignees = append(view.Assignees, assigneeChip{
 			Value: a.Name, Name: a.Name, Assignee: a.Name,
 			AvatarURL: a.AvatarURL, Initials: avatarInitials(a.Name),
 			Selected:   selectedSet[a.Name],
-			ToggleHref: dailyToggleHref(selected, a.Name, selectedSet[a.Name]),
+			ToggleHref: assigneeToggleHref("/daily/results", selected, a.Name, selectedSet[a.Name]),
 		})
 	}
-	view.Assignees = append(view.Assignees, dailyAssigneeAvatar{
+	view.Assignees = append(view.Assignees, assigneeChip{
 		Value: dailyAssigneeUnassigned, Name: "Unassigned", Assignee: "",
 		Selected:   selectedSet[dailyAssigneeUnassigned],
-		ToggleHref: dailyToggleHref(selected, dailyAssigneeUnassigned, selectedSet[dailyAssigneeUnassigned]),
+		ToggleHref: assigneeToggleHref("/daily/results", selected, dailyAssigneeUnassigned, selectedSet[dailyAssigneeUnassigned]),
 	})
 
 	// With no active sprint there is nothing to query; the template shows the
@@ -266,32 +248,6 @@ func dedupeAssignees(values []string) []string {
 		out = append(out, v)
 	}
 	return out
-}
-
-// dailyToggleHref builds the /daily/results URL that flips one chip against the
-// current selection: removing it when it is already selected, adding it
-// otherwise. The range (preset/from/to) is carried separately via hx-include, so
-// only the resulting ?assignee= set is encoded here; an empty result (deselecting
-// the last chip) is the bare path, i.e. "all".
-func dailyToggleHref(current []string, value string, selected bool) string {
-	var next []string
-	if selected {
-		for _, v := range current {
-			if v != value {
-				next = append(next, v)
-			}
-		}
-	} else {
-		next = append(append(next, current...), value)
-	}
-	if len(next) == 0 {
-		return "/daily/results"
-	}
-	vals := url.Values{}
-	for _, v := range next {
-		vals.Add("assignee", v)
-	}
-	return "/daily/results?" + vals.Encode()
 }
 
 // dailyBoard groups the store's recency-sorted board cards into the fixed
