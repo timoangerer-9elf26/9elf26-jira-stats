@@ -914,6 +914,29 @@
 </div>
 {{end}}
 
+{{/* no-estimate-toggle is the compact Board no-estimate filter control (#158): a
+     single toggle that lenses the Board onto cards with no estimate (a
+     data-quality view for finding unsized tickets). Kept small so it does not
+     crowd the header. It is a server-driven toggle like the assignee chips: it
+     hx-GETs its ToggleHref — the results URL encoding the state that RESULTS from
+     flipping it — and swaps the caller's panel, so the control re-renders pressed
+     or not. The href already carries its own resulting state, so it hx-includes
+     only the OTHER filters (via IncludeAttr), never its own param. On reads as a
+     filled dark pill with aria-pressed; off is a plain outlined pill. Takes a
+     noEstimateToggleView (Prefix, On, ToggleHref, IncludeAttr). */}}
+{{define "no-estimate-toggle"}}
+<div data-testid="{{.Prefix}}" class="flex items-center">
+  <button type="button" data-testid="{{.Prefix}}-toggle"
+          {{if .On}}aria-pressed="true"{{end}}
+          hx-get="{{.ToggleHref}}" {{.IncludeAttr}}
+          class="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
+                 {{if .On}}border-slate-900 bg-slate-900 text-white hover:bg-slate-800
+                 {{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
+    No estimates
+  </button>
+</div>
+{{end}}
+
 {{/* daily-board-header is the section heading and status row within the page's
      single sticky region. It stays outside daily-board's overflow ancestor;
      daily-board mirrors its horizontal scrollLeft here to keep the matching
