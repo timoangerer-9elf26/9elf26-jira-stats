@@ -80,6 +80,39 @@ func TestBoardRendersAssigneeFilterChrome(t *testing.T) {
 	}
 }
 
+// #186: the assignee avatar bar sits at the far right edge of the Board filter
+// bar (mirroring Daily) — pushed right by a real ml-auto utility, with the
+// no-estimate and active-24h toggles staying left-aligned before it in the DOM.
+func TestBoardAssigneeBarIsRightAligned(t *testing.T) {
+	app := newBoardApp(t, boardAssigneeFixture())
+	body := get(t, app.URL+"/board")
+
+	// The assignee bar is wrapped in a right-pushed group using the ml-auto
+	// utility (not an inline margin-left style).
+	if !strings.Contains(body, `class="ml-auto"`) {
+		t.Errorf("assignee bar should be pushed right via an ml-auto utility\n%s", body)
+	}
+	if strings.Contains(body, "margin-left:auto") || strings.Contains(body, "margin-left: auto") {
+		t.Errorf("right-alignment must use ml-auto, not an inline margin-left style\n%s", body)
+	}
+
+	// DOM order inside the filter bar: both toggles come before the assignee bar,
+	// so the toggles stay left-aligned and the avatar bar is the rightmost control.
+	noEstimate := strings.Index(body, `data-testid="board-no-estimate"`)
+	active24h := strings.Index(body, `data-testid="board-active-24h"`)
+	assignee := strings.Index(body, `data-testid="board-assignee-bar"`)
+	if noEstimate < 0 || active24h < 0 || assignee < 0 {
+		t.Fatalf("expected all three Board filter controls to render\n%s", body)
+	}
+	if !(noEstimate < assignee && active24h < assignee) {
+		t.Errorf("assignee bar (%d) should render after the no-estimate (%d) and active-24h (%d) toggles", assignee, noEstimate, active24h)
+	}
+	// The toggles keep their existing relative order (no-estimate then active-24h).
+	if !(noEstimate < active24h) {
+		t.Errorf("no-estimate (%d) should stay before active-24h (%d)", noEstimate, active24h)
+	}
+}
+
 // AC2: /board/results is a fragment (no full HTML document) that renders the
 // filtered board and is the HTMX swap target.
 func TestBoardResultsIsFragment(t *testing.T) {
