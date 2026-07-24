@@ -763,8 +763,9 @@
      of the per-card partial. The badge is coloured by movement kind
      (finished=emerald, advanced=sky, pulled-back=amber); a created-here card with
      no movement uses a neutral slate. All colours are inline hexes because
-     output.css is a precompiled build with no per-kind utilities and cannot be
-     rebuilt in the workspace. */}}
+     output.css is a committed build (regenerated via `make css` / `make generate`,
+     verified by `make verify-css`) that carries no per-kind utilities for these
+     badges. */}}
 {{define "daily-board-style"}}
 <style>
   .daily-origin { display:flex; align-items:center; gap:.3rem; min-width:0; font-size:.6875rem; font-weight:600; padding:.2rem .45rem; border-radius:.375rem; background:#f1f5f9; color:#475569; }
@@ -784,10 +785,11 @@
      control fires its own HTMX GET that swaps the whole #daily-panel, so the
      controls always reflect the current selection.
 
-     The right-align (margin-left:auto) and the wider inter-control gap use inline
-     styles rather than Tailwind utilities: output.css is a precompiled build with
-     no ml-auto / gap-6 rule and can't be regenerated in the workspace. Keep them
-     inline unless the compiled CSS gains those utilities.
+     The right-align (margin-left:auto) and the wider inter-control gap currently
+     use inline styles rather than Tailwind utilities. output.css is a committed
+     build (regenerated via `make css` / `make generate`, verified by
+     `make verify-css`); these particular rules just haven't been converted yet.
+     Left inline for now — a follow-up can switch them to utilities.
 
      Mode disambiguation is by which params the trigger sends. A preset button
      GETs ?preset=<key> (no from/to) → preset mode. Editing From/Until GETs
