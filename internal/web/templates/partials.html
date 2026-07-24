@@ -239,7 +239,7 @@
     <span class="font-mono text-xs font-semibold text-slate-500" data-testid="card:{{.Key}}:key">{{.Key}}</span>
     {{template "type-badge" (dict "Type" .Type "Testid" (printf "card:%s:type" .Key))}}
   </div>
-  <p class="mt-1.5 text-sm text-slate-800" data-testid="card:{{.Key}}:title">{{.Summary}}</p>
+  <p class="mt-1.5 break-words text-sm text-slate-800" data-testid="card:{{.Key}}:title">{{.Summary}}</p>
   {{template "card-epic" .}}
   {{template "card-status" .}}
   <div class="mt-2 flex items-center justify-between gap-2">
