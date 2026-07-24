@@ -230,13 +230,17 @@ func TestReviewNowPinsDateViews(t *testing.T) {
 	}
 }
 
-// TestVersionStampIsServedAndShownInFooter builds the binary stamped with a
+// TestVersionStampIsServedAndShownInMarker builds the binary stamped with a
 // release version via -ldflags (the real Makefile path) and asserts the running
-// app reports it: GET /version returns exactly the stamped string, and the same
-// value appears in a main view's footer (docs/adr/0006). This exercises the full
-// stamp → endpoint → footer chain the deploy health check relies on.
-func TestVersionStampIsServedAndShownInFooter(t *testing.T) {
-	const want = "v2026.07.23.142 (a1b2c3d)"
+// app reports it: GET /version returns exactly the full stamped "tag (sha)"
+// string (docs/adr/0006 health check), while the nav marker shows the CalVer tag
+// alone — the git short SHA is trimmed for display only (#164). This exercises
+// the full stamp → endpoint → marker chain the deploy health check relies on.
+func TestVersionStampIsServedAndShownInMarker(t *testing.T) {
+	const (
+		want    = "v2026.07.23.142 (a1b2c3d)"
+		wantTag = "v2026.07.23.142"
+	)
 	base := launchBinary(t, buildBinaryLdflags(t, want))
 
 	if code, body := get(t, base+"/version"); code != http.StatusOK {
@@ -247,8 +251,12 @@ func TestVersionStampIsServedAndShownInFooter(t *testing.T) {
 
 	if code, body := get(t, base+"/sprint"); code != http.StatusOK {
 		t.Fatalf("GET /sprint: got status %d, want 200", code)
-	} else if !strings.Contains(body, want) {
-		t.Fatalf("/sprint: footer missing stamped version %q", want)
+	} else if !strings.Contains(body, `data-testid="version-marker"`) {
+		t.Fatalf("/sprint: version-marker not present")
+	} else if !strings.Contains(body, wantTag) {
+		t.Fatalf("/sprint: marker missing CalVer tag %q", wantTag)
+	} else if strings.Contains(body, "(a1b2c3d)") {
+		t.Fatalf("/sprint: marker should not show the git SHA")
 	}
 }
 
