@@ -117,7 +117,7 @@ type Server struct {
 	loc             *time.Location
 	velocitySprints int
 	jiraBaseURL     string
-	// version is the build identity reported by GET /version and the UI footer
+	// version is the build identity reported by GET /version and the nav marker
 	// (docs/adr/0006). It defaults to the stamped internal/version.Version and is
 	// overridable via WithVersion so tests can assert an injected value.
 	version string
@@ -181,10 +181,10 @@ func WithAuth(email, password string) Option {
 }
 
 // WithVersion overrides the build identity reported by GET /version and shown
-// in the UI footer (docs/adr/0006). Left unset, the server reports the value
+// in the nav marker (docs/adr/0006). Left unset, the server reports the value
 // stamped into internal/version.Version at build time ("dev" for an unstamped
 // build). An empty string is ignored, keeping the default. Tests use this to
-// assert the endpoint and footer surface an injected value.
+// assert the endpoint and marker surface an injected value.
 func WithVersion(v string) Option {
 	return func(s *Server) {
 		if v != "" {
@@ -324,9 +324,14 @@ func humanizeAgo(d time.Duration) string {
 // the logout control only when there is a session to end.
 func (s *Server) templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"dict":         dict,
-		"authEnabled":  func() bool { return s.auth != nil },
-		"buildVersion": func() string { return s.version },
+		"dict":        dict,
+		"authEnabled": func() bool { return s.auth != nil },
+		// displayVersion is the nav marker's build-identity label: the stamped
+		// version with the git short SHA trimmed off, so the UI shows the CalVer
+		// tag alone (#164). The full "tag (sha)" string still stays reachable at
+		// GET /version (the deploy health check asserts equality against it) — this
+		// trim is display-only.
+		"displayVersion": func() string { return trimVersionSHA(s.version) },
 		// render executes a named partial and returns its HTML, so a caller can
 		// dispatch on a template name resolved at render time — html/template's
 		// {{template}} needs a static name. The Board filter chrome uses it to range
@@ -348,6 +353,18 @@ func (s *Server) renderPartial(name string, data any) (template.HTML, error) {
 		return "", err
 	}
 	return template.HTML(buf.String()), nil
+}
+
+// trimVersionSHA drops the trailing " (sha)" from a build identity so the nav
+// marker shows the CalVer tag alone (#164), e.g. "v2026.07.24.162 (abc1234)" →
+// "v2026.07.24.162". A value with no SHA suffix — notably the "dev" default of
+// an unstamped local build — passes through unchanged. Display-only: GET
+// /version still serves the full "tag (sha)" string.
+func trimVersionSHA(v string) string {
+	if tag, _, found := strings.Cut(v, " ("); found {
+		return tag
+	}
+	return v
 }
 
 func dict(pairs ...any) (map[string]any, error) {

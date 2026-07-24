@@ -52,11 +52,15 @@ func TestServesEmbeddedAssetsWithoutCDN(t *testing.T) {
 }
 
 // assertOrder fails unless each needle appears in body in the given order.
-// TestVersionEndpointReportsInjectedValue asserts GET /version serves the
-// injected build identity unauthenticated (docs/adr/0006 health check) and that
-// the same value surfaces in a main view's footer.
+// TestVersionEndpointReportsInjectedValue asserts GET /version serves the full
+// injected build identity unauthenticated (docs/adr/0006 health check), while
+// the nav marker surfaces the CalVer tag alone — the git short SHA is trimmed
+// for display only (#164).
 func TestVersionEndpointReportsInjectedValue(t *testing.T) {
-	const want = "v2026.07.23.142 (a1b2c3d)"
+	const (
+		want    = "v2026.07.23.142 (a1b2c3d)"
+		wantTag = "v2026.07.23.142"
+	)
 	app := newTestApp(t, jira.NewFakeClient(), web.WithVersion(want))
 
 	resp, err := http.Get(app.URL + "/version")
@@ -75,8 +79,15 @@ func TestVersionEndpointReportsInjectedValue(t *testing.T) {
 		t.Fatalf("GET /version body = %q, want %q", got, want)
 	}
 
-	if page := get(t, app.URL+"/sprint"); !strings.Contains(page, want) {
-		t.Fatalf("version footer marker %q not found in /sprint page:\n%s", want, page)
+	page := get(t, app.URL+"/sprint")
+	if !strings.Contains(page, `data-testid="version-marker"`) {
+		t.Fatalf("version-marker not found in /sprint page:\n%s", page)
+	}
+	if !strings.Contains(page, wantTag) {
+		t.Fatalf("version marker %q not found in /sprint page:\n%s", wantTag, page)
+	}
+	if strings.Contains(page, "(a1b2c3d)") {
+		t.Fatalf("version marker should not show the git SHA, but /sprint page contains it:\n%s", page)
 	}
 }
 

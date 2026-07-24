@@ -31,6 +31,7 @@
   {{template "resync-control" .}}
   {{if authEnabled}}{{template "logout-control" .}}{{end}}
 </nav>
+{{template "version-marker"}}
 {{end}}
 
 {{/* logout-control is the shared nav's logout button, rendered only when the
@@ -175,14 +176,17 @@
 </header>
 {{end}}
 
-{{/* version-footer is the small, unobtrusive build-identity marker shown at the
-     bottom of every main view (docs/adr/0006): it answers "which build is this?"
-     at a glance. buildVersion reads the server's stamped version (the same value
-     GET /version serves); an unstamped local build reads "dev". Takes no data. */}}
-{{define "version-footer"}}
-<footer class="mt-10 border-t border-slate-200 pt-3 text-center text-xs text-slate-400">
-  <span data-testid="version-footer">{{buildVersion}}</span>
-</footer>
+{{/* version-marker is the small, unobtrusive build-identity marker shown
+     right-aligned just below the shared nav divider on every view (#164,
+     docs/adr/0006): it answers "which build is this?" at a glance. displayVersion
+     reads the server's stamped version with the git short SHA trimmed off, so the
+     UI shows the CalVer tag alone (e.g. "v2026.07.24.162"); an unstamped local
+     build reads "dev". The full "tag (sha)" string still lives at GET /version.
+     Rendered from inside "nav", so all five views get it. Takes no data. */}}
+{{define "version-marker"}}
+<div class="mt-1 text-right text-xs text-slate-400">
+  <span data-testid="version-marker">{{displayVersion}}</span>
+</div>
 {{end}}
 
 {{/* app-error is the friendly full-page error state shown when a rollup query
