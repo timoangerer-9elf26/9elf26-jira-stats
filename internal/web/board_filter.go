@@ -64,6 +64,16 @@ func (s *Server) boardFilters(q url.Values) ([]boardFilter, error) {
 	}, nil
 }
 
+// filterIncludeExceptSelf builds the hx-include attribute a self-encoding control
+// carries so a swap preserves EVERY other filter but not its own param: the
+// control already encodes its own resulting state in its toggle URL, so
+// re-including its own hidden inputs would double-count. Selecting
+// [data-filterparam] except the control's own param does this generically (by
+// attribute), so a newly added filter is preserved without touching this control.
+func filterIncludeExceptSelf(param string) template.HTMLAttr {
+	return template.HTMLAttr(`hx-include="[data-filterparam]:not([name='` + param + `'])"`)
+}
+
 // keepCard reports whether a card survives ALL filters (logical AND), so
 // composing filters simply intersects their predicates.
 func keepCard(filters []boardFilter, card store.BoardCard) bool {
@@ -129,10 +139,8 @@ func (s *Server) assigneeBoardFilter(q url.Values) (boardFilter, error) {
 		ClearHref:   "/board/results",
 		// The chips already encode the full resulting ?assignee= set in their own
 		// URL, so they must NOT re-include the sibling assignee hidden inputs (which
-		// would double-count) — but they must preserve EVERY other filter. Selecting
-		// all filter params except assignee does exactly that, generically, so a new
-		// filter is picked up without touching this control.
-		IncludeAttr: template.HTMLAttr(`hx-include="[data-filterparam]:not([name='assignee'])"`),
+		// would double-count) — but they must preserve EVERY other filter.
+		IncludeAttr: filterIncludeExceptSelf("assignee"),
 	}
 	// One chip per active-sprint assignee (alphabetical, from the store), then the
 	// trailing Unassigned sentinel chip. Each ToggleHref flips just that chip.
@@ -201,9 +209,8 @@ func (s *Server) noEstimateBoardFilter(q url.Values) (boardFilter, error) {
 		ToggleHref: noEstimateToggleHref("/board/results", on),
 		// The toggle encodes its own resulting state in ToggleHref, so it must NOT
 		// re-include its own hidden param (which would fight the href), but it MUST
-		// preserve every other filter. Selecting all filter params except its own
-		// does exactly that, generically — a new filter is picked up for free.
-		IncludeAttr: template.HTMLAttr(`hx-include="[data-filterparam]:not([name='` + noEstimateParam + `'])"`),
+		// preserve every other filter.
+		IncludeAttr: filterIncludeExceptSelf(noEstimateParam),
 	}
 
 	var params []boardFilterParam
