@@ -541,7 +541,13 @@
        form value) — the Board analogue of Daily's always-present preset input. */}}
   <span data-filterparam hidden></span>
   {{range .Filters}}{{range .Params}}<input type="hidden" data-filterparam name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
-  {{range .Filters}}{{render .Control .Data}}{{end}}
+  {{/* Layout only (#186): the toggle filters stay left-aligned in registry order,
+       then the assignee avatar bar is pushed to the far right edge — mirroring the
+       Daily controls — via a real ml-auto utility (no inline style). The Go filter
+       registry order is untouched; only DOM placement changes here, keyed off the
+       assignee control's partial name. */}}
+  {{range .Filters}}{{if ne .Control "assignee-bar"}}{{render .Control .Data}}{{end}}{{end}}
+  {{range .Filters}}{{if eq .Control "assignee-bar"}}<div class="ml-auto">{{render .Control .Data}}</div>{{end}}{{end}}
 </form>
 {{end}}
 
