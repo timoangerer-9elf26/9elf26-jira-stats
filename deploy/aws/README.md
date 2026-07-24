@@ -47,17 +47,32 @@ aws iam create-role \
   --assume-role-policy-document file://oidc-trust-policy.json \
   --description "GitHub Actions OIDC deploy role for jira-stats (ADR 0006, #153)"
 
-# 3. Its least-privilege permissions (inline policy).
-aws iam put-role-policy \
-  --role-name jira-stats-github-deploy \
-  --policy-name jira-stats-deploy \
-  --policy-document file://deploy-role-policy.json
+# 3. Its least-privilege permissions (inline policy) — from the repo root, the
+#    canonical way to (re-)apply the source-controlled policy (see below):
+make apply-deploy-policy
 ```
 
 The resulting role ARN is
 `arn:aws:iam::214519213070:role/jira-stats-github-deploy` — already hard-wired
 into `.github/workflows/oidc-verify.yml` (and reused by the deploy workflow in
 #155).
+
+## Editing the policy → re-apply (drift)
+
+`deploy-role-policy.json` is the source of truth, but IAM won't notice an edit on
+its own: **whenever you change the policy JSON you must re-apply it to the live
+role**, or the role drifts from `main`. The canonical way to reconcile is, from
+the repo root (with tooling-account IAM creds — see "reaching the tooling account"
+below):
+
+```sh
+make apply-deploy-policy
+```
+
+This runs an offline guard first (the policy JSON parses and carries every
+expected `Sid`) before calling `aws iam put-role-policy`, so a malformed edit is
+caught before it touches IAM. CI cannot re-apply — IAM changes are human-run by
+design. Confirm the applied role with the verification workflow below.
 
 ## Verify
 
