@@ -17,8 +17,10 @@ status: accepted
 The Board's estimate pill (a ticket's size — S / M / L / no-estimate) becomes
 editable: clicking it opens a small popover (S · M · L · No estimate) and picking
 a value **writes that estimate back to Jira** immediately, with no confirm step.
-This is the **first and only write path** in an app that has until now been a
-strictly read-only projection of Jira. See `CONTEXT.md` → Estimate edit for the
+This is the **first write path** in an app that has until now been a strictly
+read-only projection of Jira. (It was the *only* one until `docs/adr/0010` added
+[Board transitions](../../CONTEXT.md#board-transition) — that ADR supersedes the
+"sole exception" framing below, and copies this write's shape verbatim.) See `CONTEXT.md` → Estimate edit for the
 term.
 
 ## The non-obvious decisions
@@ -84,9 +86,9 @@ When run without real credentials the app falls back to a canned fake Jira clien
 
 ## Consequences
 
-- **The read-only invariant now has one documented exception.** Any future reader
-  who assumes "this app never writes to Jira" is wrong for exactly this one field
-  on exactly the Board. The invariant is otherwise intact: the store still
+- **The read-only invariant now has a documented exception.** Any future reader
+  who assumes "this app never writes to Jira" is wrong for this field on the
+  board surfaces (and, since `docs/adr/0010`, for a ticket's status too). The invariant is otherwise intact: the store still
   originates all state from Jira reads.
 - **The Jira API token must permit writes.** Basic-auth token inherits the service
   account's Jira permissions; a read-only account will get a 4xx, surfaced via the

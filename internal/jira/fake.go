@@ -36,6 +36,20 @@ type FakeClient struct {
 	// write, so a test can exercise the Board estimate edit's failure path (the
 	// pill reverts and an inline error shows, with Jira left unchanged).
 	WriteErr error
+	// Transitions is the transition set offered for every issue. It defaults to
+	// the live DCAI workflow (DCAITransitions), so the fake carries the same
+	// ambiguity the real one does — including the transition labelled "Done"
+	// that lands in Ready for release, matching no Board column by name.
+	Transitions []Transition
+	// TransitionCalls records every performed transition, so a test can assert
+	// WHICH transition a status write chose (docs/adr/0010).
+	TransitionCalls []TransitionCall
+}
+
+// TransitionCall is one recorded TransitionIssue invocation.
+type TransitionCall struct {
+	Key          string
+	TransitionID string
 }
 
 // NewFakeClient returns a FakeClient loaded with the canned DCAI dataset (issues
@@ -51,7 +65,7 @@ func NewFakeClient() *FakeClient {
 	if err != nil {
 		panic(fmt.Sprintf("jira: invalid canned sprints: %v", err))
 	}
-	return &FakeClient{Issues: issues, Sprints: sprints}
+	return &FakeClient{Issues: issues, Sprints: sprints, Transitions: DCAITransitions()}
 }
 
 // FetchIssues returns the canned issues (or the configured error).
@@ -113,6 +127,54 @@ func (c *FakeClient) UpdateIssueSize(ctx context.Context, key, size string) erro
 	for i := range c.Issues {
 		if c.Issues[i].Key == key {
 			c.Issues[i].Size = size
+			return nil
+		}
+	}
+	return fmt.Errorf("fake jira: issue %q not found", key)
+}
+
+// FetchTransitions offers the same set for every issue, mirroring the live DCAI
+// workflow (which is effectively all-to-all).
+func (c *FakeClient) FetchTransitions(ctx context.Context, key string) ([]Transition, error) {
+	if c.Err != nil {
+		return nil, c.Err
+	}
+	// A zero-valued FakeClient (built as a struct literal, as many tests do)
+	// still offers the DCAI set; an explicitly empty non-nil slice means "Jira
+	// offers this issue nothing", the case a caller must fail cleanly on.
+	if c.Transitions == nil {
+		return DCAITransitions(), nil
+	}
+	return c.Transitions, nil
+}
+
+// TransitionIssue performs a transition in memory: it moves the issue into the
+// transition's target status, so a subsequent FetchIssue (the write path's
+// reconciliation read) returns the moved issue. An unknown transition id is an
+// error, as it is in Jira. WriteErr injects a failed write.
+func (c *FakeClient) TransitionIssue(ctx context.Context, key, transitionID string) error {
+	if c.WriteErr != nil {
+		return c.WriteErr
+	}
+	offered, err := c.FetchTransitions(ctx, key)
+	if err != nil {
+		return err
+	}
+	var target Transition
+	for _, tr := range offered {
+		if tr.ID == transitionID {
+			target = tr
+			break
+		}
+	}
+	if target.ID == "" {
+		return fmt.Errorf("fake jira: unknown transition %q", transitionID)
+	}
+	for i := range c.Issues {
+		if c.Issues[i].Key == key {
+			c.Issues[i].Status = target.ToStatusName
+			c.Issues[i].StatusCategory = target.ToStatusCategory
+			c.TransitionCalls = append(c.TransitionCalls, TransitionCall{Key: key, TransitionID: transitionID})
 			return nil
 		}
 	}

@@ -68,7 +68,10 @@ badge, title, an **editable estimate**, the assignee **avatar**, and the parent
 **epic pill**) placed in its **current** status column, plus a subtle
 **latest-activity timestamp**. The Board deliberately carries **no movement
 chrome** — no origin badge, no [movement-kind](#daily-movement) colour — because
-it is a snapshot, not a movement view; those stay Daily-only.
+it is a snapshot, not a movement view; those stay Daily-only. That holds even
+though cards can be **moved**: the Board is where a user performs a
+[Board transition](#board-transition) (part of it becoming the standup surface),
+but it still renders the resulting state, never the history of getting there.
 
 ## Board filters
 
@@ -316,10 +319,32 @@ ticket's size — S / M / L / no-estimate) is editable on the **Board** and on t
 Picking a value **writes it back to Jira** as the ticket's estimate, immediately,
 with no confirm step. Everywhere else the size is read-only display.
 
-This is the sole exception to the dashboard being a read-only projection of Jira.
-Jira stays the **source of truth**: the edit is a write *to Jira*, not to the
+This is **one of the two ways the dashboard writes to Jira** (the other is a
+[Board transition](#board-transition)); everything else it shows is a read-only
+projection. Jira stays the **source of truth**: the edit is a write *to Jira*, not to the
 local projection — the projection only ever reflects what a Jira read returns, so
 after a successful write the changed ticket is re-read from Jira and the pill
 shows that authoritative value. A failed write leaves Jira (and the pill)
 unchanged. The pill is editable only on those two board surfaces; the size shown
 on the Sprint drill-down stays read-only (see `docs/adr/0005`).
+
+## Board transition
+
+The second way a user can **change** Jira from the dashboard (the first is the
+[estimate edit](#estimate-edit)): moving a ticket on the
+[Board view](#board-view) into a different workflow **status**, written straight
+to Jira with no confirm step. Only statuses Jira actually offers a transition
+into are legal targets; anything else fails and moves nothing. As with the
+estimate edit, Jira stays the source of truth — the transition is written, that
+one ticket is re-read from Jira, and the projection is set from what the read
+returned, so a failed write leaves both Jira and the board unchanged (see
+`docs/adr/0010`).
+
+A Board transition is **not** a [Daily movement](#daily-movement), and the two
+must not be blurred: a Board transition is a status change the app **causes**; a
+Daily movement is the app's **observation** of a status change (whoever or
+whatever made it), classified over a window. The app now both causes and measures
+transitions — one it writes, the other it reads back out of the changelog. A
+Board transition duly shows up afterwards as a Daily movement, and in the
+[Sprint view metrics](#sprint-view-metrics) and [Velocity](#velocity), exactly
+like a transition made in Jira itself.

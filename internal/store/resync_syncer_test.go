@@ -61,6 +61,14 @@ func (c *gatedClient) UpdateIssueSize(context.Context, string, string) error {
 	return nil
 }
 
+func (c *gatedClient) FetchTransitions(context.Context, string) ([]jira.Transition, error) {
+	return jira.DCAITransitions(), nil
+}
+
+func (c *gatedClient) TransitionIssue(context.Context, string, string) error {
+	return nil
+}
+
 func TestTriggerResyncRebuildsProjectionAndGuardsOverlap(t *testing.T) {
 	st := openTempStore(t)
 

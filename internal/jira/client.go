@@ -125,4 +125,10 @@ type Client interface {
 	// "S"/"M"/"L", or "" to clear the estimate (no-estimate). It is the inverse of
 	// the mapSize read mapping.
 	UpdateIssueSize(ctx context.Context, key, size string) error
+	// FetchTransitions reads the workflow transitions Jira currently offers for
+	// the issue, and TransitionIssue performs one by id. Together they are the
+	// status write path (docs/adr/0010): resolve the transition by its TARGET
+	// STATUS ID via TransitionTo, never by its name.
+	FetchTransitions(ctx context.Context, key string) ([]Transition, error)
+	TransitionIssue(ctx context.Context, key, transitionID string) error
 }
