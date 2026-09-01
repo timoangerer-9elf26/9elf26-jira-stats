@@ -99,18 +99,23 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 	if iss.EpicColor != "" {
 		epicColor = iss.EpicColor
 	}
+	var priority any
+	if iss.Priority != "" {
+		priority = iss.Priority
+	}
 	if _, err := tx.Exec(
-		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, assignee_avatar_url, parent_key, epic_color, created_at, creator, synced_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, assignee_avatar_url, parent_key, epic_color, priority, created_at, creator, synced_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
 		     type=excluded.type, summary=excluded.summary, status=excluded.status,
 		     status_category=excluded.status_category, size=excluded.size,
 		     sprint=excluded.sprint, active_sprint=excluded.active_sprint,
 		     assignee=excluded.assignee, assignee_avatar_url=excluded.assignee_avatar_url,
 		     parent_key=excluded.parent_key, epic_color=excluded.epic_color,
+		     priority=excluded.priority,
 		     created_at=excluded.created_at,
 		     creator=excluded.creator, synced_at=excluded.synced_at`,
-		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, assigneeAvatarURL, parentKey, epicColor, createdAt, creator, syncedAt,
+		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, assigneeAvatarURL, parentKey, epicColor, priority, createdAt, creator, syncedAt,
 	); err != nil {
 		return fmt.Errorf("upsert issue %s: %w", iss.Key, err)
 	}

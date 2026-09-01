@@ -53,6 +53,7 @@ type Issue struct {
 	// and is "" elsewhere or when unset. The Board card's epic pill is coloured by
 	// the parent epic's value.
 	EpicColor string
+	Priority  string // Jira priority level: Highest, High, Medium, Low, Lowest ("" when unset)
 	Changelog []ChangelogEntry
 	// SprintChanges is the issue's sprint-membership history: each entering or
 	// leaving of a single sprint, derived from the "Sprint" changelog field. It

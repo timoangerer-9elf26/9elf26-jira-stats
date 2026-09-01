@@ -11,6 +11,9 @@ type PrioIssue struct {
 	Type    string // Epic, Task, Bug, Story, … (whatever Jira reported)
 	Summary string
 	Status  string // the issue's current workflow status, verbatim
+	// Priority is the Jira level (Highest / High / Medium / Low / Lowest); empty
+	// for a row synced before priority joined the projection.
+	Priority string
 }
 
 // PrioIssues returns EVERY issue in the projection as a Prio row, ordered by
@@ -20,7 +23,7 @@ type PrioIssue struct {
 // ActiveSprintBoard rather than pushing filter logic into the store.
 func (s *Store) PrioIssues() ([]PrioIssue, error) {
 	const query = `
-		SELECT key, type, summary, status
+		SELECT key, type, summary, status, COALESCE(priority, '')
 		FROM issue
 		ORDER BY key`
 
@@ -33,7 +36,7 @@ func (s *Store) PrioIssues() ([]PrioIssue, error) {
 	var issues []PrioIssue
 	for rows.Next() {
 		var issue PrioIssue
-		if err := rows.Scan(&issue.Key, &issue.Type, &issue.Summary, &issue.Status); err != nil {
+		if err := rows.Scan(&issue.Key, &issue.Type, &issue.Summary, &issue.Status, &issue.Priority); err != nil {
 			return nil, fmt.Errorf("scan prio issue: %w", err)
 		}
 		issues = append(issues, issue)

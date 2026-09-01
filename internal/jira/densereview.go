@@ -127,6 +127,23 @@ func denseIssues() []Issue {
 	issues = append(issues, denseEpics()...)
 	issues = append(issues, denseKW29Issues()...)
 	issues = append(issues, denseHistoricIssues()...)
+	return withDensePriorities(issues)
+}
+
+// densePriorities cycles the five Jira levels so the Prio view's priority icons
+// and Highest→Lowest sort have something to show. Live DCAI sets a priority on
+// every issue; the fixture mirrors that by leaving none empty.
+var densePriorities = []string{"Highest", "High", "Medium", "Low", "Lowest"}
+
+// withDensePriorities stamps a deterministic priority on every fixture issue that
+// does not already carry one, so re-running the fixture always yields the same
+// order.
+func withDensePriorities(issues []Issue) []Issue {
+	for i := range issues {
+		if issues[i].Priority == "" {
+			issues[i].Priority = densePriorities[i%len(densePriorities)]
+		}
+	}
 	return issues
 }
 

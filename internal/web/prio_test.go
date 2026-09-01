@@ -19,11 +19,13 @@ import (
 // sprint-scoped views drop must still show up as a Prio row.
 func prioFixture() *jira.FakeClient {
 	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
-		{Key: "DCAI-1", Type: "Epic", Summary: "Big theme", Status: "In Progress", StatusCategory: "In Progress"},
-		{Key: "DCAI-2", Type: "Story", Summary: "Refine the widget", Status: "Refinement", StatusCategory: "To Do", Sprint: "KW29", ActiveSprint: "KW29"},
-		{Key: "DCAI-3", Type: "Task", Summary: "Wire the gadget", Status: "In Progress", StatusCategory: "In Progress", Sprint: "KW29", ActiveSprint: "KW29"},
-		{Key: "DCAI-4", Type: "Bug", Summary: "Fix the sprocket", Status: "Triage", StatusCategory: "To Do"},
-		{Key: "DCAI-5", Type: "Story", Summary: "Old shipped work", Status: "Released / Deployed", StatusCategory: "Done", Sprint: "KW28"},
+		{Key: "DCAI-1", Type: "Epic", Summary: "Big theme", Status: "In Progress", StatusCategory: "In Progress", Priority: "Medium"},
+		{Key: "DCAI-2", Type: "Story", Summary: "Refine the widget", Status: "Refinement", StatusCategory: "To Do", Sprint: "KW29", ActiveSprint: "KW29", Priority: "Highest"},
+		{Key: "DCAI-3", Type: "Task", Summary: "Wire the gadget", Status: "In Progress", StatusCategory: "In Progress", Sprint: "KW29", ActiveSprint: "KW29", Priority: "Low"},
+		{Key: "DCAI-4", Type: "Bug", Summary: "Fix the sprocket", Status: "Triage", StatusCategory: "To Do", Priority: "Highest"},
+		{Key: "DCAI-5", Type: "Story", Summary: "Old shipped work", Status: "Released / Deployed", StatusCategory: "Done", Sprint: "KW28", Priority: "Lowest"},
+		{Key: "DCAI-6", Type: "Task", Summary: "Patch the flange", Status: "Ready To Do", StatusCategory: "To Do", Priority: "High"},
+		{Key: "DCAI-7", Type: "Task", Summary: "Priority-less oddity", Status: "Triage", StatusCategory: "To Do"},
 	}}
 }
 
@@ -56,18 +58,9 @@ func TestPrioListsEveryIssueWithTypeNameStatus(t *testing.T) {
 			t.Errorf("prio missing %q\n%s", w, body)
 		}
 	}
-	if n := strings.Count(body, `data-testid="prio-row"`); n != 5 {
-		t.Errorf("prio rendered %d rows, want 5", n)
+	if n := strings.Count(body, `data-testid="prio-row"`); n != 7 {
+		t.Errorf("prio rendered %d rows, want 7", n)
 	}
-
-	// Rows are ordered by issue key.
-	assertOrder(t, body,
-		`data-key="DCAI-1"`,
-		`data-key="DCAI-2"`,
-		`data-key="DCAI-3"`,
-		`data-key="DCAI-4"`,
-		`data-key="DCAI-5"`,
-	)
 
 	// The Epic badge is its own variant, not the neutral fallback.
 	if !strings.Contains(body, `bg-violet-100 text-violet-700`) {
@@ -106,8 +99,8 @@ func TestPrioResultsServesTheFragment(t *testing.T) {
 	if strings.Contains(fragment, "<!DOCTYPE html>") {
 		t.Errorf("/prio/results returned a full page, want a fragment\n%s", fragment)
 	}
-	if n := strings.Count(fragment, `data-testid="prio-row"`); n != 5 {
-		t.Errorf("/prio/results rendered %d rows, want 5", n)
+	if n := strings.Count(fragment, `data-testid="prio-row"`); n != 7 {
+		t.Errorf("/prio/results rendered %d rows, want 7", n)
 	}
 	for _, want := range []string{"Big theme", "Fix the sprocket", `data-testid="prio:DCAI-5:status">Released / Deployed<`} {
 		if !strings.Contains(fragment, want) {
@@ -147,5 +140,56 @@ func TestPrioEmptyStateBeforeFirstSync(t *testing.T) {
 	}
 	if strings.Contains(body, `data-testid="prio-row"`) {
 		t.Errorf("prio rendered rows against an empty projection\n%s", body)
+	}
+}
+
+func TestPrioRendersPriorityColumnWithIconAndName(t *testing.T) {
+	app := newTestApp(t, prioFixture())
+	body := get(t, app.URL+"/prio")
+
+	assertOrder(t, body,
+		`data-testid="prio-col-name"`,
+		`data-testid="prio-col-priority"`,
+		`data-testid="prio-col-status"`,
+	)
+
+	wants := []string{
+		`data-testid="prio:DCAI-2:priority-name">Highest<`,
+		`data-testid="prio:DCAI-6:priority-name">High<`,
+		`data-testid="prio:DCAI-1:priority-name">Medium<`,
+		`data-testid="prio:DCAI-3:priority-name">Low<`,
+		`data-testid="prio:DCAI-5:priority-name">Lowest<`,
+		`data-testid="prio:DCAI-2:priority-icon"`,
+		`data-testid="prio:DCAI-5:priority-icon"`,
+		// The icon's colour rides in an inline style; html/template blanks an
+		// unsafe CSS value to #ZgotmplZ, so assert the hex survives.
+		`style="stroke:#E11D48"`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(body, w) {
+			t.Errorf("prio missing %q\n%s", w, body)
+		}
+	}
+
+	// An issue with no priority (should not occur in DCAI) renders no icon.
+	if strings.Contains(body, `data-testid="prio:DCAI-7:priority-icon"`) {
+		t.Errorf("prio drew a severity icon for an issue with no priority\n%s", body)
+	}
+}
+
+func TestPrioSortsHighestToLowestTiesByKey(t *testing.T) {
+	app := newTestApp(t, prioFixture())
+
+	for _, path := range []string{"/prio", "/prio/results"} {
+		body := get(t, app.URL+path)
+		assertOrder(t, body,
+			`data-key="DCAI-2"`, // Highest
+			`data-key="DCAI-4"`, // Highest, tie broken by key
+			`data-key="DCAI-6"`, // High
+			`data-key="DCAI-1"`, // Medium
+			`data-key="DCAI-3"`, // Low
+			`data-key="DCAI-5"`, // Lowest
+			`data-key="DCAI-7"`, // no priority sorts last
+		)
 	}
 }
