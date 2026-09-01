@@ -25,7 +25,7 @@ const (
 // issueFields is the `fields` query the issue reads ask Jira for — the single
 // source of truth for both the JQL search and the single-issue re-read, so the
 // two can never drift (a field missing here decodes as empty everywhere).
-const issueFields = "summary,issuetype,status,assignee,created,creator,parent,priority," +
+const issueFields = "summary,issuetype,status,assignee,created,creator,parent,priority,labels," +
 	sizeFieldID + "," + sprintFieldID + "," + epicColorFieldID
 
 // searchPageSize is the JQL search page size; changelogPageSize the per-issue
@@ -248,6 +248,7 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		ParentKey:         parentKey(dto.Fields.Parent),
 		EpicColor:         dto.Fields.EpicColor,
 		Priority:          priorityName(dto.Fields.Priority),
+		Labels:            dto.Fields.Labels,
 		CreatedAt:         createdAt,
 		Creator:           assigneeName(dto.Fields.Creator),
 		Changelog:         entries,
@@ -384,6 +385,7 @@ type fieldsDTO struct {
 	Creator   *userDTO     `json:"creator"`           // immutable author (NOT the mutable reporter)
 	Parent    *parentDTO   `json:"parent"`            // parent issue (the Epic for a Task/Bug/Story)
 	Priority  *priorityDTO `json:"priority"`          // standard Jira priority (Highest…Lowest); null only if unset
+	Labels    []string     `json:"labels"`            // standard Jira labels — a bare string array, not objects; [] or absent when unlabelled
 	Size      *selectDTO   `json:"customfield_10040"` // "Estimated Time"
 	Sprint    []sprintDTO  `json:"customfield_10020"` // Sprint
 	EpicColor string       `json:"customfield_10017"` // Epic "Issue color" — a plain string, e.g. "purple" (only on epics; empty/null otherwise)

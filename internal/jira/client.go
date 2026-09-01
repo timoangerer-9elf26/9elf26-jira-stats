@@ -54,6 +54,11 @@ type Issue struct {
 	// the parent epic's value.
 	EpicColor string
 	Priority  string // Jira priority level: Highest, High, Medium, Low, Lowest ("" when unset)
+	// Labels are the issue's Jira labels (fields.labels), in the order Jira
+	// reports them; nil when the issue carries none. Jira labels are whitespace-free
+	// strings. The Prio view renders them as pills and keys its Non-Technical
+	// filter off the exact label "Technical".
+	Labels    []string
 	Changelog []ChangelogEntry
 	// SprintChanges is the issue's sprint-membership history: each entering or
 	// leaving of a single sprint, derived from the "Sprint" changelog field. It

@@ -127,7 +127,7 @@ func denseIssues() []Issue {
 	issues = append(issues, denseEpics()...)
 	issues = append(issues, denseKW29Issues()...)
 	issues = append(issues, denseHistoricIssues()...)
-	return withDensePriorities(issues)
+	return withDenseLabels(withDensePriorities(issues))
 }
 
 // densePriorities cycles the five Jira levels so the Prio view's priority icons
@@ -142,6 +142,32 @@ func withDensePriorities(issues []Issue) []Issue {
 	for i := range issues {
 		if issues[i].Priority == "" {
 			issues[i].Priority = densePriorities[i%len(densePriorities)]
+		}
+	}
+	return issues
+}
+
+// denseLabelSets cycles the label shapes the Prio view's Labels column has to
+// render: the `Technical` label the Non-Technical filter keys off, a couple of
+// multi-label rows that stress the pill wrapping, and — critically — unlabelled
+// issues, which are the common case in live DCAI and must render an empty cell.
+var denseLabelSets = [][]string{
+	nil,
+	{"Technical"},
+	nil,
+	{"Product"},
+	{"Technical", "Product"},
+	nil,
+	{"needs-design", "customer-escalation", "Technical"},
+}
+
+// withDenseLabels stamps a deterministic label set on every fixture issue that
+// does not already carry one, so re-running the fixture always yields the same
+// pills.
+func withDenseLabels(issues []Issue) []Issue {
+	for i := range issues {
+		if len(issues[i].Labels) == 0 {
+			issues[i].Labels = denseLabelSets[i%len(denseLabelSets)]
 		}
 	}
 	return issues

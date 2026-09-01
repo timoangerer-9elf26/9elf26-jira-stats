@@ -16,6 +16,11 @@ type prioRow struct {
 	Priority string       // Jira level: Highest…Lowest ("" when the issue carries none)
 	Icon     priorityIcon // the level's icon; zero when Priority is unknown/empty
 	Href     string       // "<base>/browse/<KEY>", or "" when unconfigured
+	// Labels are the issue's Jira labels, in Jira's order; empty when it carries
+	// none, in which case the Labels cell renders empty. Kept as separate strings
+	// rather than one joined display string so a label stays individually
+	// matchable.
+	Labels []string
 }
 
 // prioView is the /prio page model: every issue in the projection as a flat
@@ -68,6 +73,7 @@ func (s *Server) prioView() (prioView, error) {
 			Priority: issue.Priority,
 			Icon:     priorityIconFor(issue.Priority),
 			Href:     s.jiraIssueURL(issue.Key),
+			Labels:   issue.Labels,
 		})
 	}
 	sortByPriority(rows)

@@ -1169,7 +1169,7 @@
 {{end}}
 
 {{/* prio-table is the Prio view's flat table: one row per issue, columns
-     Type · Name · Priority · Status, sorted priority Highest→Lowest (ties by key). The name links to the Jira issue
+     Type · Name · Priority · Status · Labels, sorted priority Highest→Lowest (ties by key). The name links to the Jira issue
      when a base URL is configured and renders as plain text when it is not,
      matching the board card. Takes a prioView. */}}
 {{define "prio-table"}}
@@ -1186,6 +1186,7 @@
         <th scope="col" class="px-4 py-2" data-testid="prio-col-name">Name</th>
         <th scope="col" class="px-4 py-2" data-testid="prio-col-priority">Priority</th>
         <th scope="col" class="px-4 py-2" data-testid="prio-col-status">Status</th>
+        <th scope="col" class="px-4 py-2" data-testid="prio-col-labels">Labels</th>
       </tr>
     </thead>
     <tbody>
@@ -1197,12 +1198,23 @@
         </td>
         <td class="px-4 py-2 align-top text-slate-700">{{template "priority-cell" .}}</td>
         <td class="px-4 py-2 align-top text-slate-600" data-testid="prio:{{.Key}}:status">{{.Status}}</td>
+        <td class="px-4 py-2 align-top" data-testid="prio:{{.Key}}:labels">{{template "labels-cell" .}}</td>
       </tr>
       {{end}}
     </tbody>
   </table>
 </div>
 {{end}}
+{{end}}
+
+{{/* labels-cell renders one Prio row's Jira labels as small grey pills, in the
+     order Jira reported them — every label, `Technical` included, styled alike.
+     An issue with no labels renders an empty cell (no placeholder), so the
+     column stays quiet on the many unlabelled rows. Takes a prioRow. */}}
+{{define "labels-cell"}}
+{{- range .Labels -}}
+<span class="mr-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600" data-testid="prio:{{$.Key}}:label:{{.}}">{{.}}</span>
+{{- end -}}
 {{end}}
 
 {{/* priority-cell renders one Prio row's priority: the level's icon (a Jira-like

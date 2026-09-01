@@ -20,9 +20,9 @@ import (
 func prioFixture() *jira.FakeClient {
 	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
 		{Key: "DCAI-1", Type: "Epic", Summary: "Big theme", Status: "In Progress", StatusCategory: "In Progress", Priority: "Medium"},
-		{Key: "DCAI-2", Type: "Story", Summary: "Refine the widget", Status: "Refinement", StatusCategory: "To Do", Sprint: "KW29", ActiveSprint: "KW29", Priority: "Highest"},
-		{Key: "DCAI-3", Type: "Task", Summary: "Wire the gadget", Status: "In Progress", StatusCategory: "In Progress", Sprint: "KW29", ActiveSprint: "KW29", Priority: "Low"},
-		{Key: "DCAI-4", Type: "Bug", Summary: "Fix the sprocket", Status: "Triage", StatusCategory: "To Do", Priority: "Highest"},
+		{Key: "DCAI-2", Type: "Story", Summary: "Refine the widget", Status: "Refinement", StatusCategory: "To Do", Sprint: "KW29", ActiveSprint: "KW29", Priority: "Highest", Labels: []string{"needs-design"}},
+		{Key: "DCAI-3", Type: "Task", Summary: "Wire the gadget", Status: "In Progress", StatusCategory: "In Progress", Sprint: "KW29", ActiveSprint: "KW29", Priority: "Low", Labels: []string{"Technical", "Product"}},
+		{Key: "DCAI-4", Type: "Bug", Summary: "Fix the sprocket", Status: "Triage", StatusCategory: "To Do", Priority: "Highest", Labels: []string{"Technical"}},
 		{Key: "DCAI-5", Type: "Story", Summary: "Old shipped work", Status: "Released / Deployed", StatusCategory: "Done", Sprint: "KW28", Priority: "Lowest"},
 		{Key: "DCAI-6", Type: "Task", Summary: "Patch the flange", Status: "Ready To Do", StatusCategory: "To Do", Priority: "High"},
 		{Key: "DCAI-7", Type: "Task", Summary: "Priority-less oddity", Status: "Triage", StatusCategory: "To Do"},
@@ -191,5 +191,72 @@ func TestPrioSortsHighestToLowestTiesByKey(t *testing.T) {
 			`data-key="DCAI-5"`, // Lowest
 			`data-key="DCAI-7"`, // no priority sorts last
 		)
+	}
+}
+
+func TestPrioRendersLabelsColumnAsGreyPills(t *testing.T) {
+	app := newTestApp(t, prioFixture())
+	body := get(t, app.URL+"/prio")
+
+	assertOrder(t, body,
+		`data-testid="prio-col-status"`,
+		`data-testid="prio-col-labels"`,
+	)
+
+	wants := []string{
+		// Every label of an issue renders, in Jira's order, including Technical.
+		`data-testid="prio:DCAI-3:label:Technical">Technical<`,
+		`data-testid="prio:DCAI-3:label:Product">Product<`,
+		`data-testid="prio:DCAI-4:label:Technical">Technical<`,
+		`data-testid="prio:DCAI-2:label:needs-design">needs-design<`,
+		// Grey pill styling: grey fill, grey text.
+		`bg-slate-100`,
+		`text-slate-600`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(body, w) {
+			t.Errorf("prio missing %q\n%s", w, body)
+		}
+	}
+
+	assertOrder(t, body,
+		`data-testid="prio:DCAI-3:label:Technical"`,
+		`data-testid="prio:DCAI-3:label:Product"`,
+	)
+
+	// An issue with no labels renders an empty cell — the cell exists, but holds
+	// no pills.
+	cell := labelsCell(t, body, "DCAI-1")
+	if strings.Contains(cell, "prio:DCAI-1:label:") {
+		t.Errorf("prio rendered a label pill for an unlabelled issue: %q", cell)
+	}
+	if strings.TrimSpace(cell) != "" {
+		t.Errorf("prio labels cell for an unlabelled issue is not empty: %q", cell)
+	}
+}
+
+// labelsCell returns the inner HTML of one row's Labels cell, so a test can
+// assert on what the cell does NOT contain.
+func labelsCell(t *testing.T, body, key string) string {
+	t.Helper()
+	open := `data-testid="prio:` + key + `:labels">`
+	i := strings.Index(body, open)
+	if i < 0 {
+		t.Fatalf("no labels cell for %s\n%s", key, body)
+	}
+	rest := body[i+len(open):]
+	j := strings.Index(rest, "</td>")
+	if j < 0 {
+		t.Fatalf("unterminated labels cell for %s", key)
+	}
+	return rest[:j]
+}
+
+func TestPrioResultsFragmentCarriesLabels(t *testing.T) {
+	app := newTestApp(t, prioFixture())
+	fragment := get(t, app.URL+"/prio/results")
+
+	if !strings.Contains(fragment, `data-testid="prio:DCAI-4:label:Technical">Technical<`) {
+		t.Errorf("/prio/results missing label pills\n%s", fragment)
 	}
 }
