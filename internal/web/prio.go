@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/url"
 	"sort"
 )
 
@@ -23,29 +24,33 @@ type prioRow struct {
 	Labels []string
 }
 
-// prioView is the /prio page model: every issue in the projection as a flat
-// table, sorted priority Highest→Lowest (ties by key). Empty drives the friendly
-// "no tickets" state (an unsynced or genuinely empty projection). Labels and the
-// Prio filters land in later slices; this renders Type · Name · Priority · Status.
+// prioView is the /prio page model: the projection's issues that survive the
+// Prio filters, as a flat table sorted priority Highest→Lowest (ties by key).
+// Filters carries the resolved filter registry so the chrome can render its
+// controls and re-emit their params.
 type prioView struct {
-	Rows  []prioRow
-	Empty bool
+	Rows    []prioRow
+	Filters []prioFilter
+	// Empty is true when no row renders; NoMatch distinguishes the two reasons —
+	// the filters hid everything (true) vs the projection itself is empty (false).
+	Empty   bool
+	NoMatch bool
 }
 
 // handlePrio renders the full standalone Prio page.
 func (s *Server) handlePrio(w http.ResponseWriter, r *http.Request) {
-	s.renderPrio(w, "prio.html")
+	s.renderPrio(w, r, "prio.html")
 }
 
 // handlePrioResults renders the Prio panel fragment (the HTMX swap target), so a
 // later filter change can re-render the chrome and the table together without a
 // full-page reload. Mirrors /board/results.
 func (s *Server) handlePrioResults(w http.ResponseWriter, r *http.Request) {
-	s.renderPrio(w, "prio-panel")
+	s.renderPrio(w, r, "prio-panel")
 }
 
-func (s *Server) renderPrio(w http.ResponseWriter, name string) {
-	view, err := s.prioView()
+func (s *Server) renderPrio(w http.ResponseWriter, r *http.Request, name string) {
+	view, err := s.prioView(r.URL.Query())
 	if err != nil {
 		s.renderError(w)
 		return
@@ -56,15 +61,19 @@ func (s *Server) renderPrio(w http.ResponseWriter, name string) {
 	}
 }
 
-// prioView reads the whole projection and maps it to table rows, preserving the
-// store's issue-key order.
-func (s *Server) prioView() (prioView, error) {
+// prioView reads the whole projection, drops the rows the active filters hide,
+// and maps the rest to table rows.
+func (s *Server) prioView(q url.Values) (prioView, error) {
 	issues, err := s.rollups.PrioIssues()
 	if err != nil {
 		return prioView{}, err
 	}
+	filters := prioFilters(q)
 	rows := make([]prioRow, 0, len(issues))
 	for _, issue := range issues {
+		if !keepPrioIssue(filters, issue) {
+			continue // hidden by a filter
+		}
 		rows = append(rows, prioRow{
 			Key:      issue.Key,
 			Type:     issue.Type,
@@ -77,7 +86,12 @@ func (s *Server) prioView() (prioView, error) {
 		})
 	}
 	sortByPriority(rows)
-	return prioView{Rows: rows, Empty: len(rows) == 0}, nil
+	return prioView{
+		Rows:    rows,
+		Filters: filters,
+		Empty:   len(rows) == 0,
+		NoMatch: len(rows) == 0 && len(issues) > 0,
+	}, nil
 }
 
 // priorityIcon is how one priority level draws in the table: a stroke colour and
