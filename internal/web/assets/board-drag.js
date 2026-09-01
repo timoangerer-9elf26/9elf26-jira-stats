@@ -94,6 +94,7 @@
     clearError(card);
     card.classList.add("bd-pending");
     card.setAttribute("data-move-pending", "true");
+    var applied = false;
 
     fetch("/board/move", {
       method: "POST",
@@ -102,10 +103,19 @@
       body: body.toString(),
     })
       .then(function (res) {
+        // Set by the handler once the transition is written, whatever happens to
+        // the render that follows. It is the only reliable "did the move land?"
+        // signal: the response can be an error while the move is a fact.
+        applied = res.headers.get("X-Board-Move") === "applied";
         // A redirect means the session expired and this is the login page, not a
-        // board: treat it as a failed move rather than swapping a login form
-        // into the board panel.
-        if (!res.ok || res.redirected) throw new Error("move failed");
+        // board. Go there rather than swapping a login form into the board panel
+        // or leaving the user staring at a move error with no way forward — the
+        // same destination HX-Redirect sends the HTMX routes to (PR #184).
+        if (res.redirected) {
+          window.location.assign(res.url);
+          throw new Error("session expired");
+        }
+        if (!res.ok) throw new Error("move failed");
         return res.text();
       })
       .then(function (html) {
@@ -116,12 +126,20 @@
         bind();
       })
       .catch(function () {
+        card.classList.remove("bd-pending");
+        card.removeAttribute("data-move-pending");
+        // The move landed but the response was unusable (the board could not be
+        // re-rendered). Snapping the card back would tell the user the opposite
+        // of what happened, so reload instead: the full render either shows the
+        // moved board or fails honestly on the error page.
+        if (applied) {
+          window.location.reload();
+          return;
+        }
         // Snap back: put the card where it came from, exactly where it was —
         // unless the panel has since been re-rendered under us (another drop
         // landed first), in which case that server-rendered board is already
         // authoritative and resurrecting a detached card would be a lie.
-        card.classList.remove("bd-pending");
-        card.removeAttribute("data-move-pending");
         if (!fromList.isConnected) return;
         var sibling = fromList.children[oldIndex] || null;
         fromList.insertBefore(card, sibling);

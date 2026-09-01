@@ -354,7 +354,12 @@ drop means one thing only, "change the status". A drop is
 **server-authoritative** — the card sits **pending** (muted) in the target
 column while the write is in flight, then the board re-renders from the
 post-write re-read; a failure snaps the card back to its origin column with a
-generic inline message. The re-render passes through the active
+generic inline message. The two ways a drop can fail are answered differently: a
+**failed write** changes nothing and snaps back, while a write that landed but
+could not be re-rendered is never reported as a failed move — the board reloads
+instead, so the user sees either the moved board or an honest error page, never a
+card sitting in its old column while Jira disagrees. A drop that finds an expired
+session goes to the login page rather than showing a move error. The re-render passes through the active
 [Board filters](#board-filters), so a moved card that no longer matches one is
 simply absent from it.
 
