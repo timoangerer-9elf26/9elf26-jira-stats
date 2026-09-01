@@ -19,17 +19,9 @@ import (
 // round-trip inputs. Adding a filter (#158 no-estimate, #159 active-in-24h) is
 // therefore purely additive: implement a constructor returning a boardFilter and
 // append it to boardFilters, plus a Control partial. No route, handler, fragment
-// or URL plumbing changes.
-
-// boardFilterParam is one URL param a filter contributes to round-tripping: a
-// name/value re-emitted as a hidden <input data-filterparam> inside the filter
-// form, so a change to ANY control preserves every other filter's state. The
-// [data-filterparam] marker lets a control hx-include the sibling filters
-// generically (by attribute), never by hard-coding their param names.
-type boardFilterParam struct {
-	Name  string
-	Value string
-}
+// or URL plumbing changes. The pieces this registry shares with the Prio one
+// (filterParam, the hx-include selectors, the two-state toggle control) live in
+// filter.go.
 
 // boardFilter is one pluggable Board filter, fully resolved from the request
 // query. See the package-level scaffolding note above.
@@ -41,7 +33,7 @@ type boardFilter struct {
 	Data    any
 	// Params are the filter's current URL params, re-emitted as hidden inputs so a
 	// change to another filter round-trips this one unchanged.
-	Params []boardFilterParam
+	Params []filterParam
 	// Keep reports whether a card survives this filter (true = shown). Filtering
 	// only ever hides cards; the column set is fixed.
 	Keep func(store.BoardCard) bool
@@ -72,26 +64,9 @@ func (s *Server) boardFilters(q url.Values) ([]boardFilter, error) {
 	}, nil
 }
 
-// filterIncludeExceptSelf builds the hx-include attribute a self-encoding control
-// carries so a swap preserves EVERY other filter but not its own param: the
-// control already encodes its own resulting state in its toggle URL, so
-// re-including its own hidden inputs would double-count. Selecting
-// [data-filterparam] except the control's own param does this generically (by
-// attribute), so a newly added filter is preserved without touching this control.
-func filterIncludeExceptSelf(param string) template.HTMLAttr {
-	return template.HTMLAttr(`hx-include="[data-filterparam]:not([name='` + param + `'])"`)
-}
-
-// filterIncludeAll includes EVERY filter param, the caller's own included. The
-// toggle filters cannot use it — their href already encodes the state that
-// results from flipping them, so re-sending their current param would fight the
-// href (hence filterIncludeExceptSelf). A text box is the opposite case: its
-// value lives in the control itself, so the request must carry it (#193).
-const filterIncludeAll template.HTMLAttr = `hx-include="[data-filterparam]"`
-
-// keepCard reports whether a card survives ALL filters (logical AND), so
+// keepBoardCard reports whether a card survives ALL filters (logical AND), so
 // composing filters simply intersects their predicates.
-func keepCard(filters []boardFilter, card store.BoardCard) bool {
+func keepBoardCard(filters []boardFilter, card store.BoardCard) bool {
 	for _, f := range filters {
 		if f.Keep != nil && !f.Keep(card) {
 			return false
@@ -217,9 +192,9 @@ func (s *Server) assigneeBoardFilter(q url.Values) (boardFilter, error) {
 		ToggleHref: assigneeToggleHref("/board/results", selected, dailyAssigneeUnassigned, selectedSet[dailyAssigneeUnassigned]),
 	})
 
-	params := make([]boardFilterParam, 0, len(selected))
+	params := make([]filterParam, 0, len(selected))
 	for _, v := range selected {
-		params = append(params, boardFilterParam{Name: "assignee", Value: v})
+		params = append(params, filterParam{Name: "assignee", Value: v})
 	}
 
 	keep := func(card store.BoardCard) bool {
@@ -242,39 +217,27 @@ const (
 	noEstimateOn    = "1"
 )
 
-// noEstimateToggleView is the model for the compact "No estimates" toggle
-// control (#158): a single server-driven toggle that lenses the Board onto
-// unsized cards (a data-quality view for finding unestimated tickets). On is the
-// current state; ToggleHref is the results URL that flips it; IncludeAttr
-// preserves every OTHER filter on the swap (it replaces only its own param, like
-// the assignee bar). Prefix is the data-testid stem.
-type noEstimateToggleView struct {
-	Prefix      string
-	On          bool
-	ToggleHref  string
-	IncludeAttr template.HTMLAttr
-}
-
 // noEstimateBoardFilter builds the Board's no-estimate toggle from the query: the
 // compact control, a Keep predicate that (when on) hides any card carrying an
 // estimate, and the round-trip param. Default off (no param) shows every card, so
-// it composes with the assignee filter as a plain intersection via keepCard.
+// it composes with the assignee filter as a plain intersection via keepBoardCard.
 func (s *Server) noEstimateBoardFilter(q url.Values) (boardFilter, error) {
 	on := q.Get(noEstimateParam) == noEstimateOn
 
-	toggle := noEstimateToggleView{
+	toggle := filterToggleView{
 		Prefix:     "board-no-estimate",
+		Label:      "No estimates",
 		On:         on,
-		ToggleHref: noEstimateToggleHref("/board/results", on),
+		ToggleHref: toggleHref("/board/results", noEstimateParam, noEstimateOn, !on),
 		// The toggle encodes its own resulting state in ToggleHref, so it must NOT
 		// re-include its own hidden param (which would fight the href), but it MUST
 		// preserve every other filter.
 		IncludeAttr: filterIncludeExceptSelf(noEstimateParam),
 	}
 
-	var params []boardFilterParam
+	var params []filterParam
 	if on {
-		params = append(params, boardFilterParam{Name: noEstimateParam, Value: noEstimateOn})
+		params = append(params, filterParam{Name: noEstimateParam, Value: noEstimateOn})
 	}
 
 	keep := func(card store.BoardCard) bool {
@@ -284,17 +247,7 @@ func (s *Server) noEstimateBoardFilter(q url.Values) (boardFilter, error) {
 		return card.Size == "" // on = only cards with no estimate
 	}
 
-	return boardFilter{Control: "no-estimate-toggle", Data: toggle, Params: params, Keep: keep}, nil
-}
-
-// noEstimateToggleHref returns the results URL (rooted at basePath) that flips the
-// toggle: turning it on adds ?no-estimate=1, turning it off drops back to the bare
-// path. Only its own param is encoded; other filters ride along via hx-include.
-func noEstimateToggleHref(basePath string, on bool) string {
-	if on {
-		return basePath // toggling an on filter off yields the bare path
-	}
-	return basePath + "?" + noEstimateParam + "=" + noEstimateOn
+	return boardFilter{Control: "filter-toggle", Data: toggle, Params: params, Keep: keep}, nil
 }
 
 // active24hParam is the URL/query key carrying the active-in-24h toggle state.
@@ -305,24 +258,11 @@ const (
 	active24hWindow = 24 * time.Hour
 )
 
-// active24hToggleView is the model for the compact "Active in last 24h" toggle
-// control (#159): a single server-driven toggle that lenses the Board onto cards
-// active in the rolling [now − 24h, now) window. On is the current state;
-// ToggleHref is the results URL that flips it; IncludeAttr preserves every OTHER
-// filter on the swap (it replaces only its own param, like the assignee and
-// no-estimate controls). Prefix is the data-testid stem.
-type active24hToggleView struct {
-	Prefix      string
-	On          bool
-	ToggleHref  string
-	IncludeAttr template.HTMLAttr
-}
-
 // active24hBoardFilter builds the Board's active-in-24h toggle from the query: the
 // compact control, a Keep predicate that (when on) hides any card whose
 // latest-activity instant falls outside the rolling [now − 24h, now) window, and
 // the round-trip param. Default off (no param) shows every card, so it composes
-// with the assignee and no-estimate filters as a plain intersection via keepCard.
+// with the assignee and no-estimate filters as a plain intersection via keepBoardCard.
 //
 // "Active" reuses the Daily rule end to end: each card's LatestActivity is already
 // the latest non-intra-Done status change (or its creation instant) computed by
@@ -334,19 +274,20 @@ type active24hToggleView struct {
 func (s *Server) active24hBoardFilter(q url.Values) (boardFilter, error) {
 	on := q.Get(active24hParam) == active24hOn
 
-	toggle := active24hToggleView{
+	toggle := filterToggleView{
 		Prefix:     "board-active-24h",
+		Label:      "Active in last 24h",
 		On:         on,
-		ToggleHref: active24hToggleHref("/board/results", on),
+		ToggleHref: toggleHref("/board/results", active24hParam, active24hOn, !on),
 		// The toggle encodes its own resulting state in ToggleHref, so it must NOT
 		// re-include its own hidden param (which would fight the href), but it MUST
 		// preserve every other filter.
 		IncludeAttr: filterIncludeExceptSelf(active24hParam),
 	}
 
-	var params []boardFilterParam
+	var params []filterParam
 	if on {
-		params = append(params, boardFilterParam{Name: active24hParam, Value: active24hOn})
+		params = append(params, filterParam{Name: active24hParam, Value: active24hOn})
 	}
 
 	now := s.now()
@@ -362,17 +303,7 @@ func (s *Server) active24hBoardFilter(q url.Values) (boardFilter, error) {
 		return !a.IsZero() && !a.Before(from) && a.Before(now)
 	}
 
-	return boardFilter{Control: "active-24h-toggle", Data: toggle, Params: params, Keep: keep}, nil
-}
-
-// active24hToggleHref returns the results URL (rooted at basePath) that flips the
-// toggle: turning it on adds ?active-24h=1, turning it off drops back to the bare
-// path. Only its own param is encoded; other filters ride along via hx-include.
-func active24hToggleHref(basePath string, on bool) string {
-	if on {
-		return basePath // toggling an on filter off yields the bare path
-	}
-	return basePath + "?" + active24hParam + "=" + active24hOn
+	return boardFilter{Control: "filter-toggle", Data: toggle, Params: params, Keep: keep}, nil
 }
 
 // assigneeToggleHref builds the results URL (rooted at basePath) that flips one

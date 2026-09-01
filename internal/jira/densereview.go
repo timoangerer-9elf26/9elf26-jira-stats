@@ -45,6 +45,7 @@ const (
 	stReadyForR  = "Ready for Release"
 	stReleased   = "Released / Deployed"
 	stCanceled   = "Canceled"
+	stTriage     = "Triage"
 )
 
 // denseSprintID is the active sprint's id/name for the dense dataset; historical
@@ -127,6 +128,50 @@ func denseIssues() []Issue {
 	issues = append(issues, denseEpics()...)
 	issues = append(issues, denseKW29Issues()...)
 	issues = append(issues, denseHistoricIssues()...)
+	issues = append(issues, denseBacklogIssues()...)
+	return withDenseLabels(withDensePriorities(issues))
+}
+
+// densePriorities cycles the five Jira levels so the Prio view's priority icons
+// and Highest→Lowest sort have something to show. Live DCAI sets a priority on
+// every issue; the fixture mirrors that by leaving none empty.
+var densePriorities = []string{"Highest", "High", "Medium", "Low", "Lowest"}
+
+// withDensePriorities stamps a deterministic priority on every fixture issue that
+// does not already carry one, so re-running the fixture always yields the same
+// order.
+func withDensePriorities(issues []Issue) []Issue {
+	for i := range issues {
+		if issues[i].Priority == "" {
+			issues[i].Priority = densePriorities[i%len(densePriorities)]
+		}
+	}
+	return issues
+}
+
+// denseLabelSets cycles the label shapes the Prio view's Labels column has to
+// render: the `Technical` label the Non-Technical filter keys off, a couple of
+// multi-label rows that stress the pill wrapping, and — critically — unlabelled
+// issues, which are the common case in live DCAI and must render an empty cell.
+var denseLabelSets = [][]string{
+	nil,
+	{"Technical"},
+	nil,
+	{"Product"},
+	{"Technical", "Product"},
+	nil,
+	{"needs-design", "customer-escalation", "Technical"},
+}
+
+// withDenseLabels stamps a deterministic label set on every fixture issue that
+// does not already carry one, so re-running the fixture always yields the same
+// pills.
+func withDenseLabels(issues []Issue) []Issue {
+	for i := range issues {
+		if len(issues[i].Labels) == 0 {
+			issues[i].Labels = denseLabelSets[i%len(denseLabelSets)]
+		}
+	}
 	return issues
 }
 
@@ -292,6 +337,28 @@ func denseKW29Issues() []Issue {
 
 	issues = append(issues, d14, d15, d16, d17, d18, c20, c21)
 	return issues
+}
+
+// denseBacklogIssues are sprint-less Triage tickets: work that has never entered
+// a sprint. Every other view is active-sprint scoped and the Board keeps Triage
+// off-board, so these are inert there — but the Prio view's universe is the whole
+// project, and its Not-done filter deliberately KEEPS Triage (CONTEXT.md → Prio
+// filters), so the dense dataset needs some or that rule cannot be observed.
+func denseBacklogIssues() []Issue {
+	created := mustInstant("2026-07-02T09:15:00Z")
+	mk := func(n int, typ, summary string) Issue {
+		key := fmt.Sprintf("DCAI-T%d", n)
+		return Issue{
+			Key: key, Type: typ, Summary: summary,
+			Status: stTriage, StatusCategory: denseCategory(stTriage),
+			Creator: denseCarla, CreatedAt: created,
+		}
+	}
+	return []Issue{
+		mk(1, "Bug", "Triage: intermittent 502 from the payments gateway during checkout retries"),
+		mk(2, "Story", "Triage: unsized backlog request"),
+		mk(3, "Task", "Triage: rotate the staging credentials"),
+	}
 }
 
 // denseHistoricIssues builds the closed-sprint issues whose Finished points give

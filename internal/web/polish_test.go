@@ -46,6 +46,7 @@ func TestSharedNavRendersWithActiveItem(t *testing.T) {
 		{"/sprint", "sprint"},
 		{"/daily", "daily"},
 		{"/board", "board"},
+		{"/prio", "prio"},
 		{"/velocity", "velocity"},
 	}
 	for _, c := range cases {
@@ -54,18 +55,19 @@ func TestSharedNavRendersWithActiveItem(t *testing.T) {
 		if !strings.Contains(body, `data-testid="nav"`) {
 			t.Errorf("%s: missing shared nav\n%s", c.path, body)
 		}
-		for _, link := range []string{`href="/sprint"`, `href="/daily"`, `href="/board"`, `href="/velocity"`} {
+		for _, link := range []string{`href="/sprint"`, `href="/daily"`, `href="/board"`, `href="/prio"`, `href="/velocity"`} {
 			if !strings.Contains(body, link) {
 				t.Errorf("%s: nav missing link %q", c.path, link)
 			}
 		}
-		// Nav order is Sprint · Daily · Board · Velocity (#66), with the resync
-		// control pinned to the far right.
+		// Nav order is Board · Prio · Sprint · Velocity · Daily (#199), with the
+		// resync control pinned to the far right.
 		assertOrder(t, body,
-			`data-nav="sprint"`,
-			`data-nav="daily"`,
 			`data-nav="board"`,
+			`data-nav="prio"`,
+			`data-nav="sprint"`,
 			`data-nav="velocity"`,
+			`data-nav="daily"`,
 			`data-testid="resync-status"`,
 		)
 		if strings.Contains(body, `data-nav="now"`) {
@@ -136,6 +138,9 @@ func (failingRollups) DailyBoard(_ []string, _, _ time.Time) ([]store.DailyBoard
 func (failingRollups) ActiveSprintAssignees() ([]store.SprintAssignee, error) {
 	return nil, errBoom
 }
+func (failingRollups) PrioIssues() ([]store.PrioIssue, error) {
+	return nil, errBoom
+}
 
 var errBoom = &boomError{}
 
@@ -153,7 +158,7 @@ func TestRollupErrorRendersFriendlyMessage(t *testing.T) {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	for _, path := range []string{"/board", "/sprint", "/sprint/cell?row=started&col=open", "/velocity"} {
+	for _, path := range []string{"/board", "/prio", "/sprint", "/sprint/cell?row=started&col=open", "/velocity"} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)

@@ -21,15 +21,18 @@
 {{end}}
 
 {{/* nav is the one shared top navigation across all views. The string argument
-     is the active view key ("sprint" | "daily" | "board" | "velocity"); the
-     matching tab is marked current. The right side carries the shared
-     full-resync control (present on every view). */}}
+     is the active view key ("board" | "prio" | "sprint" | "velocity" | "daily");
+     the matching tab is marked current. The order is Board · Prio · Sprint ·
+     Velocity · Daily (#199) — Prio sits next to the Board, where planning
+     happens. The right side carries the shared full-resync control (present on
+     every view). */}}
 {{define "nav"}}
 <nav data-testid="nav" aria-label="Primary" class="flex items-center gap-1 border-b border-slate-200">
-  {{template "nav-link" (dict "Href" "/sprint" "Label" "Sprint" "Key" "sprint" "Active" .)}}
-  {{template "nav-link" (dict "Href" "/daily" "Label" "Daily" "Key" "daily" "Active" .)}}
   {{template "nav-link" (dict "Href" "/board" "Label" "Board" "Key" "board" "Active" .)}}
+  {{template "nav-link" (dict "Href" "/prio" "Label" "Prio" "Key" "prio" "Active" .)}}
+  {{template "nav-link" (dict "Href" "/sprint" "Label" "Sprint" "Key" "sprint" "Active" .)}}
   {{template "nav-link" (dict "Href" "/velocity" "Label" "Velocity" "Key" "velocity" "Active" .)}}
+  {{template "nav-link" (dict "Href" "/daily" "Label" "Daily" "Key" "daily" "Active" .)}}
   <span class="grow"></span>
   {{template "resync-control" .}}
   {{if authEnabled}}{{template "logout-control" .}}{{end}}
@@ -220,11 +223,12 @@
 {{end}}
 
 {{/* type-badge is a small colored badge distinguishing an issue type
-     (Task / Bug / Story) on a board card. Takes a dict of Type and Testid;
-     Bug is rose, Story emerald, Task sky, any other type slate. */}}
+     (Epic / Task / Bug / Story) on a board card or a Prio row. Takes a dict of
+     Type and Testid; Bug is rose, Story emerald, Task sky, Epic violet (added
+     for the Prio view, #199, where epics appear as rows), any other type slate. */}}
 {{define "type-badge"}}
 <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold
-             {{if eq .Type "Bug"}}bg-rose-100 text-rose-700{{else if eq .Type "Story"}}bg-emerald-100 text-emerald-700{{else if eq .Type "Task"}}bg-sky-100 text-sky-700{{else}}bg-slate-100 text-slate-600{{end}}"
+             {{if eq .Type "Bug"}}bg-rose-100 text-rose-700{{else if eq .Type "Story"}}bg-emerald-100 text-emerald-700{{else if eq .Type "Task"}}bg-sky-100 text-sky-700{{else if eq .Type "Epic"}}bg-violet-100 text-violet-700{{else}}bg-slate-100 text-slate-600{{end}}"
       data-testid="{{.Testid}}">{{.Type}}</span>
 {{end}}
 
@@ -1027,17 +1031,17 @@
 </div>
 {{end}}
 
-{{/* no-estimate-toggle is the compact Board no-estimate filter control (#158): a
-     single toggle that lenses the Board onto cards with no estimate (a
-     data-quality view for finding unsized tickets). Kept small so it does not
-     crowd the header. It is a server-driven toggle like the assignee chips: it
-     hx-GETs its ToggleHref — the results URL encoding the state that RESULTS from
-     flipping it — and swaps the caller's panel, so the control re-renders pressed
-     or not. The href already carries its own resulting state, so it hx-includes
-     only the OTHER filters (via IncludeAttr), never its own param. On reads as a
-     filled dark pill with aria-pressed; off is a plain outlined pill. Takes a
-     noEstimateToggleView (Prefix, On, ToggleHref, IncludeAttr). */}}
-{{define "no-estimate-toggle"}}
+{{/* filter-toggle is the shared two-state filter pill behind every on/off filter
+     in the app: the Board's "No estimates" (#158) and "Active in last 24h"
+     (#159) controls and the Prio view's "Not done" (#202). It is server-driven:
+     it hx-GETs its ToggleHref — the results URL encoding the state that RESULTS
+     from flipping it — and swaps the caller's panel, so the control re-renders
+     pressed or not. The href already carries its own resulting state, so it
+     hx-includes only the OTHER filters (via IncludeAttr), never its own param.
+     On reads as a filled dark pill with aria-pressed; off is a plain outlined
+     pill. Takes a filterToggleView (Prefix, Label, On, ToggleHref,
+     IncludeAttr). */}}
+{{define "filter-toggle"}}
 <div data-testid="{{.Prefix}}" class="flex items-center">
   <button type="button" data-testid="{{.Prefix}}-toggle"
           {{if .On}}aria-pressed="true"{{end}}
@@ -1045,33 +1049,11 @@
           class="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
                  {{if .On}}border-slate-900 bg-slate-900 text-white hover:bg-slate-800
                  {{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
-    No estimates
+    {{.Label}}
   </button>
 </div>
 {{end}}
 
-{{/* active-24h-toggle is the compact Board active-in-24h filter control (#159): a
-     single toggle that lenses the Board onto cards active in the rolling
-     [now − 24h, now) window (created in it or moved in it, intra-Done housekeeping
-     ignored — the Daily "active" rule). It is a server-driven toggle like the
-     no-estimate one: it hx-GETs its ToggleHref (the results URL encoding the state
-     that RESULTS from flipping it) and swaps the caller's panel, so the control
-     re-renders pressed or not. The href already carries its own resulting state, so
-     it hx-includes only the OTHER filters (via IncludeAttr), never its own param.
-     On reads as a filled dark pill with aria-pressed; off is a plain outlined
-     pill. Takes an active24hToggleView (Prefix, On, ToggleHref, IncludeAttr). */}}
-{{define "active-24h-toggle"}}
-<div data-testid="{{.Prefix}}" class="flex items-center">
-  <button type="button" data-testid="{{.Prefix}}-toggle"
-          {{if .On}}aria-pressed="true"{{end}}
-          hx-get="{{.ToggleHref}}" {{.IncludeAttr}}
-          class="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
-                 {{if .On}}border-slate-900 bg-slate-900 text-white hover:bg-slate-800
-                 {{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
-    Active in last 24h
-  </button>
-</div>
-{{end}}
 
 {{/* daily-board-header is the section heading and status row within the page's
      single sticky region. It stays outside daily-board's overflow ancestor;
@@ -1148,4 +1130,116 @@
     {{if gt .Moves 1}}<span class="daily-origin-hops">· {{.Moves}} moves</span>{{end}}
   </div>
 {{if .Href}}</a>{{else}}</div>{{end}}
+{{end}}
+
+{{/* prio-panel is the swappable Prio unit: the sticky chrome (nav + title) plus
+     the table of every issue in the projection. HTMX will swap this whole unit
+     into #prio-panel once the Prio filters land, mirroring board-panel — which
+     is why GET /prio/results renders this partial rather than the bare table.
+     Takes a prioView. */}}
+{{define "prio-panel"}}
+  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50 pt-4">
+    {{template "nav" "prio"}}
+    {{template "page-header" "Prio — every ticket in the project, for deciding what to work on next."}}
+    {{template "prio-filters" .}}
+  </div>
+
+  {{template "prio-table" .}}
+{{end}}
+
+{{/* prio-filters is the Prio view's filter chrome (#202, #203) — the Board's
+     filter-agnostic region (see "board-filters") pointed at #prio-panel. One
+     <form> that, on any control change, swaps the whole panel via HTMX so filter
+     state stays URL-encoded and bookmarkable without a full-page reload. It
+     re-emits every registered filter's current params as hidden inputs marked
+     data-filterparam (so a change to one filter round-trips the others), then
+     renders each filter's control partial by name via the render func. Adding a
+     filter means slotting it into the prioFilters registry; this region does not
+     change (as the #203 Non-Technical toggle showed). Controls stack left-to-right
+     in registry order — Non-Technical, then Not done. Takes a prioView (needs .Filters). */}}
+{{define "prio-filters"}}
+<form data-testid="prio-filters"
+      hx-target="#prio-panel" hx-swap="innerHTML"
+      class="mt-4 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+  {{/* Always-present filter-param anchor: a control hx-includes the OTHER
+       filters via [data-filterparam]:not([name='<own>']), and with every filter
+       at its default that selector would otherwise match nothing and make HTMX
+       log a no-match error. This valueless marker guarantees a match while
+       contributing no form value — same trick as the Board chrome. */}}
+  <span data-filterparam hidden></span>
+  {{range .Filters}}{{range .Params}}<input type="hidden" data-filterparam name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
+  {{range .Filters}}{{render .Control .Data}}{{end}}
+</form>
+{{end}}
+
+{{/* prio-table is the Prio view's flat table: one row per surviving issue, columns
+     Type · Name · Priority · Status · Labels, sorted priority Highest→Lowest (ties by key). The name links to the Jira issue
+     when a base URL is configured and renders as plain text when it is not,
+     matching the board card. With no rows it says so: "no tickets match" when
+     the filters hid everything, "no tickets yet" when the projection is empty.
+     Takes a prioView. */}}
+{{define "prio-table"}}
+{{if .Empty}}
+{{if .NoMatch}}
+<p data-testid="prio-no-match" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+  No tickets match the current filters.
+</p>
+{{else}}
+<p data-testid="prio-empty" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+  No tickets yet.
+</p>
+{{end}}
+{{else}}
+<div data-testid="prio" class="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+  <table class="w-full border-collapse text-left text-sm">
+    <thead>
+      <tr class="border-b border-slate-200 text-xs font-medium uppercase tracking-wide text-slate-500">
+        <th scope="col" class="px-4 py-2" data-testid="prio-col-type">Type</th>
+        <th scope="col" class="px-4 py-2" data-testid="prio-col-name">Name</th>
+        <th scope="col" class="px-4 py-2" data-testid="prio-col-priority">Priority</th>
+        <th scope="col" class="px-4 py-2" data-testid="prio-col-status">Status</th>
+        <th scope="col" class="px-4 py-2" data-testid="prio-col-labels">Labels</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}
+      <tr class="border-b border-slate-100 last:border-0" data-testid="prio-row" data-key="{{.Key}}">
+        <td class="px-4 py-2 align-top">{{template "type-badge" (dict "Type" .Type "Testid" (printf "prio:%s:type" .Key))}}</td>
+        <td class="px-4 py-2 align-top text-slate-800" data-testid="prio:{{.Key}}:name">
+          {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener" class="hover:underline">{{.Summary}}</a>{{else}}{{.Summary}}{{end}}
+        </td>
+        <td class="px-4 py-2 align-top text-slate-700">{{template "priority-cell" .}}</td>
+        <td class="px-4 py-2 align-top text-slate-600" data-testid="prio:{{.Key}}:status">{{.Status}}</td>
+        <td class="px-4 py-2 align-top" data-testid="prio:{{.Key}}:labels">{{template "labels-cell" .}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+{{end}}
+
+{{/* labels-cell renders one Prio row's Jira labels as small grey pills, in the
+     order Jira reported them — every label, `Technical` included, styled alike.
+     An issue with no labels renders an empty cell (no placeholder), so the
+     column stays quiet on the many unlabelled rows. Takes a prioRow. */}}
+{{define "labels-cell"}}
+{{- range .Labels -}}
+<span class="mr-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600" data-testid="prio:{{$.Key}}:label:{{.}}">{{.}}</span>
+{{- end -}}
+{{end}}
+
+{{/* priority-cell renders one Prio row's priority: the level's icon (a Jira-like
+     severity glyph — stacked chevrons, coloured and shaped by the level; see
+     priorityLevels in prio.go) followed by the level's name. An issue with no
+     priority (which DCAI issues do not have, but a row synced before priority
+     joined the projection can) renders a dash and no icon. Takes a prioRow. */}}
+{{define "priority-cell"}}
+<span class="inline-flex items-center gap-1.5" data-testid="prio:{{.Key}}:priority">
+  {{if .Icon.Path}}<svg viewBox="0 0 14 14" class="h-3.5 w-3.5 shrink-0"
+       fill="none" style="stroke:{{.Icon.Color}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+       aria-hidden="true" data-testid="prio:{{.Key}}:priority-icon"><path d="{{.Icon.Path}}"/></svg>{{end}}
+  {{if .Priority}}<span data-testid="prio:{{.Key}}:priority-name">{{.Priority}}</span>
+  {{else}}<span class="text-slate-400" data-testid="prio:{{.Key}}:priority-name">—</span>{{end}}
+</span>
 {{end}}

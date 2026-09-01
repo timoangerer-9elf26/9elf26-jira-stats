@@ -22,6 +22,12 @@ const (
 	epicColorFieldID = "customfield_10017" // Epic "Issue color"
 )
 
+// issueFields is the `fields` query the issue reads ask Jira for — the single
+// source of truth for both the JQL search and the single-issue re-read, so the
+// two can never drift (a field missing here decodes as empty everywhere).
+const issueFields = "summary,issuetype,status,assignee,created,creator,parent,priority,labels," +
+	sizeFieldID + "," + sprintFieldID + "," + epicColorFieldID
+
 // searchPageSize is the JQL search page size; changelogPageSize the per-issue
 // changelog fallback page size. Both are Jira's usual caps.
 const (
@@ -113,7 +119,7 @@ func (c *LiveClient) FetchSprints(ctx context.Context) ([]Sprint, error) {
 // only ever set from a Jira read (see docs/adr/0005).
 func (c *LiveClient) FetchIssue(ctx context.Context, key string) (Issue, error) {
 	q := url.Values{}
-	q.Set("fields", "summary,issuetype,status,assignee,created,creator,parent,"+sizeFieldID+","+sprintFieldID+","+epicColorFieldID)
+	q.Set("fields", issueFields)
 	q.Set("expand", "changelog")
 
 	var dto issueDTO
@@ -175,7 +181,7 @@ func (c *LiveClient) search(ctx context.Context, jql string) ([]Issue, error) {
 		q := url.Values{}
 		q.Set("jql", jql)
 		q.Set("maxResults", strconv.Itoa(searchPageSize))
-		q.Set("fields", "summary,issuetype,status,assignee,created,creator,parent,"+sizeFieldID+","+sprintFieldID+","+epicColorFieldID)
+		q.Set("fields", issueFields)
 		q.Set("expand", "changelog")
 		if pageToken != "" {
 			q.Set("nextPageToken", pageToken)
@@ -241,6 +247,8 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		AssigneeAvatarURL: assigneeAvatarURL(dto.Fields.Assignee),
 		ParentKey:         parentKey(dto.Fields.Parent),
 		EpicColor:         dto.Fields.EpicColor,
+		Priority:          priorityName(dto.Fields.Priority),
+		Labels:            dto.Fields.Labels,
 		CreatedAt:         createdAt,
 		Creator:           assigneeName(dto.Fields.Creator),
 		Changelog:         entries,
@@ -376,6 +384,8 @@ type fieldsDTO struct {
 	Created   string       `json:"created"`           // Jira's immutable creation timestamp
 	Creator   *userDTO     `json:"creator"`           // immutable author (NOT the mutable reporter)
 	Parent    *parentDTO   `json:"parent"`            // parent issue (the Epic for a Task/Bug/Story)
+	Priority  *priorityDTO `json:"priority"`          // standard Jira priority (Highest…Lowest); null only if unset
+	Labels    []string     `json:"labels"`            // standard Jira labels — a bare string array, not objects; [] or absent when unlabelled
 	Size      *selectDTO   `json:"customfield_10040"` // "Estimated Time"
 	Sprint    []sprintDTO  `json:"customfield_10020"` // Sprint
 	EpicColor string       `json:"customfield_10017"` // Epic "Issue color" — a plain string, e.g. "purple" (only on epics; empty/null otherwise)
@@ -389,6 +399,21 @@ type issueTypeDTO struct {
 // name and colour are resolved from the epic's own synced row, not from here.
 type parentDTO struct {
 	Key string `json:"key"`
+}
+
+// priorityDTO is the issue's standard Jira priority object; only the name is
+// needed (the id and iconUrl Jira also sends are ignored — the view draws its
+// own icon).
+type priorityDTO struct {
+	Name string `json:"name"`
+}
+
+// priorityName reads the priority level's name, tolerating an unset priority.
+func priorityName(p *priorityDTO) string {
+	if p == nil {
+		return ""
+	}
+	return p.Name
 }
 
 type statusDTO struct {

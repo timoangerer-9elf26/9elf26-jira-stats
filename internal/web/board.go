@@ -143,7 +143,7 @@ func (s *Server) boardView(q url.Values) (boardView, error) {
 		_, draggable := boardDragTarget(col.Status)
 		for _, c := range col.Cards {
 			total++
-			if !keepCard(filters, c) {
+			if !keepBoardCard(filters, c) {
 				continue // hidden by a filter; the column still renders
 			}
 			kept++
