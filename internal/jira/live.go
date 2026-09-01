@@ -140,6 +140,32 @@ func (c *LiveClient) UpdateIssueSize(ctx context.Context, key, size string) erro
 	return nil
 }
 
+// FetchTransitions reads the transitions Jira currently offers for the issue via
+// GET /rest/api/3/issue/{key}/transitions. The set is issue- and
+// workflow-specific and can differ per source status, so it is read fresh for
+// every status write rather than cached (docs/adr/0010).
+func (c *LiveClient) FetchTransitions(ctx context.Context, key string) ([]Transition, error) {
+	var resp transitionsResponse
+	if err := c.get(ctx, "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions", nil, &resp); err != nil {
+		return nil, fmt.Errorf("jira transitions %s: %w", key, err)
+	}
+	return toTransitions(resp.Transitions), nil
+}
+
+// TransitionIssue performs one transition by id via
+// POST /rest/api/3/issue/{key}/transitions. The caller resolves transitionID
+// from the offered set by target status id (see TransitionTo) — this method
+// takes an id and performs it, nothing more. Jira answers 204 on success; a 4xx
+// (transition no longer valid, permissions) is returned as an error so the
+// caller can leave the projection untouched.
+func (c *LiveClient) TransitionIssue(ctx context.Context, key, transitionID string) error {
+	body := map[string]any{"transition": map[string]any{"id": transitionID}}
+	if err := c.post(ctx, "/rest/api/3/issue/"+url.PathEscape(key)+"/transitions", body); err != nil {
+		return fmt.Errorf("jira transition %s to %s: %w", key, transitionID, err)
+	}
+	return nil
+}
+
 // search runs a token-paginated JQL search (expand=changelog) and maps every
 // matching issue into the domain snapshot shape.
 func (c *LiveClient) search(ctx context.Context, jql string) ([]Issue, error) {
@@ -316,6 +342,35 @@ func (c *LiveClient) put(ctx context.Context, path string, body any) error {
 	return nil
 }
 
+// post issues an authenticated POST with a JSON body and expects a no-content
+// success (Jira answers 204 on a performed transition). Same auth and error
+// shape as put; only the verb differs.
+func (c *LiveClient) post(ctx context.Context, path string, body any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+path, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(c.cfg.Email, c.cfg.APIToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("POST %s: status %d: %s", path, resp.StatusCode, b)
+	}
+	return nil
+}
+
 // --- Jira v3 response DTOs (only the fields the DCAI mapping needs) ---
 
 type searchResponse struct {
@@ -357,6 +412,44 @@ type statusDTO struct {
 	Category struct {
 		Name string `json:"name"`
 	} `json:"statusCategory"`
+}
+
+// transitionsResponse is GET /rest/api/3/issue/{key}/transitions. Only id, name
+// and the `to` status are parsed; `to.id` is the field the seam selects on. The
+// status DTO here reuses the issue-field shape but adds the id, which the read
+// path never needed.
+type transitionsResponse struct {
+	Transitions []transitionDTO `json:"transitions"`
+}
+
+type transitionDTO struct {
+	ID   string      `json:"id"`
+	Name string      `json:"name"`
+	To   toStatusDTO `json:"to"`
+}
+
+type toStatusDTO struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Category struct {
+		Name string `json:"name"`
+	} `json:"statusCategory"`
+}
+
+// toTransitions maps the wire DTOs into domain transitions, preserving Jira's
+// order.
+func toTransitions(dtos []transitionDTO) []Transition {
+	trs := make([]Transition, 0, len(dtos))
+	for _, dto := range dtos {
+		trs = append(trs, Transition{
+			ID:               dto.ID,
+			Name:             dto.Name,
+			ToStatusID:       dto.To.ID,
+			ToStatusName:     dto.To.Name,
+			ToStatusCategory: dto.To.Category.Name,
+		})
+	}
+	return trs
 }
 
 type userDTO struct {

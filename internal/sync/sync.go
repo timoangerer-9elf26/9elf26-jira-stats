@@ -175,6 +175,49 @@ func (s *Syncer) SetEstimate(ctx context.Context, key, size string) (string, err
 	return iss.Size, nil
 }
 
+// SetStatus is the Board transition write path (docs/adr/0010): it moves a
+// ticket into the requested status in Jira, then immediately re-reads that one
+// issue and persists it, so the projection is set only ever from a Jira read —
+// the identical write → re-read → persist shape as SetEstimate (docs/adr/0005).
+// It returns the authoritative status the re-fetched issue carries.
+//
+// statusID is a Jira STATUS id (see jira.StatusID*), not a transition id and not
+// a status name: Jira offers a transition labelled "Done" that lands in a
+// different column than its name suggests, so the transition is resolved from
+// the issue's currently offered set by target status id (jira.TransitionTo).
+// When Jira offers no transition into that status the call fails with
+// jira.ErrNoTransition and nothing is written — never a fallback to some other
+// transition. Any failure (lookup, write, or the reconciliation read/save) is
+// returned and leaves both Jira and the projection unchanged.
+//
+// As with SetEstimate, only the SaveIssue persist takes the sync mutex, so the
+// Jira round-trips never block on an in-flight cycle.
+func (s *Syncer) SetStatus(ctx context.Context, key, statusID string) (string, error) {
+	offered, err := s.client.FetchTransitions(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("fetch transitions: %w", err)
+	}
+	tr, err := jira.TransitionTo(offered, statusID)
+	if err != nil {
+		return "", fmt.Errorf("transition for %s: %w", key, err)
+	}
+	if err := s.client.TransitionIssue(ctx, key, tr.ID); err != nil {
+		return "", fmt.Errorf("transition issue: %w", err)
+	}
+	iss, err := s.client.FetchIssue(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("re-fetch issue: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	syncedAt := time.Now().UTC().Format(time.RFC3339)
+	if err := s.store.SaveIssue(iss, syncedAt); err != nil {
+		return "", fmt.Errorf("save issue: %w", err)
+	}
+	return iss.Status, nil
+}
+
 // resync clears the projection and re-backfills the whole project — a full
 // resync (CONTEXT.md → Sync). It holds the sync mutex for the duration so no
 // incremental cycle interleaves with the wipe or the rebuild, and on success
