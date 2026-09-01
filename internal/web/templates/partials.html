@@ -503,6 +503,14 @@
 
   {{if .HasSprint}}
   <div data-testid="board">
+    {{/* Explicit no-match state (#193): the columns still render below (filtering
+         hides cards, never columns), but an over-narrow filter set would otherwise
+         look identical to an empty sprint, so say so. */}}
+    {{if .NoMatch}}
+    <p data-testid="board-no-match" class="mb-3 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
+      No cards match the current filters.
+    </p>
+    {{end}}
     <div data-testid="board-card-strip"
          class="flex gap-4 overflow-x-auto pb-4"
          style="overflow-y:hidden"
@@ -929,6 +937,44 @@
                  {{else}}cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300{{end}}">
     Clear
   </button>
+</div>
+{{end}}
+
+{{/* search-box is the Board free-text search control (#193): a text input that
+     narrows the board to cards whose key, title or parent epic title contains the
+     typed text (case-insensitive substring; assignee is deliberately not matched).
+
+     It is the one Board control that is NOT a self-encoding toggle href. Its value
+     lives in the input, so it must send its OWN param — hence hx-include of every
+     [data-filterparam] (htmx de-duplicates the triggering element) rather than the
+     "all but self" selector the toggles use. The input itself carries
+     data-filterparam, so it is also how the term round-trips: sibling controls
+     pick it up through their own include selector, and a bookmarked ?q= re-renders
+     it as the input's value.
+
+     hx-trigger debounces input (500ms after typing stops) so a keystroke does not
+     fire a request per character, and also fires on the native "search" event so
+     the browser's clear (×) affordance restores the full board immediately.
+
+     The id is load-bearing, not decoration: the swap replaces the very input being
+     typed in, and htmx only restores focus and caret position across a swap for an
+     active element that HAS an id. Without it the box silently loses focus the
+     moment the debounce fires and the rest of the word goes nowhere.
+
+     Pressing Enter is left to the browser: the box is the filter form's only text
+     field, so Enter natively GETs /board with every filter param — a full reload
+     of exactly the shareable ?q= URL, which is also the one way a user gets that
+     URL into the address bar (no control here pushes it). Takes a searchBoxView
+     (Prefix, Param, Value, ResultsHref, IncludeAttr). */}}
+{{define "search-box"}}
+<div data-testid="{{.Prefix}}" class="flex items-center">
+  <input type="search" id="{{.Prefix}}-input" data-testid="{{.Prefix}}-input" data-filterparam
+         name="{{.Param}}" value="{{.Value}}"
+         placeholder="Search key, title or epic" aria-label="Search cards by key, title or epic"
+         autocomplete="off"
+         hx-get="{{.ResultsHref}}" {{.IncludeAttr}}
+         hx-trigger="input changed delay:500ms, search"
+         class="w-64 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none">
 </div>
 {{end}}
 
