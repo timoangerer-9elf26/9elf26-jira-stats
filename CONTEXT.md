@@ -92,6 +92,43 @@ The three filters (see `docs/adr/0008-board-standup-filters.md`):
   Canceled stays off-board, a ticket cancelled in the window does not appear
   under this lens.
 
+## Prio view
+
+The prioritization surface: a **flat table of tickets** (not a board), one row
+per issue, for triaging what to work on next. Unlike every other view, its
+universe is the **whole projection — every issue in the DCAI project**,
+regardless of sprint or status, not just the active sprint. Columns: **type**
+(epic / task / bug / story), **name**, **priority**, **status**, and **labels**.
+
+Because the projection is dominated by done work (the vast majority of issues
+are Released / Deployed), the view leans on its filters — see
+[Prio filters](#prio-filters) — to narrow to the tickets worth prioritising.
+
+**Priority** and **labels** are Jira fields that exist on every issue but were
+**not part of the projection before this view** — the Prio view is what
+introduces syncing them; older rows only carry them once a full resync has run.
+
+## Prio filters
+
+Two independent two-state toggles on the [Prio view](#prio-view), reusing the
+[Board's](#board-filters) URL-encoded, fragment-swapping filter scaffolding.
+Both are plain on/off toggles (like the Board's no-estimate control), not the
+Board's multi-select assignee bar.
+
+- **Non-Technical** — default **OFF**. Off shows every ticket; on hides tickets
+  carrying the exact Jira label **`Technical`**, leaving only non-technical work.
+  (There is no positive `non-technical` label — "non-technical" is simply the
+  absence of `Technical`.)
+- **Not done** — default **ON**. On narrows to tickets **not yet in a done
+  state**: the statuses Triage, Refinement, Ready To Do, In Progress,
+  Review / Testing. (This set **includes Triage**, which the Board keeps
+  off-board.) Toggling it off reveals the done and canceled tickets too — the
+  full ~1,400-row projection, dominated by Released / Deployed.
+
+Rows are sorted by **priority**, Highest→Lowest, ties broken by issue key. The
+DCAI project uses the standard five-level priority scheme (Highest, High,
+Medium, Low, Lowest); every issue has a priority set.
+
 ## Daily view
 
 The morning standup overview, presented as a **board**. For a chosen
