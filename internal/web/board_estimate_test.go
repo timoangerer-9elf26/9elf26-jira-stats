@@ -62,6 +62,18 @@ func postForm(t *testing.T, url string, vals url.Values) (int, string) {
 	return resp.StatusCode, readAll(t, resp)
 }
 
+// postFormWithHeader posts form values and returns the status code, the body and
+// the named response header — the header being how the Board move route reports
+// that a write landed independently of whether the re-render then succeeded.
+func postFormWithHeader(t *testing.T, url string, vals url.Values, header string) (int, string, string) {
+	t.Helper()
+	resp, err := http.PostForm(url, vals)
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	return resp.StatusCode, readAll(t, resp), resp.Header.Get(header)
+}
+
 // TestBoardEstimatePillIsEditable asserts the Board renders the size pill as an
 // interactive popover offering S / M / L / No estimate, each choice posting to
 // /board/estimate, while still displaying the card's current value.

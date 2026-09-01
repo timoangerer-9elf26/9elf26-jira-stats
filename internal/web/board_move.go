@@ -47,6 +47,40 @@ func boardDragTarget(status string) (string, bool) {
 	return id, ok
 }
 
+// boardMoveApplied marks a response whose transition was actually written. It is
+// set independently of the HTTP status, because the write and the re-render that
+// follows it fail differently: once the write lands the move is a fact in Jira
+// and the projection, so a re-render that then fails must not be reported to the
+// client as a failed move (it would snap the card back and claim nothing
+// happened, while the board silently disagrees with Jira until the next render).
+const (
+	boardMoveAppliedHeader = "X-Board-Move"
+	boardMoveApplied       = "applied"
+)
+
+// boardDragSource reports whether the issue is currently sitting in a column
+// that takes part in dragging. The drag surface freezes its columns as drag
+// *sources* as well as drop targets, and that half of the rule is enforced here
+// rather than only by the markup's draggable="false" — so boardDragStatuses is
+// genuinely the single source of truth the markup and the handler both key off
+// (docs/adr/0010). An issue that is not on the active-sprint board at all is not
+// a legal source either.
+func (s *Server) boardDragSource(key string) (bool, error) {
+	board, err := s.rollups.ActiveSprintBoard()
+	if err != nil {
+		return false, err
+	}
+	for _, col := range board.Columns {
+		for _, c := range col.Cards {
+			if c.Key == key {
+				_, draggable := boardDragTarget(col.Status)
+				return draggable, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // handleBoardMove is the Board drag-and-drop write (#195, docs/adr/0010). It
 // takes the dropped card's key and the target column's status name, writes the
 // transition to Jira through the Transitioner (which re-reads that one issue and
@@ -71,6 +105,17 @@ func (s *Server) handleBoardMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	switch draggable, err := s.boardDragSource(key); {
+	case err != nil:
+		log.Printf("web: board move %s→%q: reading the board failed: %v", key, status, err)
+		boardMoveFailed(w)
+		return
+	case !draggable:
+		// Either a frozen column's card or a key that is not on the board at all.
+		http.Error(w, "bad move request", http.StatusBadRequest)
+		return
+	}
+
 	if s.transitioner == nil {
 		log.Printf("web: board move %s→%q rejected: no transitioner wired", key, status)
 		boardMoveFailed(w)
@@ -81,6 +126,9 @@ func (s *Server) handleBoardMove(w http.ResponseWriter, r *http.Request) {
 		boardMoveFailed(w)
 		return
 	}
+	// The write landed. Everything from here is rendering, which fails on its
+	// own terms — see boardMoveApplied.
+	w.Header().Set(boardMoveAppliedHeader, boardMoveApplied)
 	s.renderBoardValues(w, boardMoveFilters(r.PostForm), "board-panel")
 }
 

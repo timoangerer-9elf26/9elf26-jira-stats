@@ -329,3 +329,112 @@ func TestBoardMoveRendersThroughTheActiveFilters(t *testing.T) {
 		t.Errorf("filtered move did not write: card is in %q", got)
 	}
 }
+
+// stubTransitioner is a write path that succeeds without touching the store, so
+// a test can make the post-write re-render fail (by closing the store) while the
+// transition itself still lands — the one case where the move is a fact in Jira
+// but the board cannot be rendered.
+type stubTransitioner struct {
+	calls int
+	after func() // runs after the write lands, to break the re-render that follows
+}
+
+func (s *stubTransitioner) SetStatus(ctx context.Context, key, statusID string) (string, error) {
+	s.calls++
+	if s.after != nil {
+		s.after()
+	}
+	return "In Progress", nil
+}
+
+// TestBoardMoveRejectsCardsOutsideTheDragSurface asserts the frozen columns are
+// not drag *sources* either, enforced on the server and not only by the markup's
+// draggable="false" (docs/adr/0010: the drag-surface map is the single source of
+// truth the markup and the handler both key off).
+func TestBoardMoveRejectsCardsOutsideTheDragSurface(t *testing.T) {
+	for _, card := range []struct{ key, column string }{
+		{"DCAI-6", "Ready for Release"},
+		{"DCAI-7", "Released / Deployed"},
+	} {
+		t.Run("from="+card.column, func(t *testing.T) {
+			fake := moveFixture()
+			app := newMoveApp(t, fake)
+			code, _ := postForm(t, app.URL+"/board/move",
+				url.Values{"key": {card.key}, "status": {"In Progress"}})
+			if code != http.StatusBadRequest {
+				t.Errorf("POST from %q: status %d, want 400", card.column, code)
+			}
+			if len(fake.TransitionCalls) != 0 {
+				t.Errorf("POST from %q wrote transitions %v, want none", card.column, fake.TransitionCalls)
+			}
+			if got := columnOf(t, get(t, app.URL+"/board"), card.key); got != card.column {
+				t.Errorf("card moved to %q; a frozen card must not move", got)
+			}
+		})
+	}
+}
+
+// TestBoardMoveRejectsAnUnknownKey asserts a key that is not on the board at all
+// is refused before any write, since its origin column cannot be checked.
+func TestBoardMoveRejectsAnUnknownKey(t *testing.T) {
+	fake := moveFixture()
+	app := newMoveApp(t, fake)
+	code, _ := postForm(t, app.URL+"/board/move",
+		url.Values{"key": {"DCAI-999"}, "status": {"In Progress"}})
+	if code != http.StatusBadRequest {
+		t.Errorf("POST unknown key: status %d, want 400", code)
+	}
+	if len(fake.TransitionCalls) != 0 {
+		t.Errorf("POST unknown key wrote transitions %v, want none", fake.TransitionCalls)
+	}
+}
+
+// TestBoardMoveMarksAnAppliedWriteEvenWhenTheRerenderFails is the guard against
+// telling the user a move failed when it actually landed. Once the transition is
+// written the move is a fact in Jira and the projection; if rendering the board
+// afterwards fails, the response must still say so, so the client reloads into
+// the honest error page rather than snapping the card back and claiming failure.
+func TestBoardMoveMarksAnAppliedWriteEvenWhenTheRerenderFails(t *testing.T) {
+	tr := &stubTransitioner{}
+	app := newBoardApp(t, moveFixture(), web.WithTransitioner(tr))
+	// Break the store the moment the write lands, so the transition succeeds and
+	// only the re-render that follows it fails.
+	tr.after = func() { app.Store.Close() }
+
+	code, _, header := postFormWithHeader(t, app.URL+"/board/move",
+		url.Values{"key": {"DCAI-3"}, "status": {"Review / Testing"}}, "X-Board-Move")
+	if tr.calls != 1 {
+		t.Fatalf("transitioner called %d times, want 1", tr.calls)
+	}
+	if header != "applied" {
+		t.Errorf("X-Board-Move = %q (status %d), want \"applied\": the write landed and the client must not report failure", header, code)
+	}
+}
+
+// TestBoardMoveDoesNotMarkAFailedWriteAsApplied is the other half: a write that
+// never landed must not carry the applied marker, or the client would skip the
+// snap-back for a card that really did not move.
+func TestBoardMoveDoesNotMarkAFailedWriteAsApplied(t *testing.T) {
+	fake := moveFixture()
+	fake.WriteErr = errors.New("jira says no (permissions)")
+	app := newMoveApp(t, fake)
+
+	_, _, header := postFormWithHeader(t, app.URL+"/board/move",
+		url.Values{"key": {"DCAI-3"}, "status": {"Review / Testing"}}, "X-Board-Move")
+	if header != "" {
+		t.Errorf("X-Board-Move = %q on a failed write, want empty", header)
+	}
+}
+
+// TestBoardMoveMarksASuccessfulMoveAsApplied asserts the marker is present on
+// the ordinary success path too, so the client has one rule to read.
+func TestBoardMoveMarksASuccessfulMoveAsApplied(t *testing.T) {
+	_, _, header := func() (int, string, string) {
+		app := newMoveApp(t, moveFixture())
+		return postFormWithHeader(t, app.URL+"/board/move",
+			url.Values{"key": {"DCAI-3"}, "status": {"Review / Testing"}}, "X-Board-Move")
+	}()
+	if header != "applied" {
+		t.Errorf("X-Board-Move = %q on a successful move, want \"applied\"", header)
+	}
+}
