@@ -75,6 +75,10 @@ type Rollups interface {
 	// work items (each with its captured avatar URL), to populate the /daily
 	// assignee avatar filter bar.
 	ActiveSprintAssignees() ([]store.SprintAssignee, error)
+	// PrioIssues is the Prio view's whole-project read: EVERY issue in the
+	// projection (any sprint, any status), key-ordered. It is deliberately the one
+	// read not scoped to the active sprint.
+	PrioIssues() ([]store.PrioIssue, error)
 }
 
 // Resyncer triggers a full rebuild of the SQLite projection from Jira and
@@ -264,6 +268,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /board/results", s.handleBoardResults)
 	s.mux.HandleFunc("POST /board/estimate", s.handleBoardEstimate)
 	s.mux.HandleFunc("POST /board/move", s.handleBoardMove)
+	s.mux.HandleFunc("GET /prio", s.handlePrio)
+	s.mux.HandleFunc("GET /prio/results", s.handlePrioResults)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
 	s.mux.HandleFunc("GET /sprint", s.handleSprint)

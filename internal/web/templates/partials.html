@@ -21,15 +21,18 @@
 {{end}}
 
 {{/* nav is the one shared top navigation across all views. The string argument
-     is the active view key ("sprint" | "daily" | "board" | "velocity"); the
-     matching tab is marked current. The right side carries the shared
-     full-resync control (present on every view). */}}
+     is the active view key ("board" | "prio" | "sprint" | "velocity" | "daily");
+     the matching tab is marked current. The order is Board · Prio · Sprint ·
+     Velocity · Daily (#199) — Prio sits next to the Board, where planning
+     happens. The right side carries the shared full-resync control (present on
+     every view). */}}
 {{define "nav"}}
 <nav data-testid="nav" aria-label="Primary" class="flex items-center gap-1 border-b border-slate-200">
-  {{template "nav-link" (dict "Href" "/sprint" "Label" "Sprint" "Key" "sprint" "Active" .)}}
-  {{template "nav-link" (dict "Href" "/daily" "Label" "Daily" "Key" "daily" "Active" .)}}
   {{template "nav-link" (dict "Href" "/board" "Label" "Board" "Key" "board" "Active" .)}}
+  {{template "nav-link" (dict "Href" "/prio" "Label" "Prio" "Key" "prio" "Active" .)}}
+  {{template "nav-link" (dict "Href" "/sprint" "Label" "Sprint" "Key" "sprint" "Active" .)}}
   {{template "nav-link" (dict "Href" "/velocity" "Label" "Velocity" "Key" "velocity" "Active" .)}}
+  {{template "nav-link" (dict "Href" "/daily" "Label" "Daily" "Key" "daily" "Active" .)}}
   <span class="grow"></span>
   {{template "resync-control" .}}
   {{if authEnabled}}{{template "logout-control" .}}{{end}}
@@ -220,11 +223,12 @@
 {{end}}
 
 {{/* type-badge is a small colored badge distinguishing an issue type
-     (Task / Bug / Story) on a board card. Takes a dict of Type and Testid;
-     Bug is rose, Story emerald, Task sky, any other type slate. */}}
+     (Epic / Task / Bug / Story) on a board card or a Prio row. Takes a dict of
+     Type and Testid; Bug is rose, Story emerald, Task sky, Epic violet (added
+     for the Prio view, #199, where epics appear as rows), any other type slate. */}}
 {{define "type-badge"}}
 <span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold
-             {{if eq .Type "Bug"}}bg-rose-100 text-rose-700{{else if eq .Type "Story"}}bg-emerald-100 text-emerald-700{{else if eq .Type "Task"}}bg-sky-100 text-sky-700{{else}}bg-slate-100 text-slate-600{{end}}"
+             {{if eq .Type "Bug"}}bg-rose-100 text-rose-700{{else if eq .Type "Story"}}bg-emerald-100 text-emerald-700{{else if eq .Type "Task"}}bg-sky-100 text-sky-700{{else if eq .Type "Epic"}}bg-violet-100 text-violet-700{{else}}bg-slate-100 text-slate-600{{end}}"
       data-testid="{{.Testid}}">{{.Type}}</span>
 {{end}}
 
@@ -1148,4 +1152,53 @@
     {{if gt .Moves 1}}<span class="daily-origin-hops">· {{.Moves}} moves</span>{{end}}
   </div>
 {{if .Href}}</a>{{else}}</div>{{end}}
+{{end}}
+
+{{/* prio-panel is the swappable Prio unit: the sticky chrome (nav + title) plus
+     the table of every issue in the projection. HTMX will swap this whole unit
+     into #prio-panel once the Prio filters land, mirroring board-panel — which
+     is why GET /prio/results renders this partial rather than the bare table.
+     Takes a prioView. */}}
+{{define "prio-panel"}}
+  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50 pt-4">
+    {{template "nav" "prio"}}
+    {{template "page-header" "Prio — every ticket in the project, for deciding what to work on next."}}
+  </div>
+
+  {{template "prio-table" .}}
+{{end}}
+
+{{/* prio-table is the Prio view's flat table: one row per issue, columns
+     Type · Name · Status, ordered by issue key. The name links to the Jira issue
+     when a base URL is configured and renders as plain text when it is not,
+     matching the board card. Takes a prioView. */}}
+{{define "prio-table"}}
+{{if .Empty}}
+<p data-testid="prio-empty" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+  No tickets yet.
+</p>
+{{else}}
+<div data-testid="prio" class="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+  <table class="w-full border-collapse text-left text-sm">
+    <thead>
+      <tr class="border-b border-slate-200 text-xs font-medium uppercase tracking-wide text-slate-500">
+        <th scope="col" class="px-4 py-2" data-testid="prio-col-type">Type</th>
+        <th scope="col" class="px-4 py-2" data-testid="prio-col-name">Name</th>
+        <th scope="col" class="px-4 py-2" data-testid="prio-col-status">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}
+      <tr class="border-b border-slate-100 last:border-0" data-testid="prio-row" data-key="{{.Key}}">
+        <td class="px-4 py-2 align-top">{{template "type-badge" (dict "Type" .Type "Testid" (printf "prio:%s:type" .Key))}}</td>
+        <td class="px-4 py-2 align-top text-slate-800" data-testid="prio:{{.Key}}:name">
+          {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener" class="hover:underline">{{.Summary}}</a>{{else}}{{.Summary}}{{end}}
+        </td>
+        <td class="px-4 py-2 align-top text-slate-600" data-testid="prio:{{.Key}}:status">{{.Status}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
 {{end}}

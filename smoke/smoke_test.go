@@ -176,6 +176,8 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 	}{
 		{"/", "Sprint"}, // root redirects to /sprint (#66)
 		{"/board", "Board"},
+		{"/prio", "Prio"},
+		{"/prio/results", ""},
 		{"/daily", "Daily"},
 		{"/sprint", "Sprint"},
 		{"/velocity", "Velocity"},
