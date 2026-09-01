@@ -231,13 +231,17 @@
 {{/* board-card is one issue on the sprint board: key, title, an estimated-time
      chip (S/M/L or "no estimate") and a type badge. Takes a boardCard. When
      Href is set the whole card links to the Jira issue in a new tab; when it is
-     empty (no Jira base URL configured) the card renders without a link. */}}
+     empty (no Jira base URL configured) the card renders without a link. A card
+     the Board keeps out of the drag system (DragLocked — the Ready for Release
+     and Released / Deployed columns, #195) renders draggable="false" so not even
+     a native link drag can start on it; every other card leaves the attribute
+     off and stays draggable. */}}
 {{define "board-card"}}
 {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener"
    class="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
-   data-testid="board-card" data-key="{{.Key}}">{{else}}<div
+   data-testid="board-card" data-key="{{.Key}}"{{if .DragLocked}} draggable="false"{{end}}>{{else}}<div
    class="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
-   data-testid="board-card" data-key="{{.Key}}">{{end}}
+   data-testid="board-card" data-key="{{.Key}}"{{if .DragLocked}} draggable="false"{{end}}>{{end}}
   <div class="flex items-center justify-between gap-2">
     <span class="font-mono text-xs font-semibold text-slate-500" data-testid="card:{{.Key}}:key">{{.Key}}</span>
     {{template "type-badge" (dict "Type" .Type "Testid" (printf "card:%s:type" .Key))}}
@@ -365,6 +369,41 @@
 </style>
 {{end}}
 
+{{/* board-drag-style holds the CSS for Board drag-and-drop (#195), included ONCE
+     per Board page next to the estimate popover's styles. These are not Tailwind
+     utilities (no rebuild needed): the legal-drop outline every participating
+     column shows on drag start, the stronger fill on the hovered one, the muted
+     pending card while its write is in flight, the drag ghost, and the inline
+     error a failed move leaves on the snapped-back card. */}}
+{{define "board-drag-style"}}
+<style>
+  [data-drag-target="true"] [data-testid="board-card"] { cursor: grab; }
+  [data-drag-target="true"] .bd-chosen { cursor: grabbing; }
+  .bd-legal {
+    outline: 2px dashed #94a3b8; /* slate-400 */
+    outline-offset: -2px;
+    background-color: #eef2f7;
+  }
+  .bd-over {
+    outline: 2px solid #0ea5e9; /* sky-500 */
+    background-color: #e0f2fe; /* sky-100 */
+  }
+  .bd-ghost { opacity: 0.35; }
+  .bd-pending {
+    opacity: 0.5;
+    filter: grayscale(0.6);
+    pointer-events: none;
+  }
+  .bd-error {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    color: #e11d48; /* rose-600 */
+  }
+</style>
+{{end}}
+
 {{/* card-status renders the ticket's current workflow status as a neutral pill
      under the title (#79). It renders only when .Status is set — the Board leaves
      it empty, so no status pill appears there; the Sprint cell drill-down sets it
@@ -461,10 +500,20 @@
 </div>
 {{end}}
 
+{{/* board-column-cards renders one column's cards. A column in the Board's drag
+     surface (#195: the five columns any card can move between) is marked
+     data-drag-target="true" and its inner card list data-drag-list, which is
+     what board-drag.js binds Sortable to and reads the target status from. The
+     server decides the legal set (boardDragStatuses) — the script hard-codes no
+     column names. The two excluded columns carry neither marker, so they are not
+     drop targets, and their cards render draggable="false" (see board-card). */}}
 {{define "board-column-cards"}}
 <div class="flex w-72 shrink-0 flex-col rounded-b-xl border border-t-0 border-slate-200 bg-slate-100/60 p-3"
-     data-testid="board-column" data-status="{{.Status}}">
-  <div class="flex flex-col gap-2">
+     data-testid="board-column" data-status="{{.Status}}"{{if .Draggable}} data-drag-target="true"{{end}}>
+  {{/* grow: the card list fills the column's height so a drop anywhere inside a
+       column counts — dropping into the empty space below the last card is the
+       common gesture, and a list sized to its cards would ignore it. */}}
+  <div class="flex grow flex-col gap-2"{{if .Draggable}} data-drag-list data-status="{{.Status}}"{{end}}>
     {{range .Cards}}
       {{template "board-card" .}}
     {{end}}

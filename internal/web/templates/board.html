@@ -6,9 +6,15 @@
     {{/* board-estimate-style sits OUTSIDE #board-panel so the popover CSS is
          included exactly once and survives every HTMX panel swap. */}}
     {{template "board-estimate-style"}}
+    {{template "board-drag-style"}}
     <div id="board-panel">
       {{template "board-panel" .}}
     </div>
   </main>
+  {{/* Board drag-and-drop (#195, docs/adr/0010). Both scripts are vendored and
+       embedded in the binary and served from /static — no CDN, no npm in the
+       build path — and load only here: dragging is Board-only. */}}
+  <script src="/static/sortable.min.js"></script>
+  <script src="/static/board-drag.js"></script>
 </body>
 </html>

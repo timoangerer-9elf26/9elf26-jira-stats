@@ -53,6 +53,19 @@ So the seam takes a **status id** (`jira.StatusID*`, a table of the nine DCAI
 status ids) and picks the offered transition whose `to.id` matches.
 `jira.TransitionTo` consults `Name` for nothing but error messages.
 
+> **Amendment (#195, the drag-and-drop ticket).** The correction below is a fact
+> about the Jira workflow and stands: `Ready for Release` **is** reachable. Its
+> recommendation, though, was **not** followed. #195 shipped a drag surface of
+> exactly five columns — Refinement, Ready To Do, In Progress, Review / Testing,
+> DONE (This Sprint) — with `Ready for Release` and `Released / Deployed` outside
+> the drag system entirely (neither drop targets nor drag sources). That
+> exclusion is a **design** decision about the standup surface's mis-drop
+> budget, not a claim about the workflow: `Released / Deployed` was already
+> excluded with no workflow justification, and the two release columns behave the
+> same way for the same reason. Widening the surface later is a one-line change
+> to `boardDragStatuses` in `internal/web/board_move.go` — the map is the single
+> source of truth the markup and the handler both key off.
+
 > **Correction to a fact recorded earlier.** The Board's `Ready for Release`
 > column was believed unreachable ("no transition offers it", which was the
 > stated reason it holds zero issues). That was an artefact of looking at

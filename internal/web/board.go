@@ -49,12 +49,24 @@ type boardCard struct {
 	// "" when the card has no recorded activity or on the Sprint drill-down, in
 	// which case no timestamp renders.
 	Activity string
+	// DragLocked marks a card the Board deliberately keeps out of the drag system
+	// (#195): the cards in Ready for Release and Released / Deployed, which are
+	// neither drop targets nor drag sources. It renders draggable="false" on the
+	// card so the browser cannot start even a native link drag on it. Cards off
+	// the Board (the Sprint drill-down) leave it false and are unaffected.
+	DragLocked bool
 }
 
 // boardColumn is one workflow-status column and its cards.
 type boardColumn struct {
 	Status string
 	Cards  []boardCard
+	// Draggable marks the column as part of the Board's drag surface (#195): one
+	// of the five columns a card can be dragged out of and dropped into. The
+	// client only binds the drag library to these, and POST /board/move accepts
+	// only their statuses as targets (boardDragStatuses is the one source of
+	// truth for both).
+	Draggable bool
 }
 
 // boardView is the /board page model: the active sprint's columns plus its name
@@ -90,7 +102,15 @@ func (s *Server) handleBoardResults(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderBoard(w http.ResponseWriter, r *http.Request, name string) {
-	view, err := s.boardView(r.URL.Query())
+	s.renderBoardValues(w, r.URL.Query(), name)
+}
+
+// renderBoardValues renders the Board (page or fragment) resolved against an
+// explicit set of filter params rather than the request URL, so the drag-and-drop
+// move handler can re-render the fragment through the filters the client posted
+// alongside the drop (POST body, not query string).
+func (s *Server) renderBoardValues(w http.ResponseWriter, q url.Values, name string) {
+	view, err := s.boardView(q)
 	if err != nil {
 		s.renderError(w)
 		return
@@ -120,6 +140,7 @@ func (s *Server) boardView(q url.Values) (boardView, error) {
 	total, kept := 0, 0
 	for _, col := range board.Columns {
 		cards := make([]boardCard, 0, len(col.Cards))
+		_, draggable := boardDragTarget(col.Status)
 		for _, c := range col.Cards {
 			total++
 			if !keepCard(filters, c) {
@@ -140,9 +161,10 @@ func (s *Server) boardView(q url.Values) (boardView, error) {
 				EpicName:     c.EpicName,
 				EpicColorHex: epicPillColor(c.EpicColor),
 				Activity:     boardActivityLabel(c.LatestActivity, s.loc),
+				DragLocked:   !draggable,
 			})
 		}
-		view.Columns = append(view.Columns, boardColumn{Status: col.Status, Cards: cards})
+		view.Columns = append(view.Columns, boardColumn{Status: col.Status, Cards: cards, Draggable: draggable})
 	}
 	view.NoMatch = total > 0 && kept == 0
 

@@ -29,7 +29,7 @@ const displayTimeZone = "Europe/Berlin"
 //go:embed templates/*.html
 var templatesFS embed.FS
 
-//go:embed assets/output.css assets/htmx.min.js assets/favicon.svg assets/avatars/*.svg
+//go:embed assets/output.css assets/htmx.min.js assets/sortable.min.js assets/board-drag.js assets/favicon.svg assets/avatars/*.svg
 var assetsFS embed.FS
 
 // Rollups is the read side the web layer depends on: rollup queries over the
@@ -105,12 +105,27 @@ type Estimator interface {
 	SetEstimate(ctx context.Context, key, size string) (string, error)
 }
 
+// Transitioner is the Board drag-and-drop write path (docs/adr/0010 / #195): the
+// app's second mutation of Jira. SetStatus moves the issue into the given Jira
+// STATUS id (jira.StatusID*, resolved to a transition by target status, never by
+// transition name), re-reads that one issue and persists it, returning the
+// authoritative status NAME the re-fetch carried. An error means the write (or
+// its reconciliation read/save) failed and left BOTH Jira and the projection
+// unchanged, so the handler answers a failure and the card snaps back to its
+// origin column. It is nil when the server is built without one (most in-process
+// tests): a drop is then reported as a failed move, never silently dropped. The
+// running *sync.Syncer satisfies it.
+type Transitioner interface {
+	SetStatus(ctx context.Context, key, statusID string) (string, error)
+}
+
 // Server holds the parsed templates and the rollup source, and implements
 // http.Handler via its router.
 type Server struct {
 	rollups         Rollups
 	resyncer        Resyncer
 	estimator       Estimator
+	transitioner    Transitioner
 	templates       *template.Template
 	mux             *http.ServeMux
 	now             func() time.Time
@@ -169,6 +184,15 @@ func WithResyncer(r Resyncer) Option {
 // reported back as a failure (the pill reverts and shows an inline error).
 func WithEstimator(e Estimator) Option {
 	return func(s *Server) { s.estimator = e }
+}
+
+// WithTransitioner wires the Board drag-and-drop write path into the server,
+// enabling POST /board/move to change a ticket's status in Jira (docs/adr/0010).
+// Left unset, the board still renders its drag affordances but a drop is
+// reported back as a failed move (the card snaps back and shows an inline
+// error).
+func WithTransitioner(tr Transitioner) Option {
+	return func(s *Server) { s.transitioner = tr }
 }
 
 // WithAuth gates the server behind the shared team login (#122), enabling the
@@ -239,6 +263,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /board", s.handleBoard)
 	s.mux.HandleFunc("GET /board/results", s.handleBoardResults)
 	s.mux.HandleFunc("POST /board/estimate", s.handleBoardEstimate)
+	s.mux.HandleFunc("POST /board/move", s.handleBoardMove)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
 	s.mux.HandleFunc("GET /sprint", s.handleSprint)

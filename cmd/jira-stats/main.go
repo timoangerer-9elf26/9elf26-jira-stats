@@ -110,6 +110,11 @@ func run() error {
 		// Unlike the fire-and-forget resync it runs under the request context, so
 		// no adapter is needed — the Syncer satisfies web.Estimator directly.
 		web.WithEstimator(syncer),
+		// The Board drag-and-drop transition write path (docs/adr/0010): the same
+		// Syncer's SetStatus writes the transition to Jira, re-reads the issue and
+		// persists it. Like the estimate edit it runs under the request context,
+		// so the Syncer satisfies web.Transitioner directly.
+		web.WithTransitioner(syncer),
 	}
 	// Only override the web clock when REVIEW_NOW is set; leaving it out keeps the
 	// server's default time.Now for every production deployment.
