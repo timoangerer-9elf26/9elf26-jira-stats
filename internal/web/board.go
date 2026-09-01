@@ -69,6 +69,11 @@ type boardView struct {
 	// to render each control and its hidden round-trip inputs, so adding a filter
 	// needs no template plumbing change (see board_filter.go).
 	Filters []boardFilter
+	// NoMatch is true when the sprint has cards but the active filters hid every
+	// one of them. The Board then says so explicitly (#193) instead of rendering a
+	// silently empty set of columns, so an over-narrow search is never mistaken for
+	// an empty sprint.
+	NoMatch bool
 }
 
 // handleBoard renders the full standalone Board page.
@@ -112,12 +117,15 @@ func (s *Server) boardView(q url.Values) (boardView, error) {
 	}
 
 	view := boardView{Columns: make([]boardColumn, 0, len(board.Columns)), Filters: filters}
+	total, kept := 0, 0
 	for _, col := range board.Columns {
 		cards := make([]boardCard, 0, len(col.Cards))
 		for _, c := range col.Cards {
+			total++
 			if !keepCard(filters, c) {
 				continue // hidden by a filter; the column still renders
 			}
+			kept++
 			cards = append(cards, boardCard{
 				Key:          c.Key,
 				Summary:      c.Summary,
@@ -136,6 +144,7 @@ func (s *Server) boardView(q url.Values) (boardView, error) {
 		}
 		view.Columns = append(view.Columns, boardColumn{Status: col.Status, Cards: cards})
 	}
+	view.NoMatch = total > 0 && kept == 0
 
 	switch sprint, ok, err := s.rollups.ActiveSprintWindow(); {
 	case err != nil:

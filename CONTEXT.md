@@ -72,13 +72,15 @@ it is a snapshot, not a movement view; those stay Daily-only.
 
 ## Board filters
 
-Three **composable** filters on the [Board view](#board-view), all default
+Four **composable** filters on the [Board view](#board-view), all default
 **OFF** (so a fresh `/board` still opens as the full snapshot). Filtering
 **hides cards, never columns** — the board's shape stays stable as filters
 toggle. Selection lives in the **URL** and swaps a board fragment, built as
-reusable filter scaffolding for other views later.
+reusable filter scaffolding for other views later. When the active combination
+matches **nothing**, the Board says so explicitly rather than rendering an empty
+set of columns.
 
-The three filters (see `docs/adr/0008-board-standup-filters.md`):
+The four filters (the first three: `docs/adr/0008-board-standup-filters.md`):
 
 - **Assignee** — the [Daily view's](#assignee-filter) exact multi-select avatar
   control, reused here; defaults to all assignees.
@@ -91,6 +93,12 @@ The three filters (see `docs/adr/0008-board-standup-filters.md`):
   for Release) leaves a card **hidden** despite the column change. Because
   Canceled stays off-board, a ticket cancelled in the window does not appear
   under this lens.
+- **Search** (`?q=`) — a free-text box narrowing the board to cards whose **key**,
+  **title** or **parent epic title** contains the text, case-insensitively, as a
+  plain **substring** (no fuzzy matching). The assignee is deliberately **not**
+  matched — it has its own filter. Unlike the toggles, the control itself carries
+  the value: it is a debounced text input, so it sends its own param rather than a
+  self-encoding toggle href.
 
 ## Prio view
 

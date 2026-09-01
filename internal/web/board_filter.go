@@ -3,6 +3,7 @@ package web
 import (
 	"html/template"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
@@ -50,6 +51,7 @@ type boardFilter struct {
 // its constructor here — the plumbing needs no other change. Each constructor may
 // query the store, so the slice is built with an error.
 func (s *Server) boardFilters(q url.Values) ([]boardFilter, error) {
+	search := searchBoardFilter(q)
 	assignee, err := s.assigneeBoardFilter(q)
 	if err != nil {
 		return nil, err
@@ -63,6 +65,7 @@ func (s *Server) boardFilters(q url.Values) ([]boardFilter, error) {
 		return nil, err
 	}
 	return []boardFilter{
+		search,
 		assignee,
 		noEstimate,
 		active24h,
@@ -77,6 +80,15 @@ func (s *Server) boardFilters(q url.Values) ([]boardFilter, error) {
 // attribute), so a newly added filter is preserved without touching this control.
 func filterIncludeExceptSelf(param string) template.HTMLAttr {
 	return template.HTMLAttr(`hx-include="[data-filterparam]:not([name='` + param + `'])"`)
+}
+
+// filterIncludeAll includes EVERY filter param, the caller's own included. The
+// toggle filters cannot use it — their href already encodes the state that
+// results from flipping them, so re-sending their current param would fight the
+// href (hence filterIncludeExceptSelf). A text box is the opposite case: its
+// value lives in the control itself, so the request must carry it (#193).
+func filterIncludeAll() template.HTMLAttr {
+	return template.HTMLAttr(`hx-include="[data-filterparam]"`)
 }
 
 // keepCard reports whether a card survives ALL filters (logical AND), so
@@ -97,6 +109,50 @@ func keepCard(filters []boardFilter, card store.BoardCard) bool {
 // card-avatar partial (the Unassigned chip leaves Assignee empty for the neutral
 // circle); Selected marks it pressed; ToggleHref is the results URL that flips
 // just this chip while preserving the rest of the selection.
+const searchParam = "q"
+
+// searchBoxView is the Board search control's view model. Unlike every other
+// Board filter, the control IS the round-trip carrier: it renders a named,
+// data-filterparam-marked text input holding the current term, so sibling
+// controls pick the term up through their own include selector and the filter
+// registry emits no hidden param of its own (which would send ?q= twice).
+type searchBoxView struct {
+	Prefix      string
+	Param       string
+	Value       string
+	ResultsHref string
+	IncludeAttr template.HTMLAttr
+}
+
+// searchBoardFilter is the Board free-text search (#193): a case-insensitive
+// plain-substring test over the card's key, title and parent epic title. It
+// deliberately does NOT match the assignee — that has its own filter, and
+// overlapping the two yields result sets no one can explain. An empty (or
+// whitespace-only) term keeps every card, so clearing the box restores the board.
+func searchBoardFilter(q url.Values) boardFilter {
+	term := strings.TrimSpace(q.Get(searchParam))
+
+	box := searchBoxView{
+		Prefix:      "board-search",
+		Param:       searchParam,
+		Value:       term,
+		ResultsHref: "/board/results",
+		IncludeAttr: filterIncludeAll(),
+	}
+
+	needle := strings.ToLower(term)
+	keep := func(card store.BoardCard) bool {
+		if needle == "" {
+			return true // empty search = show all cards
+		}
+		return strings.Contains(strings.ToLower(card.Key), needle) ||
+			strings.Contains(strings.ToLower(card.Summary), needle) ||
+			strings.Contains(strings.ToLower(card.EpicName), needle)
+	}
+
+	return boardFilter{Control: "search-box", Data: box, Keep: keep}
+}
+
 type assigneeChip struct {
 	Value      string
 	Name       string
