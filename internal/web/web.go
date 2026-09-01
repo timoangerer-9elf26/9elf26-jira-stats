@@ -29,7 +29,7 @@ const displayTimeZone = "Europe/Berlin"
 //go:embed templates/*.html
 var templatesFS embed.FS
 
-//go:embed assets/output.css assets/htmx.min.js assets/avatars/*.svg
+//go:embed assets/output.css assets/htmx.min.js assets/favicon.svg assets/avatars/*.svg
 var assetsFS embed.FS
 
 // Rollups is the read side the web layer depends on: rollup queries over the
