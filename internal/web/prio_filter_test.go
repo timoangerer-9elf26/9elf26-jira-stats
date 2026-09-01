@@ -1,9 +1,12 @@
 package web_test
 
-// Integration tests for the Prio view's Not-done filter (#202): a two-state
-// toggle, default ON, built on the Board's URL-encoded, fragment-swapping
-// filter scaffolding. On it keeps the not-done statuses (Triage included); off
-// it reveals the Done set and Canceled too.
+// Integration tests for the Prio view's two filters, both two-state toggles
+// built on the Board's URL-encoded, fragment-swapping filter scaffolding.
+// Not-done (#202) is default ON: on it keeps the not-done statuses (Triage
+// included), off it reveals the Done set and Canceled too. Non-Technical (#203)
+// is the mirror image, default OFF: off it shows every ticket, on it hides the
+// ones carrying the exact `Technical` label. The two are independent, so the
+// last tests here drive them in combination.
 
 import (
 	"strings"
@@ -155,5 +158,148 @@ func TestPrioNoMatchState(t *testing.T) {
 	off := get(t, app.URL+"/prio/results?not-done=0")
 	if !strings.Contains(off, `data-key="DCAI-8"`) {
 		t.Errorf("not-done off should show the released row\n%s", off)
+	}
+}
+
+// prioLabelFixture pairs technical-ness with done-ness so the two toggles can be
+// exercised independently and in combination. DCAI-1/-2 are not done, -3/-4 are
+// done; the odd ones carry the exact `Technical` label, the even ones do not.
+func prioLabelFixture() *jira.FakeClient {
+	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
+		{Key: "DCAI-1", Type: "Task", Summary: "Technical, not done", Status: "In Progress", StatusCategory: "In Progress", Priority: "High", Labels: []string{"Technical"}},
+		{Key: "DCAI-2", Type: "Task", Summary: "Product, not done", Status: "Triage", StatusCategory: "To Do", Priority: "High", Labels: []string{"Product"}},
+		{Key: "DCAI-3", Type: "Task", Summary: "Technical, done", Status: "Released / Deployed", StatusCategory: "Done", Priority: "Low", Labels: []string{"Frontend", "Technical"}},
+		{Key: "DCAI-4", Type: "Task", Summary: "Unlabelled, done", Status: "Released / Deployed", StatusCategory: "Done", Priority: "Low"},
+	}}
+}
+
+// AC1: the Non-Technical toggle renders on the Prio filter chrome, default OFF,
+// its state URL-encoded.
+func TestPrioNonTechnicalToggleRendersDefaultOff(t *testing.T) {
+	app := newTestApp(t, prioLabelFixture())
+	body := get(t, app.URL+"/prio")
+
+	for _, want := range []string{
+		`data-testid="prio-non-technical"`,
+		`data-testid="prio-non-technical-toggle"`,
+		"Non-Technical",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("prio filter chrome missing %q\n%s", want, body)
+		}
+	}
+	if strings.Contains(openingTag(body, `data-testid="prio-non-technical-toggle"`), "aria-pressed") {
+		t.Errorf("the Non-Technical toggle should render unpressed on a fresh /prio\n%s", body)
+	}
+	if !strings.Contains(body, `hx-get="/prio/results?non-technical=1"`) {
+		t.Errorf("unpressed Non-Technical toggle should link to the on state\n%s", body)
+	}
+	if strings.Contains(body, `name="non-technical"`) {
+		t.Errorf("the default-off Non-Technical filter should emit no param\n%s", body)
+	}
+	if !strings.Contains(body, `hx-include="[data-filterparam]:not([name='non-technical'])"`) {
+		t.Errorf("Non-Technical toggle should hx-include only the other filters\n%s", body)
+	}
+}
+
+// The spec (#196) wants the toggles stacked "Non-Technical, then Not done",
+// which the prioFilters registry order decides.
+func TestPrioNonTechnicalStacksLeftOfNotDone(t *testing.T) {
+	app := newTestApp(t, prioLabelFixture())
+	body := get(t, app.URL+"/prio")
+
+	nonTechnical := strings.Index(body, `data-testid="prio-non-technical"`)
+	notDone := strings.Index(body, `data-testid="prio-not-done"`)
+	if nonTechnical < 0 || notDone < 0 {
+		t.Fatalf("prio chrome is missing a toggle (non-technical=%d, not-done=%d)\n%s", nonTechnical, notDone, body)
+	}
+	if nonTechnical > notDone {
+		t.Errorf("toggles should stack Non-Technical then Not done\n%s", body)
+	}
+}
+
+// AC3: off, every ticket shows regardless of the `Technical` label — whether the
+// param is absent or explicitly off.
+func TestPrioNonTechnicalOffShowsTechnicalTickets(t *testing.T) {
+	app := newTestApp(t, prioLabelFixture())
+
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{"param absent", "/prio/results?not-done=0"},
+		{"param explicitly off", "/prio/results?not-done=0&non-technical=0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertPrioRows(t, get(t, app.URL+tc.path), []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-4"}, nil)
+		})
+	}
+}
+
+// AC2 + AC5: on, `Technical`-labelled tickets are hidden and the rest (including
+// unlabelled ones) remain, and the swapped fragment carries the flipped toggle
+// and its round-trip param back.
+func TestPrioNonTechnicalOnHidesTechnicalTickets(t *testing.T) {
+	app := newTestApp(t, prioLabelFixture())
+	fragment := get(t, app.URL+"/prio/results?not-done=0&non-technical=1")
+
+	// Only the `Technical`-labelled rows go; unlabelled rows stay.
+	assertPrioRows(t, fragment, []string{"DCAI-2", "DCAI-4"}, []string{"DCAI-1", "DCAI-3"})
+	if !strings.Contains(openingTag(fragment, `data-testid="prio-non-technical-toggle"`), `aria-pressed="true"`) {
+		t.Errorf("Non-Technical toggle should render pressed when on\n%s", fragment)
+	}
+	if !strings.Contains(fragment, `hx-get="/prio/results"`) {
+		t.Errorf("pressed Non-Technical toggle should link back to the default off state\n%s", fragment)
+	}
+	if !strings.Contains(fragment, `<input type="hidden" data-filterparam name="non-technical" value="1">`) {
+		t.Errorf("the on state should be re-emitted as a filter param\n%s", fragment)
+	}
+}
+
+// "Technical" is matched as an exact whole label (capital T, the canonical
+// stored value): neither a differently-cased nor a prefixed label counts.
+func TestPrioNonTechnicalMatchesTheExactLabel(t *testing.T) {
+	app := newTestApp(t, &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
+		{Key: "DCAI-1", Type: "Task", Summary: "Exact", Status: "Triage", StatusCategory: "To Do", Priority: "Medium", Labels: []string{"Technical"}},
+		{Key: "DCAI-2", Type: "Task", Summary: "Lowercased", Status: "Triage", StatusCategory: "To Do", Priority: "Medium", Labels: []string{"technical"}},
+		{Key: "DCAI-3", Type: "Task", Summary: "Prefixed", Status: "Triage", StatusCategory: "To Do", Priority: "Medium", Labels: []string{"Technical-Debt"}},
+	}})
+
+	body := get(t, app.URL+"/prio?non-technical=1")
+	assertPrioRows(t, body, []string{"DCAI-2", "DCAI-3"}, []string{"DCAI-1"})
+}
+
+// AC4: the two filters combine as a plain intersection — all four quadrants.
+func TestPrioFiltersCombineIndependently(t *testing.T) {
+	app := newTestApp(t, prioLabelFixture())
+
+	for _, tc := range []struct {
+		name   string
+		query  string
+		want   []string
+		absent []string
+	}{
+		{"defaults: not-done on, non-technical off", "", []string{"DCAI-1", "DCAI-2"}, []string{"DCAI-3", "DCAI-4"}},
+		{"both on", "?non-technical=1", []string{"DCAI-2"}, []string{"DCAI-1", "DCAI-3", "DCAI-4"}},
+		{"both off", "?not-done=0", []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-4"}, nil},
+		{"non-technical alone", "?not-done=0&non-technical=1", []string{"DCAI-2", "DCAI-4"}, []string{"DCAI-1", "DCAI-3"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertPrioRows(t, get(t, app.URL+"/prio"+tc.query), tc.want, tc.absent)
+		})
+	}
+}
+
+// AC4: each toggle's href must carry the OTHER filter's non-default state so a click
+// round-trips both selections through the URL.
+func TestPrioToggleHrefsPreserveTheOtherFilter(t *testing.T) {
+	app := newTestApp(t, prioLabelFixture())
+	body := get(t, app.URL+"/prio?not-done=0&non-technical=1")
+
+	if !strings.Contains(body, `<input type="hidden" data-filterparam name="not-done" value="0">`) {
+		t.Errorf("not-done off should round-trip as a param\n%s", body)
+	}
+	if !strings.Contains(body, `<input type="hidden" data-filterparam name="non-technical" value="1">`) {
+		t.Errorf("non-technical on should round-trip as a param\n%s", body)
 	}
 }

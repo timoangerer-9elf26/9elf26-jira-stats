@@ -15,6 +15,7 @@ package web
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
@@ -41,6 +42,7 @@ type prioFilter struct {
 // goes FIRST in this slice — prepended, not appended.
 func prioFilters(q url.Values) []prioFilter {
 	return []prioFilter{
+		nonTechnicalPrioFilter(q),
 		notDonePrioFilter(q),
 	}
 }
@@ -104,6 +106,55 @@ func notDonePrioFilter(q url.Values) prioFilter {
 			return true // off = every status, done and canceled included
 		}
 		return notDoneStatuses[strings.ToLower(issue.Status)]
+	}
+
+	return prioFilter{Control: "filter-toggle", Data: toggle, Params: params, Keep: keep}
+}
+
+// nonTechnicalParam is the URL/query key carrying the Non-Technical toggle state.
+// The toggle is on iff this param equals nonTechnicalOn. It is the mirror image of
+// not-done: default OFF, so the param encodes the ON state and its absence means
+// "show everything".
+const (
+	nonTechnicalParam = "non-technical"
+	nonTechnicalOn    = "1"
+	// technicalLabel is the canonical stored Jira label, matched exactly (capital
+	// T, whole label). There is no positive non-technical label — non-technical is
+	// simply the absence of this one, so an unlabelled ticket always survives.
+	technicalLabel = "Technical"
+)
+
+// nonTechnicalPrioFilter builds the Prio view's Non-Technical toggle (#203) from the
+// query: the compact control, a Keep predicate that (when on) hides any issue
+// carrying the exact `Technical` label, and the round-trip param. Default off (no
+// param) shows every issue, so it composes with the not-done filter as a plain
+// intersection via keepPrioIssue.
+func nonTechnicalPrioFilter(q url.Values) prioFilter {
+	on := q.Get(nonTechnicalParam) == nonTechnicalOn
+
+	toggle := filterToggleView{
+		Prefix: "prio-non-technical",
+		Label:  "Non-Technical",
+		On:     on,
+		// Default off, so the href encodes the on state and drops the param to go
+		// back off — the inverse of the default-on Not-done toggle.
+		ToggleHref: toggleHref("/prio/results", nonTechnicalParam, nonTechnicalOn, !on),
+		// The toggle encodes its own resulting state in ToggleHref, so it must NOT
+		// re-include its own hidden param (which would fight the href), but it MUST
+		// preserve every other filter.
+		IncludeAttr: filterIncludeExceptSelf(nonTechnicalParam),
+	}
+
+	var params []filterParam
+	if on {
+		params = append(params, filterParam{Name: nonTechnicalParam, Value: nonTechnicalOn})
+	}
+
+	keep := func(issue store.PrioIssue) bool {
+		if !on {
+			return true // off = every issue, technical included
+		}
+		return !slices.Contains(issue.Labels, technicalLabel)
 	}
 
 	return prioFilter{Control: "filter-toggle", Data: toggle, Params: params, Keep: keep}
