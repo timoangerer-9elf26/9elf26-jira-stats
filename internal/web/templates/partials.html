@@ -510,7 +510,10 @@
 {{define "board-column-cards"}}
 <div class="flex w-72 shrink-0 flex-col rounded-b-xl border border-t-0 border-slate-200 bg-slate-100/60 p-3"
      data-testid="board-column" data-status="{{.Status}}"{{if .Draggable}} data-drag-target="true"{{end}}>
-  <div class="flex flex-col gap-2"{{if .Draggable}} data-drag-list data-status="{{.Status}}"{{end}}>
+  {{/* grow: the card list fills the column's height so a drop anywhere inside a
+       column counts — dropping into the empty space below the last card is the
+       common gesture, and a list sized to its cards would ignore it. */}}
+  <div class="flex grow flex-col gap-2"{{if .Draggable}} data-drag-list data-status="{{.Status}}"{{end}}>
     {{range .Cards}}
       {{template "board-card" .}}
     {{end}}

@@ -26,12 +26,11 @@
   "use strict";
 
   var PANEL_ID = "board-panel";
+  // The one message a failed drop ever shows. Deliberately identical to the
+  // server's boardMoveError (internal/web/board_move.go), so a failure looks the
+  // same whether it came back from the handler or never reached it at all.
   var GENERIC_ERROR = "Couldn't move — try again.";
   var instances = [];
-
-  function panel() {
-    return document.getElementById(PANEL_ID) || document;
-  }
 
   function dragColumns() {
     return Array.prototype.slice.call(
@@ -66,6 +65,11 @@
     span.setAttribute("data-move-error", "");
     span.setAttribute("data-testid", "card:" + key + ":move-error");
     span.setAttribute("role", "alert");
+    // The card is a link to Jira; clicking its error message must not follow it.
+    span.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    });
     span.textContent = message;
     card.appendChild(span);
   }
@@ -98,11 +102,10 @@
       body: body.toString(),
     })
       .then(function (res) {
-        if (!res.ok) {
-          return res.text().then(function (text) {
-            throw new Error((text || "").trim() || GENERIC_ERROR);
-          });
-        }
+        // A redirect means the session expired and this is the login page, not a
+        // board: treat it as a failed move rather than swapping a login form
+        // into the board panel.
+        if (!res.ok || res.redirected) throw new Error("move failed");
         return res.text();
       })
       .then(function (html) {
@@ -112,13 +115,19 @@
         if (window.htmx) window.htmx.process(target);
         bind();
       })
-      .catch(function (err) {
-        // Snap back: put the card where it came from, exactly where it was.
+      .catch(function () {
+        // Snap back: put the card where it came from, exactly where it was —
+        // unless the panel has since been re-rendered under us (another drop
+        // landed first), in which case that server-rendered board is already
+        // authoritative and resurrecting a detached card would be a lie.
         card.classList.remove("bd-pending");
         card.removeAttribute("data-move-pending");
+        if (!fromList.isConnected) return;
         var sibling = fromList.children[oldIndex] || null;
         fromList.insertBefore(card, sibling);
-        showError(card, (err && err.message) || GENERIC_ERROR);
+        // Always the generic message: the technical cause is logged server-side
+        // (or is a browser-level fetch error), and neither is the user's problem.
+        showError(card, GENERIC_ERROR);
       });
   }
 
@@ -150,6 +159,12 @@
           filter: "[data-estimate-control]",
           preventOnFilter: false,
           animation: 120,
+          // The fallback (mouse-event) driver rather than native HTML5 drag: a
+          // board card IS an <a>, and the browser's own link-drag races Sortable's
+          // native path and aborts the drop mid-flight.
+          forceFallback: true,
+          fallbackOnBody: true,
+          fallbackTolerance: 3,
           ghostClass: "bd-ghost",
           chosenClass: "bd-chosen",
           onStart: function () {
@@ -184,9 +199,7 @@
   document.addEventListener("htmx:afterSwap", function (evt) {
     var t = evt.target;
     if (!t || !t.closest) return;
-    if (t.id === PANEL_ID || t.closest("#" + PANEL_ID) || panel().contains(t)) {
-      bind();
-    }
+    if (t.id === PANEL_ID || t.closest("#" + PANEL_ID)) bind();
   });
 
   ready(bind);

@@ -11,7 +11,9 @@ import (
 
 // boardMoveError is the generic inline message a failed drop shows. The
 // technical cause (permissions, a 4xx, a dead network) is logged server-side and
-// never rendered — the user's only useful action is to try again.
+// never rendered — the user's only useful action is to try again. The client
+// carries the same string (GENERIC_ERROR in assets/board-drag.js) for failures
+// that never reach the server, so a failed drop always reads the same.
 const boardMoveError = "Couldn't move — try again."
 
 // boardDragStatuses is the Board's drag surface (#195): the five columns that
