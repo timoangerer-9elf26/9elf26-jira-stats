@@ -91,6 +91,54 @@ func TestVersionEndpointReportsInjectedValue(t *testing.T) {
 	}
 }
 
+// TestFaviconIsServedAndLinkedFromEveryView asserts the tab icon (#192) is a
+// static embedded SVG served from /static and linked from the shared page head,
+// so every view — including the logged-out login page — shows the mark in the
+// browser tab. It must be a real file, not a data: URI: html/template rewrites
+// those to #ZgotmplZ.
+func TestFaviconIsServedAndLinkedFromEveryView(t *testing.T) {
+	const faviconLink = `<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">`
+
+	app := newTestApp(t, jira.NewFakeClient())
+
+	resp, err := http.Get(app.URL + "/static/favicon.svg")
+	if err != nil {
+		t.Fatalf("GET /static/favicon.svg: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /static/favicon.svg: status %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "image/svg+xml") {
+		t.Fatalf("GET /static/favicon.svg: Content-Type = %q, want image/svg+xml", ct)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read favicon body: %v", err)
+	}
+	if !strings.Contains(string(body), "<svg") {
+		t.Fatalf("favicon.svg is not an SVG document:\n%s", body)
+	}
+
+	for _, path := range []string{"/sprint", "/daily", "/board", "/velocity"} {
+		page := get(t, app.URL+path)
+		if !strings.Contains(page, faviconLink) {
+			t.Fatalf("GET %s: favicon link %q missing from head", path, faviconLink)
+		}
+		if strings.Contains(page, "ZgotmplZ") {
+			t.Fatalf("GET %s: head contains #ZgotmplZ; the icon must be a served file, not a data: URI", path)
+		}
+	}
+
+	loginPage := get(t, newAuthApp(t).URL+"/login")
+	if !strings.Contains(loginPage, faviconLink) {
+		t.Fatalf("GET /login: favicon link %q missing from head", faviconLink)
+	}
+	if strings.Contains(loginPage, "ZgotmplZ") {
+		t.Fatalf("GET /login: head contains #ZgotmplZ")
+	}
+}
+
 func assertOrder(t *testing.T, body string, needles ...string) {
 	t.Helper()
 	prev := -1

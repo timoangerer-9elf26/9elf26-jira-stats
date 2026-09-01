@@ -1,11 +1,14 @@
 {{/* page-head renders the shared document <head>: charset/viewport, the
-     embedded Tailwind stylesheet and vendored HTMX, and a per-page <title>
-     (the string argument). */}}
+     embedded favicon, the embedded Tailwind stylesheet and vendored HTMX, and
+     a per-page <title> (the string argument). The icon is linked as a served
+     file rather than inlined as a data: URI — html/template rewrites those to
+     #ZgotmplZ (#192). */}}
 {{define "page-head"}}
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.}}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/output.css">
   <style>
     /* Tailwind v4's Preflight gives buttons the default cursor; restore the

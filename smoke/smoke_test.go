@@ -186,6 +186,7 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 		{"/version", "dev"}, // unstamped build reports the "dev" default
 		{"/static/output.css", ""},
 		{"/static/htmx.min.js", ""},
+		{"/static/favicon.svg", "<svg"}, // tab icon, embedded like the rest (#192)
 	}
 
 	for _, tc := range cases {
@@ -260,12 +261,12 @@ func TestVersionStampIsServedAndShownInMarker(t *testing.T) {
 	}
 }
 
-// TestStaticAssetsAreEmbedded confirms the CSS and JS are served from the
-// binary itself (non-empty, correct-ish content types), i.e. no CDN needed.
+// TestStaticAssetsAreEmbedded confirms the CSS, JS and tab icon are served from
+// the binary itself (non-empty, correct-ish content types), i.e. no CDN needed.
 func TestStaticAssetsAreEmbedded(t *testing.T) {
 	base := startDashboard(t)
 
-	for _, path := range []string{"/static/output.css", "/static/htmx.min.js"} {
+	for _, path := range []string{"/static/output.css", "/static/htmx.min.js", "/static/favicon.svg"} {
 		code, body := get(t, base+path)
 		if code != http.StatusOK {
 			t.Fatalf("GET %s: status %d", path, code)
