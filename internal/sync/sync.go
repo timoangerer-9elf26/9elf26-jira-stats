@@ -179,7 +179,9 @@ func (s *Syncer) SetEstimate(ctx context.Context, key, size string) (string, err
 // ticket into the requested status in Jira, then immediately re-reads that one
 // issue and persists it, so the projection is set only ever from a Jira read —
 // the identical write → re-read → persist shape as SetEstimate (docs/adr/0005).
-// It returns the authoritative status the re-fetched issue carries.
+// Note the units differ by direction, deliberately: it takes a status ID (the
+// only unambiguous way to name a target) and returns the status NAME the
+// re-fetched issue carries — the value the projection stores and a card renders.
 //
 // statusID is a Jira STATUS id (see jira.StatusID*), not a transition id and not
 // a status name: Jira offers a transition labelled "Done" that lands in a

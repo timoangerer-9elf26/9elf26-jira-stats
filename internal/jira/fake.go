@@ -156,8 +156,12 @@ func (c *FakeClient) TransitionIssue(ctx context.Context, key, transitionID stri
 	if c.WriteErr != nil {
 		return c.WriteErr
 	}
+	offered, err := c.FetchTransitions(ctx, key)
+	if err != nil {
+		return err
+	}
 	var target Transition
-	for _, tr := range c.Transitions {
+	for _, tr := range offered {
 		if tr.ID == transitionID {
 			target = tr
 			break

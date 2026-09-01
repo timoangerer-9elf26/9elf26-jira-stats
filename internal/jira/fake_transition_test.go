@@ -53,6 +53,28 @@ func TestFakeClientTransitionMovesTheIssue(t *testing.T) {
 	}
 }
 
+// A struct-literal FakeClient (how most tests build one) must be able to perform
+// the transitions it offers: FetchTransitions defaults to the DCAI set, so
+// TransitionIssue has to resolve against that same default.
+func TestZeroValueFakeClientCanPerformAnOfferedTransition(t *testing.T) {
+	c := &FakeClient{Issues: []Issue{{Key: "DCAI-1", Status: "Refinement", StatusCategory: "To Do"}}}
+
+	trs, err := c.FetchTransitions(context.Background(), "DCAI-1")
+	if err != nil {
+		t.Fatalf("FetchTransitions: %v", err)
+	}
+	tr, err := TransitionTo(trs, StatusIDReadyToDo)
+	if err != nil {
+		t.Fatalf("TransitionTo: %v", err)
+	}
+	if err := c.TransitionIssue(context.Background(), "DCAI-1", tr.ID); err != nil {
+		t.Fatalf("TransitionIssue: %v", err)
+	}
+	if c.Issues[0].Status != "Ready To Do" {
+		t.Errorf("status = %q, want %q", c.Issues[0].Status, "Ready To Do")
+	}
+}
+
 func TestFakeClientRejectsAnUnknownTransition(t *testing.T) {
 	c := NewFakeClient()
 	if err := c.TransitionIssue(context.Background(), c.Issues[0].Key, "nope"); err == nil {

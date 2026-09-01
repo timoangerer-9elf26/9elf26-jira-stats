@@ -312,45 +312,28 @@ func (c *LiveClient) get(ctx context.Context, path string, q url.Values, out any
 	return nil
 }
 
-// put issues an authenticated PUT with a JSON body and expects a no-content
-// success (Jira answers 204 on a successful issue edit). It is the write
-// counterpart to get; the same basic-auth token is reused.
+// put issues an authenticated PUT with a JSON body (the shape every field edit
+// uses); see write for the shared plumbing.
 func (c *LiveClient) put(ctx context.Context, path string, body any) error {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.cfg.BaseURL+path, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.SetBasicAuth(c.cfg.Email, c.cfg.APIToken)
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Jira returns 204 No Content on a successful edit; accept any 2xx.
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("PUT %s: status %d: %s", path, resp.StatusCode, b)
-	}
-	return nil
+	return c.write(ctx, http.MethodPut, path, body)
 }
 
-// post issues an authenticated POST with a JSON body and expects a no-content
-// success (Jira answers 204 on a performed transition). Same auth and error
-// shape as put; only the verb differs.
+// post is put's sibling for the one write that is not an edit: performing a
+// transition (POST /issue/{key}/transitions).
 func (c *LiveClient) post(ctx context.Context, path string, body any) error {
+	return c.write(ctx, http.MethodPost, path, body)
+}
+
+// write issues an authenticated request with a JSON body and expects a
+// no-content success (Jira answers 204 both to a successful issue edit and to a
+// performed transition). It is the write counterpart to get; the same basic-auth
+// token is reused.
+func (c *LiveClient) write(ctx context.Context, method, path string, body any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+path, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, method, c.cfg.BaseURL+path, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -364,9 +347,10 @@ func (c *LiveClient) post(ctx context.Context, path string, body any) error {
 	}
 	defer resp.Body.Close()
 
+	// Jira returns 204 No Content on success; accept any 2xx.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("POST %s: status %d: %s", path, resp.StatusCode, b)
+		return fmt.Errorf("%s %s: status %d: %s", method, path, resp.StatusCode, b)
 	}
 	return nil
 }
