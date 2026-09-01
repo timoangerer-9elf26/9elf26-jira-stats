@@ -87,9 +87,7 @@ func filterIncludeExceptSelf(param string) template.HTMLAttr {
 // results from flipping them, so re-sending their current param would fight the
 // href (hence filterIncludeExceptSelf). A text box is the opposite case: its
 // value lives in the control itself, so the request must carry it (#193).
-func filterIncludeAll() template.HTMLAttr {
-	return template.HTMLAttr(`hx-include="[data-filterparam]"`)
-}
+const filterIncludeAll template.HTMLAttr = `hx-include="[data-filterparam]"`
 
 // keepCard reports whether a card survives ALL filters (logical AND), so
 // composing filters simply intersects their predicates.
@@ -137,7 +135,7 @@ func searchBoardFilter(q url.Values) boardFilter {
 		Param:       searchParam,
 		Value:       term,
 		ResultsHref: "/board/results",
-		IncludeAttr: filterIncludeAll(),
+		IncludeAttr: filterIncludeAll,
 	}
 
 	needle := strings.ToLower(term)

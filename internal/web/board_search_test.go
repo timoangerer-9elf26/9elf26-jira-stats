@@ -44,9 +44,9 @@ func boardSearchFixture() *jira.FakeClient {
 
 const boardSearchAllKeys = "DCAI-20 DCAI-21 DCAI-22 DCAI-23"
 
-// assertCards asserts exactly the given keys render as board cards (out of the
-// fixture's four).
-func assertCards(t *testing.T, body string, want ...string) {
+// assertSearchFixtureCards asserts exactly the given keys render as board cards,
+// over the search fixture's four keys and no others.
+func assertSearchFixtureCards(t *testing.T, body string, want ...string) {
 	t.Helper()
 	wanted := map[string]bool{}
 	for _, k := range want {
@@ -72,6 +72,10 @@ func TestBoardRendersSearchBox(t *testing.T) {
 	for _, want := range []string{
 		`data-testid="board-search"`,
 		`data-testid="board-search-input"`,
+		// The id is what lets htmx restore focus and caret across the swap that
+		// replaces the very input being typed in — without it, typing dies after
+		// the first debounced request.
+		`id="board-search-input"`,
 		`name="q"`,
 		`data-filterparam`,                // siblings include the search text
 		`hx-get="/board/results"`,         // typing swaps the board panel
@@ -83,7 +87,7 @@ func TestBoardRendersSearchBox(t *testing.T) {
 		}
 	}
 	// Fresh load: empty box, every card visible.
-	assertCards(t, body, "DCAI-20", "DCAI-21", "DCAI-22", "DCAI-23")
+	assertSearchFixtureCards(t, body, "DCAI-20", "DCAI-21", "DCAI-22", "DCAI-23")
 
 	// The search box is Board-only.
 	for _, path := range []string{"/daily", "/sprint", "/velocity"} {
@@ -116,7 +120,7 @@ func TestBoardSearchMatchesKeyTitleAndEpic(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := get(t, app.URL+"/board/results?q="+url.QueryEscape(tc.term))
 			assertAllColumnsRender(t, body) // AC6: filtering never removes a column
-			assertCards(t, body, tc.want...)
+			assertSearchFixtureCards(t, body, tc.want...)
 		})
 	}
 }
@@ -127,12 +131,12 @@ func TestBoardSearchIsSubstringOnlyAndIgnoresAssignee(t *testing.T) {
 
 	// "Ada" is an assignee on three cards but appears in no key, title or epic.
 	byAssignee := get(t, app.URL+"/board/results?q=Ada")
-	assertCards(t, byAssignee /* none */)
+	assertSearchFixtureCards(t, byAssignee /* none */)
 
 	// Fuzzy/subsequence matches must not hit: "rty" is a subsequence of "retry"
 	// but not a substring of it.
 	fuzzy := get(t, app.URL+"/board/results?q=rty")
-	assertCards(t, fuzzy /* none */)
+	assertSearchFixtureCards(t, fuzzy /* none */)
 }
 
 // AC4: the search text round-trips in the URL as ?q= — loading such a URL
@@ -142,14 +146,14 @@ func TestBoardSearchRoundTripsInURL(t *testing.T) {
 
 	page := get(t, app.URL+"/board?q=checkout")
 	assertAllColumnsRender(t, page)
-	assertCards(t, page, "DCAI-20", "DCAI-23")
+	assertSearchFixtureCards(t, page, "DCAI-20", "DCAI-23")
 	if !strings.Contains(page, `value="checkout"`) {
 		t.Errorf("bookmarked /board?q= should re-render the term in the box\n%s", page)
 	}
 
 	// Clearing it restores the full board.
 	cleared := get(t, app.URL+"/board/results?q=")
-	assertCards(t, cleared, "DCAI-20", "DCAI-21", "DCAI-22", "DCAI-23")
+	assertSearchFixtureCards(t, cleared, "DCAI-20", "DCAI-21", "DCAI-22", "DCAI-23")
 }
 
 // AC5: search composes with the assignee, no-estimate and active-24h filters as a
@@ -162,7 +166,7 @@ func TestBoardSearchComposesWithOtherFilters(t *testing.T) {
 	body := get(t, app.URL+"/board/results?q=checkout&assignee="+url.QueryEscape("Ada Lovelace")+"&no-estimate=1")
 	assertAllColumnsRender(t, body)
 	// checkout-epic ∩ Ada ∩ unsized = DCAI-23 only (DCAI-20 is Ada+checkout but sized).
-	assertCards(t, body, "DCAI-23")
+	assertSearchFixtureCards(t, body, "DCAI-23")
 
 	// The other filters' state round-trips as hidden params, and the search term
 	// round-trips in the box — so changing any one preserves the rest.
@@ -185,7 +189,7 @@ func TestBoardSearchNoMatchesState(t *testing.T) {
 
 	body := get(t, app.URL+"/board/results?q=zzzznope")
 	assertAllColumnsRender(t, body)
-	assertCards(t, body /* none */)
+	assertSearchFixtureCards(t, body /* none */)
 	if !strings.Contains(body, `data-testid="board-no-match"`) {
 		t.Errorf("a search matching nothing should show the no-match state\n%s", body)
 	}

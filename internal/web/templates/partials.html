@@ -954,11 +954,21 @@
 
      hx-trigger debounces input (500ms after typing stops) so a keystroke does not
      fire a request per character, and also fires on the native "search" event so
-     the browser's clear (×) affordance restores the full board immediately. Takes
-     a searchBoxView (Prefix, Param, Value, ResultsHref, IncludeAttr). */}}
+     the browser's clear (×) affordance restores the full board immediately.
+
+     The id is load-bearing, not decoration: the swap replaces the very input being
+     typed in, and htmx only restores focus and caret position across a swap for an
+     active element that HAS an id. Without it the box silently loses focus the
+     moment the debounce fires and the rest of the word goes nowhere.
+
+     Pressing Enter is left to the browser: the box is the filter form's only text
+     field, so Enter natively GETs /board with every filter param — a full reload
+     of exactly the shareable ?q= URL, which is also the one way a user gets that
+     URL into the address bar (no control here pushes it). Takes a searchBoxView
+     (Prefix, Param, Value, ResultsHref, IncludeAttr). */}}
 {{define "search-box"}}
 <div data-testid="{{.Prefix}}" class="flex items-center">
-  <input type="search" data-testid="{{.Prefix}}-input" data-filterparam
+  <input type="search" id="{{.Prefix}}-input" data-testid="{{.Prefix}}-input" data-filterparam
          name="{{.Param}}" value="{{.Value}}"
          placeholder="Search key, title or epic" aria-label="Search cards by key, title or epic"
          autocomplete="off"
