@@ -340,6 +340,24 @@ one ticket is re-read from Jira, and the projection is set from what the read
 returned, so a failed write leaves both Jira and the board unchanged (see
 `docs/adr/0010`).
 
+The gesture is **drag-and-drop**, mouse-only (no keyboard path, no status-picker
+fallback), across the **drag surface**: exactly five of the Board's columns —
+**Refinement, Ready To Do, In Progress, Review / Testing and DONE (This
+Sprint)** — any of which can move to any other. **Ready for Release** and
+**Released / Deployed** are outside the drag system entirely: not drop targets,
+and their cards are not draggable either (one rule, not two). There are **no
+off-board targets** — Canceled and Triage stay unreachable by dragging even
+though Jira permits those transitions, because cancelling a ticket is exactly
+the consequential move that should not happen by a mis-drop on a standup board.
+Dragging **never reorders** within a column: the app writes no rank field, so a
+drop means one thing only, "change the status". A drop is
+**server-authoritative** — the card sits **pending** (muted) in the target
+column while the write is in flight, then the board re-renders from the
+post-write re-read; a failure snaps the card back to its origin column with a
+generic inline message. The re-render passes through the active
+[Board filters](#board-filters), so a moved card that no longer matches one is
+simply absent from it.
+
 A Board transition is **not** a [Daily movement](#daily-movement), and the two
 must not be blurred: a Board transition is a status change the app **causes**; a
 Daily movement is the app's **observation** of a status change (whoever or

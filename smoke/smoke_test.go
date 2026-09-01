@@ -186,7 +186,9 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 		{"/version", "dev"}, // unstamped build reports the "dev" default
 		{"/static/output.css", ""},
 		{"/static/htmx.min.js", ""},
-		{"/static/favicon.svg", "<svg"}, // tab icon, embedded like the rest (#192)
+		{"/static/sortable.min.js", "Sortable"}, // vendored drag library (#195)
+		{"/static/board-drag.js", "board/move"}, // the Board's drag-and-drop glue (#195)
+		{"/static/favicon.svg", "<svg"},         // tab icon, embedded like the rest (#192)
 	}
 
 	for _, tc := range cases {
@@ -266,7 +268,7 @@ func TestVersionStampIsServedAndShownInMarker(t *testing.T) {
 func TestStaticAssetsAreEmbedded(t *testing.T) {
 	base := startDashboard(t)
 
-	for _, path := range []string{"/static/output.css", "/static/htmx.min.js", "/static/favicon.svg"} {
+	for _, path := range []string{"/static/output.css", "/static/htmx.min.js", "/static/sortable.min.js", "/static/board-drag.js", "/static/favicon.svg"} {
 		code, body := get(t, base+path)
 		if code != http.StatusOK {
 			t.Fatalf("GET %s: status %d", path, code)
