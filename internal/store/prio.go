@@ -5,8 +5,9 @@ import (
 	"strings"
 )
 
-// PrioIssue is one row of the Prio view's whole-project projection: an issue's
-// display fields, independent of sprint and status. Unlike every other read on
+// PrioIssue is one row of the Prio view's whole-project projection: the fields
+// the Prio view reads, independent of sprint and status. Not all of them are
+// displayed — ParentKey backs the No-parent filter and has no column (#210). Unlike every other read on
 // this store, the Prio read is NOT scoped to the active sprint (CONTEXT.md →
 // Prio view), so a row here may be backlog, Triage or long-since released work.
 type PrioIssue struct {
@@ -25,8 +26,9 @@ type PrioIssue struct {
 	// ParentKey is the key of the issue's parent (in DCAI usually an Epic), empty
 	// when the issue is top-of-tree — which is every Epic today, plus any
 	// unparented Task, Bug or Story. Unlike priority and labels it needed no
-	// resync to join the projection: `parent_key` has been written on every issue
-	// save since migration 00008, it was simply not selected here (#210).
+	// resync of its own to join the projection: `parent_key` has been written on
+	// every issue save since migration 00008, so any row synced since then already
+	// carries it; it was simply not selected here (#210).
 	ParentKey string
 }
 
