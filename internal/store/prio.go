@@ -5,8 +5,9 @@ import (
 	"strings"
 )
 
-// PrioIssue is one row of the Prio view's whole-project projection: an issue's
-// display fields, independent of sprint and status. Unlike every other read on
+// PrioIssue is one row of the Prio view's whole-project projection: the fields
+// the Prio view reads, independent of sprint and status. Not all of them are
+// displayed — ParentKey backs the No-parent filter and has no column (#210). Unlike every other read on
 // this store, the Prio read is NOT scoped to the active sprint (CONTEXT.md →
 // Prio view), so a row here may be backlog, Triage or long-since released work.
 type PrioIssue struct {
@@ -22,6 +23,13 @@ type PrioIssue struct {
 	// projection). They are split back out of the space-delimited `labels`
 	// column, so each stays a whole string a caller can match exactly.
 	Labels []string
+	// ParentKey is the key of the issue's parent (in DCAI usually an Epic), empty
+	// when the issue is top-of-tree — which is every Epic today, plus any
+	// unparented Task, Bug or Story. Unlike priority and labels it needed no
+	// resync of its own to join the projection: `parent_key` has been written on
+	// every issue save since migration 00008, so any row synced since then already
+	// carries it; it was simply not selected here (#210).
+	ParentKey string
 }
 
 // PrioIssues returns EVERY issue in the projection as a Prio row, ordered by
@@ -31,7 +39,7 @@ type PrioIssue struct {
 // ActiveSprintBoard rather than pushing filter logic into the store.
 func (s *Store) PrioIssues() ([]PrioIssue, error) {
 	const query = `
-		SELECT key, type, summary, status, COALESCE(priority, ''), COALESCE(labels, '')
+		SELECT key, type, summary, status, COALESCE(priority, ''), COALESCE(labels, ''), COALESCE(parent_key, '')
 		FROM issue
 		ORDER BY key`
 
@@ -45,7 +53,7 @@ func (s *Store) PrioIssues() ([]PrioIssue, error) {
 	for rows.Next() {
 		var issue PrioIssue
 		var labels string
-		if err := rows.Scan(&issue.Key, &issue.Type, &issue.Summary, &issue.Status, &issue.Priority, &labels); err != nil {
+		if err := rows.Scan(&issue.Key, &issue.Type, &issue.Summary, &issue.Status, &issue.Priority, &labels, &issue.ParentKey); err != nil {
 			return nil, fmt.Errorf("scan prio issue: %w", err)
 		}
 		issue.Labels = strings.Fields(labels)

@@ -1147,7 +1147,7 @@
   {{template "prio-table" .}}
 {{end}}
 
-{{/* prio-filters is the Prio view's filter chrome (#202, #203) — the Board's
+{{/* prio-filters is the Prio view's filter chrome (#202, #203, #209, #210) — the Board's
      filter-agnostic region (see "board-filters") pointed at #prio-panel. One
      <form> that, on any control change, swaps the whole panel via HTMX so filter
      state stays URL-encoded and bookmarkable without a full-page reload. It
@@ -1155,12 +1155,19 @@
      data-filterparam (so a change to one filter round-trips the others), then
      renders each filter's control partial by name via the render func. Adding a
      filter means slotting it into the prioFilters registry; this region does not
-     change (as the #203 Non-Technical toggle showed). Controls stack left-to-right
-     in registry order — Non-Technical, then Not done. Takes a prioView (needs .Filters). */}}
+     change (as the #203 Non-Technical, #209 Not started and #210 No parent
+     toggles showed).
+
+     The controls sit against the RIGHT edge (#209, justify-end) while the card
+     itself stays full-width, so it keeps its alignment with the page header
+     above and the table below — the Board's assignee bar (#186) does the same
+     with ml-auto. They read left-to-right in registry order against that edge:
+     Non-Technical, Not done, Not started, No parent — the first three lit by
+     default, No parent unlit. Takes a prioView (needs .Filters). */}}
 {{define "prio-filters"}}
 <form data-testid="prio-filters"
       hx-target="#prio-panel" hx-swap="innerHTML"
-      class="mt-4 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      class="mt-4 flex flex-wrap items-end justify-end gap-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
   {{/* Always-present filter-param anchor: a control hx-includes the OTHER
        filters via [data-filterparam]:not([name='<own>']), and with every filter
        at its default that selector would otherwise match nothing and make HTMX

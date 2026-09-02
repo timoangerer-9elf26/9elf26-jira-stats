@@ -56,7 +56,7 @@ type filterToggleView struct {
 // is encoded, so URLs stay short and a bare /board or /prio means "every filter
 // at its default". Pass encode = whether the state the flip lands in is the
 // non-default one: for a default-off filter that is !on (flipping off→on must
-// encode), for the default-on Not-done filter it is on (flipping on→off must).
+// encode), for a default-on filter it is on (flipping on→off must).
 // Only the toggle's own param is encoded; other filters ride along via
 // hx-include.
 func toggleHref(basePath, param, value string, encode bool) string {

@@ -27,11 +27,17 @@ the projection — become first-class synced fields on the `issue` row.
 ## The non-obvious consequences
 
 - **The universe is dominated by done work.** ~1,259 of ~1,400 issues are
-  Released / Deployed. So the Prio filters — unlike the Board's, which all default
-  OFF — **default Not-done ON**, and the view leans on filtering rather than
-  showing its raw universe. A future reader comparing filter defaults across views
-  should not "fix" this to match the Board; it is deliberate (see
+  Released / Deployed. So the Prio filters that narrow by **status and label** —
+  unlike the Board's, which all default OFF — **default ON**: the view opens on
+  the narrowed, prioritisable slice rather than its raw universe, and leans on
+  filters to widen back out. A future reader comparing filter defaults across
+  views should not "fix" this to match the Board; it is deliberate (see
   [Prio filters](../../CONTEXT.md#prio-filters)).
+
+  The registry is **not uniform** in this, and must not be assumed to be. A
+  filter that narrows on some *other* axis is an ordinary default-OFF filter
+  taking the usual `<param>=1`-means-on encoding — No parent (#210) is the
+  first. Only the default-ON ones flip that round, encoding their OFF state instead.
 
 - **Existing rows are blank until a full resync.** Because `priority` and `labels`
   are additive projection columns, historical tickets carry them only after a
