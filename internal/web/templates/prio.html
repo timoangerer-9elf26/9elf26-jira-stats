@@ -3,6 +3,9 @@
 {{template "page-head" "Prio — 9elf26 Jira Stats"}}
 <body class="min-h-screen bg-slate-50 text-slate-900">
   <main class="px-4 pb-4 sm:px-6">
+    {{/* prio-priority-style sits OUTSIDE #prio-panel so the priority popover CSS
+         is included exactly once and survives every HTMX panel swap (#212). */}}
+    {{template "prio-priority-style"}}
     <div id="prio-panel">
       {{template "prio-panel" .}}
     </div>

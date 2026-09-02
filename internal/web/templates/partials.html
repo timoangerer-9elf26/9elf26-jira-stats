@@ -1180,7 +1180,9 @@
 {{end}}
 
 {{/* prio-table is the Prio view's flat table: one row per surviving issue, columns
-     Type · Name · Priority · Status · Labels, sorted priority Highest→Lowest (ties by key). The name links to the Jira issue
+     Type · Name · Priority · Status · Labels, sorted priority Highest→Lowest (ties by key). A row a priority
+     edit just changed (prioRow.Edited, #212) carries data-edited + a tinted
+     background so the eye finds where it re-sorted to. The name links to the Jira issue
      when a base URL is configured and renders as plain text when it is not,
      matching the board card. With no rows it says so: "no tickets match" when
      the filters hid everything, "no tickets yet" when the projection is empty.
@@ -1210,7 +1212,7 @@
     </thead>
     <tbody>
       {{range .Rows}}
-      <tr class="border-b border-slate-100 last:border-0" data-testid="prio-row" data-key="{{.Key}}">
+      <tr class="border-b border-slate-100 last:border-0{{if .Edited}} pri-row--edited{{end}}" data-testid="prio-row" data-key="{{.Key}}"{{if .Edited}} data-edited="true"{{end}}>
         <td class="px-4 py-2 align-top">{{template "type-badge" (dict "Type" .Type "Testid" (printf "prio:%s:type" .Key))}}</td>
         <td class="px-4 py-2 align-top text-slate-800" data-testid="prio:{{.Key}}:name">
           {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener" class="hover:underline">{{.Summary}}</a>{{else}}{{.Summary}}{{end}}
@@ -1236,17 +1238,154 @@
 {{- end -}}
 {{end}}
 
+{{/* priority-glyph draws one priority level's icon: a Jira-like severity glyph
+     (stacked chevrons, coloured and shaped by the level; see priorityLevels in
+     prio.go). Shared by the Prio row's read-only cell, the editable trigger and
+     each menu choice (#212). Takes a dict of Icon (priorityIcon) and Testid ("" to
+     emit none — the menu's glyphs must not masquerade as a row's own). */}}
+{{define "priority-glyph"}}<svg viewBox="0 0 14 14" class="h-3.5 w-3.5 shrink-0"
+     fill="none" style="stroke:{{.Icon.Color}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+     aria-hidden="true"{{if .Testid}} data-testid="{{.Testid}}"{{end}}><path d="{{.Icon.Path}}"/></svg>{{end}}
+
 {{/* priority-cell renders one Prio row's priority: the level's icon (a Jira-like
      severity glyph — stacked chevrons, coloured and shaped by the level; see
      priorityLevels in prio.go) followed by the level's name. An issue with no
      priority (which DCAI issues do not have, but a row synced before priority
-     joined the projection can) renders a dash and no icon. Takes a prioRow. */}}
+     joined the projection can) renders a dash and no icon.
+
+     When the row is Editable (#212 — the Prio table is the only surface that
+     sets it) the cell is the priority edit: a real <button popovertarget> whose
+     native popover lists the five levels (never a clear/none choice), each an
+     hx-post to /prio/priority that swaps the WHOLE #prio-panel — the estimate
+     edit's cell-swap precedent does not transfer, because a priority change
+     re-ranks the row and the table must re-sort in the same response. The
+     choices hx-include every [data-filterparam] hidden input so the re-rendered
+     panel keeps the active filters, and mark #prio-panel as the hx-indicator so
+     the panel dims while the write is in flight. The popover sits in the top
+     layer (not clipped by the table's overflow-x scroll wrapper, even on the
+     last row) and is placed under its trigger with CSS anchor positioning
+     (per-row anchor-name); where unsupported it degrades to the UA's centred
+     top-layer panel. Esc / light-dismiss / focusability come from the native
+     popover — no JS, which is also why the choices are plain buttons in a
+     labelled group rather than an ARIA menu: menu roles promise arrow-key
+     navigation and focus management this deliberately does not implement. A
+     failed write leaves an inline error under the trigger (.Error). Styling
+     lives in prio-priority-style. Takes a prioRow. */}}
 {{define "priority-cell"}}
+{{- if .Editable -}}
+<span class="pri" data-testid="prio:{{.Key}}:priority">
+  <button type="button" class="pri-trigger" popovertarget="pri-menu-{{.Key}}"
+          style="anchor-name:--pri-{{.Key}}"
+          data-testid="prio:{{.Key}}:priority-trigger"
+          aria-label="Edit priority for {{.Key}}">
+    {{if .Icon.Path}}{{template "priority-glyph" (dict "Icon" .Icon "Testid" (printf "prio:%s:priority-icon" .Key))}}{{end}}
+    {{if .Priority}}<span data-testid="prio:{{.Key}}:priority-name">{{.Priority}}</span>
+    {{else}}<span class="text-slate-400" data-testid="prio:{{.Key}}:priority-name">—</span>{{end}}
+  </button>
+  <div id="pri-menu-{{.Key}}" popover class="pri-menu" role="group" aria-label="Priority for {{.Key}}"
+       style="position-anchor:--pri-{{.Key}}"
+       data-testid="prio:{{.Key}}:priority-menu"
+       hx-target="#prio-panel" hx-swap="innerHTML" hx-include="[data-filterparam]" hx-indicator="#prio-panel">
+    {{range priorityLevels}}
+    <button type="button" class="pri-opt{{if eq .Name $.Priority}} pri-opt--sel{{end}}"
+            data-testid="prio:{{$.Key}}:priority-opt:{{.Slug}}"
+            {{if eq .Name $.Priority}}aria-current="true"{{end}}
+            hx-post="/prio/priority" hx-vals='{"key":"{{$.Key}}","priority":"{{.Name}}"}'>
+      {{template "priority-glyph" (dict "Icon" .Icon "Testid" "")}}
+      <span>{{.Name}}</span>
+    </button>
+    {{end}}
+  </div>
+  {{if .Error}}<span class="pri-error" data-testid="prio:{{.Key}}:priority-error" role="alert">{{.Error}}</span>{{end}}
+</span>
+{{- else -}}
 <span class="inline-flex items-center gap-1.5" data-testid="prio:{{.Key}}:priority">
-  {{if .Icon.Path}}<svg viewBox="0 0 14 14" class="h-3.5 w-3.5 shrink-0"
-       fill="none" style="stroke:{{.Icon.Color}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-       aria-hidden="true" data-testid="prio:{{.Key}}:priority-icon"><path d="{{.Icon.Path}}"/></svg>{{end}}
+  {{if .Icon.Path}}{{template "priority-glyph" (dict "Icon" .Icon "Testid" (printf "prio:%s:priority-icon" .Key))}}{{end}}
   {{if .Priority}}<span data-testid="prio:{{.Key}}:priority-name">{{.Priority}}</span>
   {{else}}<span class="text-slate-400" data-testid="prio:{{.Key}}:priority-name">—</span>{{end}}
 </span>
+{{- end -}}
+{{end}}
+
+{{/* prio-priority-style holds the CSS for the Prio priority edit (#212), kept
+     out of the per-row cell partial and included ONCE per Prio page, OUTSIDE
+     #prio-panel so it survives every panel swap. None of it is a Tailwind
+     utility (no rebuild): the trigger is a quiet inline button; the popover is a
+     native top-layer panel, anchored under its trigger where CSS anchor
+     positioning exists (flipping above when it would overflow the viewport
+     bottom) and left at the UA's centred fallback where it does not; the
+     current level is marked; the panel dims and stops taking clicks while a
+     write is in flight (htmx puts .htmx-request on the hx-indicator); the
+     just-edited row is tinted; the inline error is a small rose line. */}}
+{{define "prio-priority-style"}}
+<style>
+  .pri { display: inline-flex; flex-direction: column; align-items: flex-start; }
+  .pri-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin: -0.125rem -0.5rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 0.375rem;
+    background: transparent;
+    border: 0;
+    font: inherit;
+    color: inherit;
+    line-height: 1.25rem;
+  }
+  .pri-trigger:hover { background: #f1f5f9; } /* slate-100 */
+  .pri-trigger:focus-visible { outline: 2px solid #0ea5e9; outline-offset: 1px; } /* sky-500 */
+  .pri-menu {
+    min-width: 9rem;
+    padding: 0.25rem;
+    background: #ffffff;
+    border: 1px solid #e2e8f0; /* slate-200 */
+    border-radius: 0.5rem;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+  .pri-menu:popover-open { display: flex; }
+  @supports (anchor-name: --a) {
+    .pri-menu {
+      inset: auto;
+      margin: 0.25rem 0 0 0;
+      top: anchor(bottom);
+      left: anchor(left);
+      position-try-fallbacks: flip-block;
+    }
+  }
+  .pri-opt {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    border: 0;
+    border-radius: 0.375rem;
+    padding: 0.25rem 0.5rem;
+    background: transparent;
+    font: inherit;
+    font-size: 0.75rem;
+    line-height: 1rem;
+    color: #475569; /* slate-600 */
+    text-align: left;
+    outline: none;
+  }
+  .pri-opt:hover,
+  .pri-opt:focus-visible { background: #f1f5f9; } /* slate-100 */
+  .pri-opt--sel { background: #e0f2fe; color: #0f172a; } /* sky-100 / slate-900 */
+  .pri-error {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    color: #e11d48; /* rose-600 */
+  }
+  .pri-row--edited td { background: #fef9c3; } /* amber-100 */
+  #prio-panel.htmx-request {
+    opacity: 0.55;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+  }
+</style>
 {{end}}

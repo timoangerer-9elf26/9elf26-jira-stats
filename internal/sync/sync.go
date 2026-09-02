@@ -175,6 +175,35 @@ func (s *Syncer) SetEstimate(ctx context.Context, key, size string) (string, err
 	return iss.Size, nil
 }
 
+// SetPriority is the Prio view's priority edit write path (#212): it writes the
+// level (one of jira.Priorities, BY NAME) to Jira, then immediately re-reads that
+// one issue and persists it — the identical write → re-read → persist shape as
+// SetEstimate (docs/adr/0005) and SetStatus (docs/adr/0010), so the projection
+// is only ever set from a Jira read. Unlike SetEstimate it hands nothing back:
+// the caller re-renders the whole Prio panel from the store afterwards, which is
+// what re-sorts the table around the change. Any failure (write, re-read or
+// save) is returned and leaves both Jira and the projection unchanged.
+//
+// As with the other two writes, only the SaveIssue persist takes the sync mutex,
+// so the Jira round-trips never block on an in-flight cycle.
+func (s *Syncer) SetPriority(ctx context.Context, key, priority string) error {
+	if err := s.client.UpdateIssuePriority(ctx, key, priority); err != nil {
+		return fmt.Errorf("update priority: %w", err)
+	}
+	iss, err := s.client.FetchIssue(ctx, key)
+	if err != nil {
+		return fmt.Errorf("re-fetch issue: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	syncedAt := time.Now().UTC().Format(time.RFC3339)
+	if err := s.store.SaveIssue(iss, syncedAt); err != nil {
+		return fmt.Errorf("save issue: %w", err)
+	}
+	return nil
+}
+
 // SetStatus is the Board transition write path (docs/adr/0010): it moves a
 // ticket into the requested status in Jira, then immediately re-reads that one
 // issue and persists it, so the projection is set only ever from a Jira read —

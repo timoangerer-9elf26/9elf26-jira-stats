@@ -4,6 +4,8 @@ status: accepted
 
 # Editable estimate on the Board writes back to Jira
 
+> **Amended (2026-09, #212): there are now three write paths** — this estimate edit, the [Board transition](../CONTEXT.md#board-transition) (`docs/adr/0010`) and the Prio view's [Priority edit](../CONTEXT.md#priority-edit), the latter two copying this ADR's write → re-read → persist shape (no new ADR).
+
 > **Amended (2026-07): editing is no longer Board-only.** When the Daily view
 > became a board (`docs/adr/0003`) it adopted the same board-style card, so the
 > **editable estimate pill now renders on the Daily board as well**. It is the

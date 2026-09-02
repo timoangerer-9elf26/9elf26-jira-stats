@@ -32,9 +32,10 @@ type FakeClient struct {
 	// Err, if set, is returned by both fetch methods (for exercising error
 	// paths).
 	Err error
-	// WriteErr, if set, is returned by UpdateIssueSize instead of applying the
-	// write, so a test can exercise the Board estimate edit's failure path (the
-	// pill reverts and an inline error shows, with Jira left unchanged).
+	// WriteErr, if set, is returned by every write (UpdateIssueSize,
+	// UpdateIssuePriority, TransitionIssue) instead of applying it, so a test can
+	// exercise a write path's failure branch (the control reverts / shows an
+	// inline error, with Jira left unchanged).
 	WriteErr error
 	// Transitions is the transition set offered for every issue. It defaults to
 	// the live DCAI workflow (DCAITransitions), so the fake carries the same
@@ -127,6 +128,26 @@ func (c *FakeClient) UpdateIssueSize(ctx context.Context, key, size string) erro
 	for i := range c.Issues {
 		if c.Issues[i].Key == key {
 			c.Issues[i].Size = size
+			return nil
+		}
+	}
+	return fmt.Errorf("fake jira: issue %q not found", key)
+}
+
+// UpdateIssuePriority applies the priority write in memory (or returns
+// WriteErr), so the Prio view's priority edit is a live control in local dev
+// and the smoke suite (#212). Like live Jira it accepts exactly the five level
+// names (jira.Priorities) and nothing else — there is no "clear priority".
+func (c *FakeClient) UpdateIssuePriority(ctx context.Context, key, priority string) error {
+	if c.WriteErr != nil {
+		return c.WriteErr
+	}
+	if !ValidPriority(priority) {
+		return fmt.Errorf("fake jira: unknown priority %q (want one of %v)", priority, Priorities)
+	}
+	for i := range c.Issues {
+		if c.Issues[i].Key == key {
+			c.Issues[i].Priority = priority
 			return nil
 		}
 	}

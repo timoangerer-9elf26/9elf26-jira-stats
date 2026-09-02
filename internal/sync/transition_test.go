@@ -90,14 +90,7 @@ func TestSetStatusWritesThenRereadsThenPersists(t *testing.T) {
 		t.Errorf("returned status = %q, want %q", got, "In Progress")
 	}
 	want := []string{"transitions:DCAI-1", "transition:DCAI-1:21", "fetch:DCAI-1"}
-	if len(client.calls) != len(want) {
-		t.Fatalf("calls = %v, want %v", client.calls, want)
-	}
-	for i := range want {
-		if client.calls[i] != want[i] {
-			t.Fatalf("calls = %v, want %v", client.calls, want)
-		}
-	}
+	assertCalls(t, client.calls, want)
 	if len(store.saved) != 1 || store.saved[0].Key != client.reread.Key || store.saved[0].Status != client.reread.Status {
 		t.Errorf("saved = %+v, want exactly the re-read issue", store.saved)
 	}
