@@ -1070,16 +1070,33 @@
      NON-default value as a hidden param instead, which is why IncludeAttr is the
      pill's "all but self" selector rather than include-all.
 
+     The chevron is ours, not the platform's. Chrome and Firefox let padding
+     push the native arrow inward, but Safari insets it by its own rule and
+     ignores us, which is what left it crowding the right border. So the select
+     is appearance-none, reserves room on its right, and the wrapper positions a
+     pointer-events-none chevron in that space, making the gap either side of
+     the arrow the same value in every engine. Under forced colours the UA
+     re-asserts its own arrow regardless, so there we hand the control back
+     rather than paint a second chevron beside the system one.
+
      Takes a filterSelectView (Prefix, Label, Param, Options, ResultsHref,
      IncludeAttr). */}}
 {{define "filter-select"}}
 <div data-testid="{{.Prefix}}" class="flex items-center gap-2">
   <label for="{{.Prefix}}-select" class="text-sm font-medium text-slate-600">{{.Label}}</label>
-  <select id="{{.Prefix}}-select" data-testid="{{.Prefix}}-select" name="{{.Param}}"
-          hx-get="{{.ResultsHref}}" {{.IncludeAttr}}
-          class="cursor-pointer rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 focus:border-slate-400 focus:outline-none">
-    {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
-  </select>
+  <div class="relative shrink-0">
+    <select id="{{.Prefix}}-select" data-testid="{{.Prefix}}-select" name="{{.Param}}"
+            hx-get="{{.ResultsHref}}" {{.IncludeAttr}}
+            class="cursor-pointer appearance-none rounded-md border border-slate-200 bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-slate-700 focus:border-slate-400 focus:outline-none forced-colors:appearance-auto forced-colors:pr-3">
+      {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+         aria-hidden="true"
+         class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 forced-colors:hidden">
+      <path d="m6 9 6 6 6-6"/>
+    </svg>
+  </div>
 </div>
 {{end}}
 
