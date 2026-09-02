@@ -1238,6 +1238,15 @@
 {{- end -}}
 {{end}}
 
+{{/* priority-glyph draws one priority level's icon: a Jira-like severity glyph
+     (stacked chevrons, coloured and shaped by the level; see priorityLevels in
+     prio.go). Shared by the Prio row's read-only cell, the editable trigger and
+     each menu choice (#212). Takes a dict of Icon (priorityIcon) and Testid ("" to
+     emit none — the menu's glyphs must not masquerade as a row's own). */}}
+{{define "priority-glyph"}}<svg viewBox="0 0 14 14" class="h-3.5 w-3.5 shrink-0"
+     fill="none" style="stroke:{{.Icon.Color}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+     aria-hidden="true"{{if .Testid}} data-testid="{{.Testid}}"{{end}}><path d="{{.Icon.Path}}"/></svg>{{end}}
+
 {{/* priority-cell renders one Prio row's priority: the level's icon (a Jira-like
      severity glyph — stacked chevrons, coloured and shaped by the level; see
      priorityLevels in prio.go) followed by the level's name. An issue with no
@@ -1257,32 +1266,32 @@
      last row) and is placed under its trigger with CSS anchor positioning
      (per-row anchor-name); where unsupported it degrades to the UA's centred
      top-layer panel. Esc / light-dismiss / focusability come from the native
-     popover — no JS. A failed write leaves an inline error under the trigger
-     (.Error). Styling lives in prio-priority-style. Takes a prioRow. */}}
+     popover — no JS, which is also why the choices are plain buttons in a
+     labelled group rather than an ARIA menu: menu roles promise arrow-key
+     navigation and focus management this deliberately does not implement. A
+     failed write leaves an inline error under the trigger (.Error). Styling
+     lives in prio-priority-style. Takes a prioRow. */}}
 {{define "priority-cell"}}
 {{- if .Editable -}}
 <span class="pri" data-testid="prio:{{.Key}}:priority">
   <button type="button" class="pri-trigger" popovertarget="pri-menu-{{.Key}}"
           style="anchor-name:--pri-{{.Key}}"
           data-testid="prio:{{.Key}}:priority-trigger"
-          aria-haspopup="menu" aria-label="Edit priority for {{.Key}}">
-    {{if .Icon.Path}}<svg viewBox="0 0 14 14" class="h-3.5 w-3.5 shrink-0"
-         fill="none" style="stroke:{{.Icon.Color}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-         aria-hidden="true" data-testid="prio:{{.Key}}:priority-icon"><path d="{{.Icon.Path}}"/></svg>{{end}}
+          aria-label="Edit priority for {{.Key}}">
+    {{if .Icon.Path}}{{template "priority-glyph" (dict "Icon" .Icon "Testid" (printf "prio:%s:priority-icon" .Key))}}{{end}}
     {{if .Priority}}<span data-testid="prio:{{.Key}}:priority-name">{{.Priority}}</span>
     {{else}}<span class="text-slate-400" data-testid="prio:{{.Key}}:priority-name">—</span>{{end}}
   </button>
-  <div id="pri-menu-{{.Key}}" popover class="pri-menu" role="menu" aria-label="Priority for {{.Key}}"
+  <div id="pri-menu-{{.Key}}" popover class="pri-menu" role="group" aria-label="Priority for {{.Key}}"
        style="position-anchor:--pri-{{.Key}}"
        data-testid="prio:{{.Key}}:priority-menu"
        hx-target="#prio-panel" hx-swap="innerHTML" hx-include="[data-filterparam]" hx-indicator="#prio-panel">
     {{range priorityLevels}}
-    <button type="button" class="pri-opt{{if eq .Name $.Priority}} pri-opt--sel{{end}}" role="menuitem"
+    <button type="button" class="pri-opt{{if eq .Name $.Priority}} pri-opt--sel{{end}}"
             data-testid="prio:{{$.Key}}:priority-opt:{{.Slug}}"
             {{if eq .Name $.Priority}}aria-current="true"{{end}}
             hx-post="/prio/priority" hx-vals='{"key":"{{$.Key}}","priority":"{{.Name}}"}'>
-      <svg viewBox="0 0 14 14" class="h-3.5 w-3.5 shrink-0" fill="none" style="stroke:{{.Icon.Color}}"
-           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{.Icon.Path}}"/></svg>
+      {{template "priority-glyph" (dict "Icon" .Icon "Testid" "")}}
       <span>{{.Name}}</span>
     </button>
     {{end}}
@@ -1291,9 +1300,7 @@
 </span>
 {{- else -}}
 <span class="inline-flex items-center gap-1.5" data-testid="prio:{{.Key}}:priority">
-  {{if .Icon.Path}}<svg viewBox="0 0 14 14" class="h-3.5 w-3.5 shrink-0"
-       fill="none" style="stroke:{{.Icon.Color}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-       aria-hidden="true" data-testid="prio:{{.Key}}:priority-icon"><path d="{{.Icon.Path}}"/></svg>{{end}}
+  {{if .Icon.Path}}{{template "priority-glyph" (dict "Icon" .Icon "Testid" (printf "prio:%s:priority-icon" .Key))}}{{end}}
   {{if .Priority}}<span data-testid="prio:{{.Key}}:priority-name">{{.Priority}}</span>
   {{else}}<span class="text-slate-400" data-testid="prio:{{.Key}}:priority-name">—</span>{{end}}
 </span>

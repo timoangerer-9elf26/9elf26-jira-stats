@@ -87,12 +87,11 @@ func (s *Server) renderPrioWith(w http.ResponseWriter, q url.Values, name string
 	}
 }
 
-// prioView reads the whole projection, drops the rows the active filters hide,
-// and maps the rest to table rows.
-// prioView builds the Prio table for the filter params q. edit marks the row a
-// priority write just targeted: highlighted when the write landed, carrying the
-// inline error when it did not. Every row renders editable — the Prio table is
-// the one surface the priority is editable on.
+// prioView reads the whole projection, drops the rows the active filters (q)
+// hide, and maps the rest to table rows. edit marks the row a priority write
+// just targeted: highlighted when the write landed, carrying the inline error
+// when it did not. Every row renders editable — the Prio table is the one
+// surface the priority is editable on.
 func (s *Server) prioView(q url.Values, edit prioEdit) (prioView, error) {
 	issues, err := s.rollups.PrioIssues()
 	if err != nil {
@@ -104,7 +103,7 @@ func (s *Server) prioView(q url.Values, edit prioEdit) (prioView, error) {
 		if !keepPrioIssue(filters, issue) {
 			continue // hidden by a filter
 		}
-		rows = append(rows, prioRow{
+		row := prioRow{
 			Key:      issue.Key,
 			Type:     issue.Type,
 			Summary:  issue.Summary,
@@ -114,9 +113,12 @@ func (s *Server) prioView(q url.Values, edit prioEdit) (prioView, error) {
 			Href:     s.jiraIssueURL(issue.Key),
 			Labels:   issue.Labels,
 			Editable: true, // the Prio table is the sole surface the priority is editable on (#212)
-			Edited:   issue.Key == edit.Key && edit.Error == "",
-			Error:    pick(issue.Key == edit.Key, edit.Error, ""),
-		})
+		}
+		if issue.Key == edit.Key {
+			row.Edited = edit.Error == ""
+			row.Error = edit.Error
+		}
+		rows = append(rows, row)
 	}
 	sortByPriority(rows)
 	return prioView{
@@ -138,20 +140,20 @@ type priorityIcon struct {
 	Path  string // SVG path data (several chevrons ride in one path as sub-paths)
 }
 
-// priorityLevels is the single ordered table of Jira's five priority levels:
-// most important first, so a level's index IS its sort rank, and each level's
-// icon lives next to it. Adding or renaming a level is a one-line edit here —
-// nothing else in the app enumerates the levels.
-// priorityLevel is one of the five Jira levels as the Prio view draws it. Index
-// in priorityLevels is the sort rank; Name is the Jira priority name, which is
-// also the value the priority edit writes back (#212); Slug is the testid
-// suffix of its menu choice.
+// priorityLevel is one of the five Jira levels as the Prio view draws it: Name
+// is the Jira priority name (the value the priority edit writes back, #212),
+// Slug the testid suffix of its menu choice, Icon its glyph.
 type priorityLevel struct {
 	Name string
 	Slug string
 	Icon priorityIcon
 }
 
+// priorityLevels is the ordered table of Jira's five priority levels as the Prio
+// view draws them: most important first, so a level's index IS its sort rank,
+// and each level's icon lives next to it. The names mirror jira.Priorities (the
+// write whitelist) one-for-one, in order — a test keeps the two in step, so a
+// level added or renamed there must be added here too, with its icon.
 var priorityLevels = []priorityLevel{
 	{"Highest", "highest", priorityIcon{Color: "#E11D48", Path: "M2 7l5-4 5 4M2 12l5-4 5 4"}},
 	{"High", "high", priorityIcon{Color: "#F97316", Path: "M2 9.5l5-4 5 4"}},
@@ -194,12 +196,4 @@ func sortByPriority(rows []prioRow) {
 		}
 		return rows[i].Key < rows[j].Key
 	})
-}
-
-// pick returns a when cond holds, else b.
-func pick(cond bool, a, b string) string {
-	if cond {
-		return a
-	}
-	return b
 }

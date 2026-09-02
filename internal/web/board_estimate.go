@@ -6,10 +6,12 @@ import (
 	"strings"
 )
 
-// estimateWriteError is the inline message shown on a card when a Board estimate
+// writeError is the inline message shown on a card when a Board estimate
 // write fails (permissions / network / 4xx, or the reconciliation re-fetch). It
 // is deliberately generic and non-technical — the detail is logged server-side.
-const estimateWriteError = "Couldn't save — try again."
+// writeError is the generic inline message every Jira write path shows on
+// failure (estimate edit, priority edit): the cause is logged, not shown.
+const writeError = "Couldn't save — try again."
 
 // handleBoardEstimate is the Board estimate edit's write endpoint (#108,
 // docs/adr/0005): the popover's choices POST here to write a ticket's size back
@@ -34,14 +36,14 @@ func (s *Server) handleBoardEstimate(w http.ResponseWriter, r *http.Request) {
 	if s.estimator == nil {
 		// No write path wired (e.g. an in-process test without a Syncer): the edit
 		// can't be honored, so fail safe — revert and show the inline error.
-		s.renderEstimateControl(w, key, prior, estimateWriteError)
+		s.renderEstimateControl(w, key, prior, writeError)
 		return
 	}
 
 	newSize, err := s.estimator.SetEstimate(r.Context(), key, size)
 	if err != nil {
 		log.Printf("web: board estimate write %s=%q failed: %v", key, size, err)
-		s.renderEstimateControl(w, key, prior, estimateWriteError)
+		s.renderEstimateControl(w, key, prior, writeError)
 		return
 	}
 	s.renderEstimateControl(w, key, newSize, "")
