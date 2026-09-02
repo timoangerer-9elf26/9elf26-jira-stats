@@ -29,10 +29,10 @@ func prioFixture() *jira.FakeClient {
 	}}
 }
 
-// Every column-content assertion below drives the view with every filter turned
-// off (#202, #203, #209), so the whole fixture — released work, In Progress work
-// and Technical-labelled work included — renders. The defaults narrow to the
-// not-started, non-technical slice, which is not what these tests are about.
+// Every column-content assertion below drives the view with every filter widened
+// (#202, #203, #209, #214), so the whole fixture — released work, In Progress
+// work and Technical-labelled work included — renders. The defaults narrow to
+// the Planned, non-technical slice, which is not what these tests are about.
 func TestPrioListsEveryIssueWithTypeNameStatus(t *testing.T) {
 	app := newTestApp(t, prioFixture(), web.WithJiraBaseURL("https://9elf26.atlassian.net/"))
 	body := get(t, app.URL+"/prio?"+prioEveryFilterOff)

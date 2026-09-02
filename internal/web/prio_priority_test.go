@@ -51,9 +51,10 @@ func newPriorityApp(t *testing.T, fake *jira.FakeClient, opts ...web.Option) *te
 }
 
 // everyFilterOff is the form-encoded shape of prioEveryFilterOff: what the
-// hidden [data-filterparam] inputs carry when every default-on filter is off.
+// hidden [data-filterparam] inputs carry with the status select at All and the
+// default-on pills off.
 func everyFilterOff(extra url.Values) url.Values {
-	vals := url.Values{"not-done": {"0"}, "not-started": {"0"}, "non-technical": {"0"}}
+	vals := url.Values{"status": {"all"}, "non-technical": {"0"}}
 	for k, v := range extra {
 		vals[k] = v
 	}
@@ -177,33 +178,33 @@ func TestPrioPriorityWriteResortsAndHighlightsTheRow(t *testing.T) {
 func TestPrioPriorityWritePreservesActiveFilters(t *testing.T) {
 	app := newPriorityApp(t, prioFixture())
 
-	// Non-default state: Not started OFF (In Progress work visible), No parent OFF.
-	vals := url.Values{"key": {"DCAI-1"}, "priority": {"Lowest"}, "not-started": {"0"}, "no-parent": {"0"}}
+	// Non-default state: the Doing category (In Progress work only), No parent OFF.
+	vals := url.Values{"key": {"DCAI-1"}, "priority": {"Lowest"}, "status": {"doing"}, "no-parent": {"0"}}
 	code, body := postForm(t, app.URL+"/prio/priority", vals)
 	if code != http.StatusOK {
 		t.Fatalf("POST /prio/priority: status %d, want 200", code)
 	}
-	assertToggle(t, body, "prio-not-started", false, "/prio/results")
+	assertStatusSelect(t, body, "doing")
 	assertToggle(t, body, "prio-no-parent", false, "/prio/results")
-	assertToggle(t, body, "prio-not-done", true, "/prio/results?not-done=0")
+	assertToggle(t, body, "prio-non-technical", true, "/prio/results?non-technical=0")
 	for _, want := range []string{
-		`<input type="hidden" data-filterparam name="not-started" value="0">`,
+		`<input type="hidden" data-filterparam name="status" value="doing">`,
 		`<input type="hidden" data-filterparam name="no-parent" value="0">`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("filter state not re-emitted: %q\n%s", want, body)
 		}
 	}
-	// Filters applied: In Progress rows show (Not started off), the released
-	// DCAI-5 and the Technical DCAI-4 stay hidden.
-	assertPrioRows(t, body, []string{"DCAI-1", "DCAI-2"}, []string{"DCAI-5", "DCAI-4"})
+	// Filters applied: only the In Progress rows survive, and of those the
+	// Technical DCAI-3 stays hidden — as do the planned DCAI-2 and released DCAI-5.
+	assertPrioRows(t, body, []string{"DCAI-1"}, []string{"DCAI-2", "DCAI-3", "DCAI-5"})
 	if !strings.Contains(body, `data-key="DCAI-1" data-edited="true"`) {
 		t.Errorf("edited row not highlighted under non-default filters\n%s", body)
 	}
 
 	// Without any filter params the panel comes back at its defaults.
 	_, dflt := postForm(t, app.URL+"/prio/priority", url.Values{"key": {"DCAI-6"}, "priority": {"Low"}})
-	assertToggle(t, dflt, "prio-not-started", true, "/prio/results?not-started=0")
+	assertStatusSelect(t, dflt, "planned")
 	assertToggle(t, dflt, "prio-no-parent", true, "/prio/results?no-parent=0")
 }
 

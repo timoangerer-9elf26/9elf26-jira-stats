@@ -1032,8 +1032,9 @@
 {{end}}
 
 {{/* filter-toggle is the shared two-state filter pill behind every on/off filter
-     in the app: the Board's "No estimates" (#158) and "Active in last 24h"
-     (#159) controls and the Prio view's "Not done" (#202). It is server-driven:
+     in the app: the Board's "No estimates" (#158) and "Active in last 24h" (#159)
+     controls and the Prio view's "Non-Technical" (#203) and "No parent" (#210)
+     controls. It is server-driven:
      it hx-GETs its ToggleHref — the results URL encoding the state that RESULTS
      from flipping it — and swaps the caller's panel, so the control re-renders
      pressed or not. The href already carries its own resulting state, so it
@@ -1051,6 +1052,34 @@
                  {{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
     {{.Label}}
   </button>
+</div>
+{{end}}
+
+{{/* filter-select is the shared single-choice filter dropdown, introduced by the
+     Prio status select (#214) — the first non-pill control on that bar.
+     Server-driven like the pill: on change it hx-GETs ResultsHref and swaps the
+     caller's panel, so the control re-renders with the new choice.
+
+     Where its value lives puts it between the other two controls. A pill encodes
+     the state it flips to in its href; "search-box" below carries its value in
+     the input and marks itself data-filterparam so the control round-trips its
+     own term. The select IS the element issuing the request, so htmx picks its
+     value up automatically from name/Param — but it is deliberately NOT marked
+     data-filterparam, because a select always has a value and would then make
+     every sibling's request carry the default. The owning filter re-emits only a
+     NON-default value as a hidden param instead, which is why IncludeAttr is the
+     pill's "all but self" selector rather than include-all.
+
+     Takes a filterSelectView (Prefix, Label, Param, Options, ResultsHref,
+     IncludeAttr). */}}
+{{define "filter-select"}}
+<div data-testid="{{.Prefix}}" class="flex items-center gap-2">
+  <label for="{{.Prefix}}-select" class="text-sm font-medium text-slate-600">{{.Label}}</label>
+  <select id="{{.Prefix}}-select" data-testid="{{.Prefix}}-select" name="{{.Param}}"
+          hx-get="{{.ResultsHref}}" {{.IncludeAttr}}
+          class="cursor-pointer rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 focus:border-slate-400 focus:outline-none">
+    {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select>
 </div>
 {{end}}
 
@@ -1147,24 +1176,27 @@
   {{template "prio-table" .}}
 {{end}}
 
-{{/* prio-filters is the Prio view's filter chrome (#202, #203, #209, #210, #213) — the Board's
-     filter-agnostic region (see "board-filters") pointed at #prio-panel. One
+{{/* prio-filters is the Prio view's filter chrome (#202, #203, #209, #210, #213,
+     #214) — the Board's filter-agnostic region (see "board-filters") pointed at
+     #prio-panel. One
      <form> that, on any control change, swaps the whole panel via HTMX so filter
      state stays URL-encoded and bookmarkable without a full-page reload. It
      re-emits every registered filter's current params as hidden inputs marked
      data-filterparam (so a change to one filter round-trips the others), then
      renders each filter's control partial by name via the render func. Adding a
      filter means slotting it into the prioFilters registry; this region does not
-     change (as the #203 Non-Technical, #209 Not started and #210 No parent
-     toggles showed).
+     change (as the #203 Non-Technical and #210 No parent toggles showed, and as
+     the #214 status select showed for a whole new control TYPE — the region
+     renders whatever partial each filter names).
 
      The controls sit against the RIGHT edge (#209, justify-end) while the card
      itself stays full-width, so it keeps its alignment with the page header
      above and the table below — the Board's assignee bar (#186) does the same
      with ml-auto. They read left-to-right in registry order against that edge:
-     Non-Technical, Not done, Not started, No parent — all four lit by default
-     since #213, each unlit only when its <param>=0 is in the URL. Takes a
-     prioView (needs .Filters). */}}
+     the Status select (#214), then Non-Technical, then No parent. The select
+     defaults to Planned and reaches the URL only for its other categories; both
+     pills are lit by default since #213 and unlit only when their <param>=0 is
+     in the URL. Takes a prioView (needs .Filters). */}}
 {{define "prio-filters"}}
 <form data-testid="prio-filters"
       hx-target="#prio-panel" hx-swap="innerHTML"

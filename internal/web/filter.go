@@ -6,7 +6,8 @@ package web
 // their panel fragment over HTMX; only the row type each filters over differs.
 // This file owns the pieces that are genuinely common: the round-trip param,
 // the hx-include selectors, and the two-state toggle control (view model + its
-// href rule), whose partial is "filter-toggle".
+// href rule), plus the single-choice select control (#214). Their partials are
+// "filter-toggle" and "filter-select".
 
 import "html/template"
 
@@ -49,6 +50,39 @@ type filterToggleView struct {
 	On          bool
 	ToggleHref  string
 	IncludeAttr template.HTMLAttr
+}
+
+// filterSelectView is the model of a single-choice filter <select> (the
+// "filter-select" partial, #214): a server-driven control that hx-GETs
+// ResultsHref on change and swaps the caller's panel. Exactly one Option is
+// Selected. Prefix is the data-testid stem, Label the visible text, Param the
+// query key it submits under.
+//
+// It is the third control shape here, and sits between the other two on where its
+// value lives. A pill encodes the state it flips TO in its href. The Board's
+// search box carries its value in the input AND marks itself data-filterparam, so
+// the term is round-tripped by the control itself. The select is the element
+// issuing the request, so the value rides along automatically — but it is NOT
+// marked data-filterparam, because a select always has a value and so would make
+// every sibling's request carry the default. Dropping the default is a decision
+// only the server can take, so the owning filter re-emits a non-default value as
+// a hidden param instead. Hence IncludeAttr is the "all but self" selector, as
+// for a pill, and not filterIncludeAll.
+type filterSelectView struct {
+	Prefix      string
+	Label       string
+	Param       string
+	Options     []filterSelectOption
+	ResultsHref string
+	IncludeAttr template.HTMLAttr
+}
+
+// filterSelectOption is one choice of a filterSelectView: the URL value, the
+// visible label, and whether it is the current one.
+type filterSelectOption struct {
+	Value    string
+	Label    string
+	Selected bool
 }
 
 // toggleHref returns the results URL (rooted at basePath) that flips a two-state

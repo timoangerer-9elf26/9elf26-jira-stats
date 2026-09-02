@@ -38,20 +38,24 @@ type prioFilter struct {
 
 // prioFilters is the ordered registry of Prio filters; registry order is the
 // controls' left-to-right order in the chrome, which since #209 reads against the
-// bar's RIGHT edge: "Non-Technical, Not done, Not started, No parent".
-// Non-Technical (#203) goes FIRST in this slice — prepended, not appended — and
-// new filters append, as No parent (#210) did.
+// bar's RIGHT edge: "Status, Non-Technical, No parent". The status select (#214)
+// goes FIRST in this slice — it is the bar's only non-pill control, and the one
+// that decides which slice of the workflow the table is about.
 //
-// Every filter here currently defaults ON and so encodes only its OFF state
-// (`<param>=0`), No parent included since #213. That uniformity is a coincidence
-// of the current set, not a rule: a filter whose ON state is the unusual one is
-// an ordinary default-OFF filter taking the `<param>=1`-means-on encoding, and
-// must not copy the inverted form from its neighbours.
+// The registry is control-agnostic: a filter names the chrome partial rendering
+// it, so the select ("filter-select") sits in the same list as the pills
+// ("filter-toggle") with no special-casing in the chrome or the handler.
+//
+// The two pills default ON and so encode only their OFF state (`<param>=0`), No
+// parent included since #213. That is not a rule for the registry: a filter
+// whose ON state is the unusual one is an ordinary default-OFF filter taking the
+// `<param>=1`-means-on encoding, and must not copy the inverted form from its
+// neighbours. The status select follows the same spirit in its own idiom — only
+// its non-default categories reach the URL.
 func prioFilters(q url.Values) []prioFilter {
 	return []prioFilter{
+		statusPrioFilter(q),
 		nonTechnicalPrioFilter(q),
-		notDonePrioFilter(q),
-		notStartedPrioFilter(q),
 		noParentPrioFilter(q),
 	}
 }
@@ -67,68 +71,138 @@ func keepPrioIssue(filters []prioFilter, issue store.PrioIssue) bool {
 	return true
 }
 
+// The status select (#214): the Prio view's status control is one <select> over
+// four categories, not a set of overlapping toggles. It replaced the Not done and
+// Not started pills, whose overlap (Not started was a strict subset of Not done)
+// meant no combination could express "only work in flight" or "only finished
+// work". docs/adr/0011 has the full argument and supersedes that part of ADR
+// 0009; CONTEXT.md → Prio filters documents the categories for readers.
+//
+// The two facts a reader of THIS file needs:
+//
+//  1. Membership is an EXPLICIT status set right here, deliberately NOT derived
+//     from Jira's status_category — live Jira files Canceled under category
+//     "Done" and Triage under "To Do", so a derived map would sweep Canceled into
+//     Done and be wrong. The cost is that a new DCAI status is invisible to every
+//     category until someone adds it below.
+//  2. This is a second, Prio-LOCAL partition, NOT the project-wide sprint buckets
+//     (Triage / Open ticket / Finished / Canceled). They disagree on purpose:
+//     here Triage sits inside Planned, because on a prioritisation surface an
+//     untriaged ticket is exactly the unprioritised work you want to see.
 const (
-	notDoneParam = "not-done"
-	notDoneOff   = "0"
+	statusParam = "status"
+	// statusPlanned is the default category, so it is the one value the URL never
+	// carries: a bare /prio means Planned, and so does any unrecognised value.
+	statusPlanned = "planned"
 )
 
-// notDoneStatuses is the Not-done keep set (CONTEXT.md → Prio filters). It
-// deliberately includes Triage — pre-sprint work the Board keeps off-board is
-// exactly what a prioritiser needs to see — and excludes the Done set (DONE
-// (This Sprint), Ready for Release, Released / Deployed) and Canceled.
-// Matching is case-insensitive, like every other status-bucket test in the app
+// prioStatusCategory is one option of the status select: the URL value, the label
+// on the option, and the statuses it keeps — with keep the lower-cased index of
+// Statuses that Keeps actually consults.
+type prioStatusCategory struct {
+	Value    string
+	Label    string
+	Statuses []string // nil = every status; see Keeps
+	keep     map[string]bool
+}
+
+// Keeps reports whether a status falls in this category. Matching is
+// case-insensitive like every other status bucket in the app
 // (store.normalizeStatus), so a Jira casing quirk — "Ready to Do" for "Ready To
-// Do" — cannot silently drop a ticket out of the not-done set.
-var notDoneStatuses = func() map[string]bool {
-	statuses := []string{"Triage", "Refinement", "Ready To Do", "In Progress", "Review / Testing"}
-	set := make(map[string]bool, len(statuses))
-	for _, status := range statuses {
-		set[strings.ToLower(status)] = true
+// Do" — cannot silently drop a ticket out of its category. The nil-Statuses
+// category is All, which keeps everything and is therefore the only one Canceled
+// (which belongs to no category) surfaces under.
+func (c prioStatusCategory) Keeps(status string) bool {
+	if c.keep == nil {
+		return true
 	}
-	return set
+	return c.keep[strings.ToLower(status)]
+}
+
+// prioStatusCategories is the category map, in the select's option order, each
+// indexed for lookup as it is built. Note Ready for Release is a DONE state
+// despite the name (CONTEXT.md), and Canceled appears in no list — it reaches the
+// table only through All.
+var prioStatusCategories = func() []prioStatusCategory {
+	categories := []prioStatusCategory{
+		{Value: statusPlanned, Label: "Planned", Statuses: []string{"Triage", "Refinement", "Ready To Do"}},
+		{Value: "doing", Label: "Doing", Statuses: []string{"In Progress", "Review / Testing"}},
+		{Value: "done", Label: "Done", Statuses: []string{"DONE (This Sprint)", "Ready for Release", "Released / Deployed"}},
+		{Value: "all", Label: "All", Statuses: nil},
+	}
+	for i, category := range categories {
+		if category.Statuses == nil {
+			continue // All: no index, Keeps short-circuits
+		}
+		keep := make(map[string]bool, len(category.Statuses))
+		for _, status := range category.Statuses {
+			keep[strings.ToLower(status)] = true
+		}
+		categories[i].keep = keep
+	}
+	return categories
 }()
 
-// notDonePrioFilter is the Not-done toggle (#202): status is in Triage,
-// Refinement, Ready To Do, In Progress or Review / Testing. It defaults ON
-// because Prio's universe is ~1,400 rows dominated by released work, so a bare
-// /prio must not open on them. Because ON is the default, it is the OFF state
-// that the URL encodes (not-done=0) — a bare URL means on, and the explicit
-// not-done=1 an older link may carry reads as on too.
-//
-// Since #209 it is a no-op at the defaults: Not-started is a strict subset of
-// this set and also defaults ON. That is deliberate, not redundancy to "fix" —
-// Not-started off + Not-done on is the second gear, all open work with the
-// released rows still hidden.
-func notDonePrioFilter(q url.Values) prioFilter {
-	on := q.Get(notDoneParam) != notDoneOff
+// prioStatusCategoryFor resolves a URL value to a category, falling back to
+// Planned for anything unrecognised — including the retired not-done/not-started
+// params an old bookmark may still carry, which are simply inert now.
+func prioStatusCategoryFor(value string) prioStatusCategory {
+	value = strings.ToLower(strings.TrimSpace(value))
+	for _, category := range prioStatusCategories {
+		if category.Value == value {
+			return category
+		}
+	}
+	return prioStatusCategories[0]
+}
 
-	toggle := filterToggleView{
-		Prefix: "prio-not-done",
-		Label:  "Not done",
-		On:     on,
-		// Not-done defaults ON, so it is the OFF state the href must encode.
-		ToggleHref:  toggleHref("/prio/results", notDoneParam, notDoneOff, on),
-		IncludeAttr: filterIncludeExceptSelf(notDoneParam),
+// statusPrioFilter narrows the table to one category of the workflow (#214).
+//
+// Round-trip shape, which differs from BOTH existing controls and is worth the
+// paragraph. Like the Board's search box (see the "search-box" partial) the value
+// lives in the control, so the request carries it automatically and the select
+// hx-includes only the OTHER filters. Unlike the search box, the select is NOT
+// itself marked data-filterparam; the filter re-emits a non-default category as a
+// hidden param instead. The reason is the bar's "default state is never encoded"
+// convention: a marked select would make every sibling control's request carry
+// status=planned, since a select always has a value and cannot render "absent".
+// Only the server can drop the default, so the mirror is where that decision
+// lives — and it is what makes toggling a pill preserve the chosen category.
+func statusPrioFilter(q url.Values) prioFilter {
+	selected := prioStatusCategoryFor(q.Get(statusParam))
+
+	options := make([]filterSelectOption, 0, len(prioStatusCategories))
+	for _, category := range prioStatusCategories {
+		options = append(options, filterSelectOption{
+			Value:    category.Value,
+			Label:    category.Label,
+			Selected: category.Value == selected.Value,
+		})
+	}
+	view := filterSelectView{
+		Prefix:      "prio-status",
+		Label:       "Status",
+		Param:       statusParam,
+		Options:     options,
+		ResultsHref: "/prio/results",
+		IncludeAttr: filterIncludeExceptSelf(statusParam),
 	}
 
 	var params []filterParam
-	if !on {
-		params = append(params, filterParam{Name: notDoneParam, Value: notDoneOff})
+	if selected.Value != statusPlanned {
+		params = append(params, filterParam{Name: statusParam, Value: selected.Value})
 	}
 
 	keep := func(issue store.PrioIssue) bool {
-		if !on {
-			return true // off = every status, done and canceled included
-		}
-		return notDoneStatuses[strings.ToLower(issue.Status)]
+		return selected.Keeps(issue.Status)
 	}
 
-	return prioFilter{Control: "filter-toggle", Data: toggle, Params: params, Keep: keep}
+	return prioFilter{Control: "filter-select", Data: view, Params: params, Keep: keep}
 }
 
 // nonTechnicalParam is the URL/query key carrying the Non-Technical toggle state.
 // Since #209 it defaults ON and so encodes the OFF state (non-technical=0),
-// exactly like not-done: the toggle is on iff the param is anything but "0", which
+// exactly like No parent: the toggle is on iff the param is anything but "0", which
 // means the explicit non-technical=1 an older bookmark may carry still reads as on.
 //
 // technicalLabel is the canonical stored Jira label, matched exactly (capital T,
@@ -166,55 +240,6 @@ func nonTechnicalPrioFilter(q url.Values) prioFilter {
 			return true // off = every issue, technical included
 		}
 		return !slices.Contains(issue.Labels, technicalLabel)
-	}
-
-	return prioFilter{Control: "filter-toggle", Data: toggle, Params: params, Keep: keep}
-}
-
-const (
-	notStartedParam = "not-started"
-	notStartedOff   = "0"
-)
-
-// notStartedStatuses is the not-yet-started slice of the workflow: a strict
-// subset of notDoneStatuses, stopping short of In Progress. Matched
-// case-insensitively, like every other status bucket in the app.
-var notStartedStatuses = func() map[string]bool {
-	statuses := []string{"Triage", "Refinement", "Ready To Do"}
-	set := make(map[string]bool, len(statuses))
-	for _, status := range statuses {
-		set[strings.ToLower(status)] = true
-	}
-	return set
-}()
-
-// notStartedPrioFilter narrows to work nobody has picked up yet (#209). It is a
-// plain independent toggle ANDed with the rest, deliberately NOT merged with
-// Not-done into a three-state status control. The consequence is accepted: at
-// the defaults (both on) Not-done is a no-op, since Not-started is a strict
-// subset of it. Not-done earns its keep as the second gear — Not-started off +
-// Not-done on = all open work, with the Released / Deployed bulk still hidden.
-func notStartedPrioFilter(q url.Values) prioFilter {
-	on := q.Get(notStartedParam) != notStartedOff
-
-	toggle := filterToggleView{
-		Prefix:      "prio-not-started",
-		Label:       "Not started",
-		On:          on,
-		ToggleHref:  toggleHref("/prio/results", notStartedParam, notStartedOff, on),
-		IncludeAttr: filterIncludeExceptSelf(notStartedParam),
-	}
-
-	var params []filterParam
-	if !on {
-		params = append(params, filterParam{Name: notStartedParam, Value: notStartedOff})
-	}
-
-	keep := func(issue store.PrioIssue) bool {
-		if !on {
-			return true // off = contributes nothing
-		}
-		return notStartedStatuses[strings.ToLower(issue.Status)]
 	}
 
 	return prioFilter{Control: "filter-toggle", Data: toggle, Params: params, Keep: keep}
