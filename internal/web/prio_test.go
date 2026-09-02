@@ -29,11 +29,13 @@ func prioFixture() *jira.FakeClient {
 	}}
 }
 
-// Every column-content assertion below drives the view with the Not-done filter
-// turned off (#202), so the whole fixture — released work included — renders.
+// Every column-content assertion below drives the view with every filter turned
+// off (#202, #203, #209), so the whole fixture — released work, In Progress work
+// and Technical-labelled work included — renders. The defaults narrow to the
+// not-started, non-technical slice, which is not what these tests are about.
 func TestPrioListsEveryIssueWithTypeNameStatus(t *testing.T) {
 	app := newTestApp(t, prioFixture(), web.WithJiraBaseURL("https://9elf26.atlassian.net/"))
-	body := get(t, app.URL+"/prio?not-done=0")
+	body := get(t, app.URL+"/prio?"+prioEveryFilterOff)
 
 	// The three columns render, in order.
 	assertOrder(t, body,
@@ -80,7 +82,7 @@ func TestPrioListsEveryIssueWithTypeNameStatus(t *testing.T) {
 // a broken link, matching the board card.
 func TestPrioNameUnlinkedWithoutJiraBaseURL(t *testing.T) {
 	app := newTestApp(t, prioFixture())
-	body := get(t, app.URL+"/prio?not-done=0")
+	body := get(t, app.URL+"/prio?"+prioEveryFilterOff)
 
 	if strings.Contains(body, "/browse/DCAI-3") {
 		t.Errorf("prio linked a name with no Jira base URL configured\n%s", body)
@@ -96,7 +98,7 @@ func TestPrioNameUnlinkedWithoutJiraBaseURL(t *testing.T) {
 // /prio/results serves the swappable fragment: the same rows, no document shell.
 func TestPrioResultsServesTheFragment(t *testing.T) {
 	app := newTestApp(t, prioFixture())
-	fragment := get(t, app.URL+"/prio/results?not-done=0")
+	fragment := get(t, app.URL+"/prio/results?"+prioEveryFilterOff)
 
 	if strings.Contains(fragment, "<!DOCTYPE html>") {
 		t.Errorf("/prio/results returned a full page, want a fragment\n%s", fragment)
@@ -147,7 +149,7 @@ func TestPrioEmptyStateBeforeFirstSync(t *testing.T) {
 
 func TestPrioRendersPriorityColumnWithIconAndName(t *testing.T) {
 	app := newTestApp(t, prioFixture())
-	body := get(t, app.URL+"/prio?not-done=0")
+	body := get(t, app.URL+"/prio?"+prioEveryFilterOff)
 
 	assertOrder(t, body,
 		`data-testid="prio-col-name"`,
@@ -182,7 +184,7 @@ func TestPrioRendersPriorityColumnWithIconAndName(t *testing.T) {
 func TestPrioSortsHighestToLowestTiesByKey(t *testing.T) {
 	app := newTestApp(t, prioFixture())
 
-	for _, path := range []string{"/prio?not-done=0", "/prio/results?not-done=0"} {
+	for _, path := range []string{"/prio?" + prioEveryFilterOff, "/prio/results?" + prioEveryFilterOff} {
 		body := get(t, app.URL+path)
 		assertOrder(t, body,
 			`data-key="DCAI-2"`, // Highest
@@ -198,7 +200,7 @@ func TestPrioSortsHighestToLowestTiesByKey(t *testing.T) {
 
 func TestPrioRendersLabelsColumnAsGreyPills(t *testing.T) {
 	app := newTestApp(t, prioFixture())
-	body := get(t, app.URL+"/prio?not-done=0")
+	body := get(t, app.URL+"/prio?"+prioEveryFilterOff)
 
 	assertOrder(t, body,
 		`data-testid="prio-col-status"`,
@@ -256,7 +258,7 @@ func labelsCell(t *testing.T, body, key string) string {
 
 func TestPrioResultsFragmentCarriesLabels(t *testing.T) {
 	app := newTestApp(t, prioFixture())
-	fragment := get(t, app.URL+"/prio/results?not-done=0")
+	fragment := get(t, app.URL+"/prio/results?"+prioEveryFilterOff)
 
 	if !strings.Contains(fragment, `data-testid="prio:DCAI-4:label:Technical">Technical<`) {
 		t.Errorf("/prio/results missing label pills\n%s", fragment)

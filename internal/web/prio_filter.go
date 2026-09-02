@@ -37,13 +37,14 @@ type prioFilter struct {
 }
 
 // prioFilters is the ordered registry of Prio filters; registry order is the
-// controls' left-to-right order in the chrome. The spec (#196) wants the toggles
-// stacked "Non-Technical, then Not done", so the Non-Technical filter (#203)
-// goes FIRST in this slice — prepended, not appended.
+// controls' left-to-right order in the chrome, which since #209 reads against the
+// bar's RIGHT edge: "Non-Technical, Not done, Not started". Non-Technical (#203)
+// goes FIRST in this slice — prepended, not appended — and new filters append.
 func prioFilters(q url.Values) []prioFilter {
 	return []prioFilter{
 		nonTechnicalPrioFilter(q),
 		notDonePrioFilter(q),
+		notStartedPrioFilter(q),
 	}
 }
 
@@ -79,11 +80,17 @@ var notDoneStatuses = func() map[string]bool {
 	return set
 }()
 
-// notDonePrioFilter is the Not-done toggle (#202), the one filter in the app
-// that defaults ON: Prio's universe is ~1,400 rows dominated by released work,
-// so a bare /prio opens on the ~89 not-done tickets. Because ON is the default,
-// it is the OFF state that the URL encodes (not-done=0) — a bare URL means on,
-// and the explicit not-done=1 an older link may carry reads as on too.
+// notDonePrioFilter is the Not-done toggle (#202): status is in Triage,
+// Refinement, Ready To Do, In Progress or Review / Testing. It defaults ON
+// because Prio's universe is ~1,400 rows dominated by released work, so a bare
+// /prio must not open on them. Because ON is the default, it is the OFF state
+// that the URL encodes (not-done=0) — a bare URL means on, and the explicit
+// not-done=1 an older link may carry reads as on too.
+//
+// Since #209 it is a no-op at the defaults: Not-started is a strict subset of
+// this set and also defaults ON. That is deliberate, not redundancy to "fix" —
+// Not-started off + Not-done on is the second gear, all open work with the
+// released rows still hidden.
 func notDonePrioFilter(q url.Values) prioFilter {
 	on := q.Get(notDoneParam) != notDoneOff
 
@@ -112,42 +119,38 @@ func notDonePrioFilter(q url.Values) prioFilter {
 }
 
 // nonTechnicalParam is the URL/query key carrying the Non-Technical toggle state.
-// The toggle is on iff this param equals nonTechnicalOn. It is the mirror image of
-// not-done: default OFF, so the param encodes the ON state and its absence means
-// "show everything".
+// Since #209 it defaults ON and so encodes the OFF state (non-technical=0),
+// exactly like not-done: the toggle is on iff the param is anything but "0", which
+// means the explicit non-technical=1 an older bookmark may carry still reads as on.
+//
+// technicalLabel is the canonical stored Jira label, matched exactly (capital T,
+// whole label) — "non-technical" is the ABSENCE of it, not the presence of the
+// sibling `Product` label (ADR 0009).
 const (
 	nonTechnicalParam = "non-technical"
-	nonTechnicalOn    = "1"
-	// technicalLabel is the canonical stored Jira label, matched exactly (capital
-	// T, whole label). There is no positive non-technical label — non-technical is
-	// simply the absence of this one, so an unlabelled ticket always survives.
-	technicalLabel = "Technical"
+	nonTechnicalOff   = "0"
+	technicalLabel    = "Technical"
 )
 
-// nonTechnicalPrioFilter builds the Prio view's Non-Technical toggle (#203) from the
-// query: the compact control, a Keep predicate that (when on) hides any issue
-// carrying the exact `Technical` label, and the round-trip param. Default off (no
-// param) shows every issue, so it composes with the not-done filter as a plain
-// intersection via keepPrioIssue.
+// nonTechnicalPrioFilter hides tickets carrying the exact `Technical` label.
+// It is default ON (#209) and so uses the INVERTED encoding Not-done uses: only
+// the off state is encoded, as `non-technical=0`; any other value — including
+// the `non-technical=1` that the default-OFF version (#203) used to emit —
+// leaves it on, so old bookmarks still resolve to a lit toggle.
 func nonTechnicalPrioFilter(q url.Values) prioFilter {
-	on := q.Get(nonTechnicalParam) == nonTechnicalOn
+	on := q.Get(nonTechnicalParam) != nonTechnicalOff
 
 	toggle := filterToggleView{
-		Prefix: "prio-non-technical",
-		Label:  "Non-Technical",
-		On:     on,
-		// Default off, so the href encodes the on state and drops the param to go
-		// back off — the inverse of the default-on Not-done toggle.
-		ToggleHref: toggleHref("/prio/results", nonTechnicalParam, nonTechnicalOn, !on),
-		// The toggle encodes its own resulting state in ToggleHref, so it must NOT
-		// re-include its own hidden param (which would fight the href), but it MUST
-		// preserve every other filter.
+		Prefix:      "prio-non-technical",
+		Label:       "Non-Technical",
+		On:          on,
+		ToggleHref:  toggleHref("/prio/results", nonTechnicalParam, nonTechnicalOff, on),
 		IncludeAttr: filterIncludeExceptSelf(nonTechnicalParam),
 	}
 
 	var params []filterParam
-	if on {
-		params = append(params, filterParam{Name: nonTechnicalParam, Value: nonTechnicalOn})
+	if !on {
+		params = append(params, filterParam{Name: nonTechnicalParam, Value: nonTechnicalOff})
 	}
 
 	keep := func(issue store.PrioIssue) bool {
@@ -155,6 +158,55 @@ func nonTechnicalPrioFilter(q url.Values) prioFilter {
 			return true // off = every issue, technical included
 		}
 		return !slices.Contains(issue.Labels, technicalLabel)
+	}
+
+	return prioFilter{Control: "filter-toggle", Data: toggle, Params: params, Keep: keep}
+}
+
+const (
+	notStartedParam = "not-started"
+	notStartedOff   = "0"
+)
+
+// notStartedStatuses is the not-yet-started slice of the workflow: a strict
+// subset of notDoneStatuses, stopping short of In Progress. Matched
+// case-insensitively, like every other status bucket in the app.
+var notStartedStatuses = func() map[string]bool {
+	statuses := []string{"Triage", "Refinement", "Ready To Do"}
+	set := make(map[string]bool, len(statuses))
+	for _, status := range statuses {
+		set[strings.ToLower(status)] = true
+	}
+	return set
+}()
+
+// notStartedPrioFilter narrows to work nobody has picked up yet (#209). It is a
+// plain independent toggle ANDed with the rest, deliberately NOT merged with
+// Not-done into a three-state status control. The consequence is accepted: at
+// the defaults (both on) Not-done is a no-op, since Not-started is a strict
+// subset of it. Not-done earns its keep as the second gear — Not-started off +
+// Not-done on = all open work, with the Released / Deployed bulk still hidden.
+func notStartedPrioFilter(q url.Values) prioFilter {
+	on := q.Get(notStartedParam) != notStartedOff
+
+	toggle := filterToggleView{
+		Prefix:      "prio-not-started",
+		Label:       "Not started",
+		On:          on,
+		ToggleHref:  toggleHref("/prio/results", notStartedParam, notStartedOff, on),
+		IncludeAttr: filterIncludeExceptSelf(notStartedParam),
+	}
+
+	var params []filterParam
+	if !on {
+		params = append(params, filterParam{Name: notStartedParam, Value: notStartedOff})
+	}
+
+	keep := func(issue store.PrioIssue) bool {
+		if !on {
+			return true // off = contributes nothing
+		}
+		return notStartedStatuses[strings.ToLower(issue.Status)]
 	}
 
 	return prioFilter{Control: "filter-toggle", Data: toggle, Params: params, Keep: keep}

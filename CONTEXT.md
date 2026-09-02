@@ -121,20 +121,39 @@ introduces syncing them; older rows only carry them once a full resync has run.
 
 ## Prio filters
 
-Two independent two-state toggles on the [Prio view](#prio-view), reusing the
+Three independent two-state toggles on the [Prio view](#prio-view), reusing the
 [Board's](#board-filters) URL-encoded, fragment-swapping filter scaffolding.
-Both are plain on/off toggles (like the Board's no-estimate control), not the
-Board's multi-select assignee bar.
+All are plain on/off toggles (like the Board's no-estimate control), not the
+Board's multi-select assignee bar, and each is ANDed with the others. **All
+three default ON**, so a bare `/prio` opens on the narrowed, prioritisable
+slice — not-started, non-technical work — rather than the raw project. Each is
+encoded only in its *off* state (`<param>=0`); any other value leaves it on.
 
-- **Non-Technical** — default **OFF**. Off shows every ticket; on hides tickets
-  carrying the exact Jira label **`Technical`**, leaving only non-technical work.
-  (There is no positive `non-technical` label — "non-technical" is simply the
-  absence of `Technical`.)
-- **Not done** — default **ON**. On narrows to tickets **not yet in a done
-  state**: the statuses Triage, Refinement, Ready To Do, In Progress,
+The controls sit against the **right edge** of the filter bar; the card itself
+stays full-width, keeping its alignment with the page header and the table.
+They read left-to-right in registry order:
+
+- **Non-Technical** (`non-technical=0` turns it off) — default **ON**. On hides
+  tickets carrying the exact Jira label **`Technical`**, leaving only
+  non-technical work; off shows every ticket. (There is no positive
+  `non-technical` label — "non-technical" is simply the absence of `Technical`.)
+- **Not done** (`not-done=0`) — default **ON**. On narrows to tickets **not yet
+  in a done state**: the statuses Triage, Refinement, Ready To Do, In Progress,
   Review / Testing. (This set **includes Triage**, which the Board keeps
   off-board.) Toggling it off reveals the done and canceled tickets too — the
   full ~1,400-row projection, dominated by Released / Deployed.
+- **Not started** (`not-started=0`) — default **ON**. On narrows to work nobody
+  has picked up yet: the statuses Triage, Refinement, Ready To Do. Off it
+  contributes nothing.
+
+**Not started is a strict subset of Not done**, so at the defaults Not done is a
+no-op. That overlap is deliberate, not a bug to merge away into a three-state
+status control: Not done earns its keep as the second gear — Not started off +
+Not done on = all open work, with the ~1,259 Released / Deployed rows still
+hidden.
+
+So the whole project is `?not-done=0&not-started=0&non-technical=0`, not
+`?not-done=0` alone.
 
 Rows are sorted by **priority**, Highest→Lowest, ties broken by issue key. The
 DCAI project uses the standard five-level priority scheme (Highest, High,

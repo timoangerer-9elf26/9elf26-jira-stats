@@ -149,11 +149,12 @@ func TestDenseDatasetStressesAllViews(t *testing.T) {
 				t.Errorf("prio: default view should hide %q", done)
 			}
 		}
-		// Toggled off, the whole project — done set and Canceled included — shows.
-		all := get(t, app.URL+"/prio?not-done=0")
+		// With every filter toggled off, the whole project — done set and Canceled
+		// included — shows.
+		all := get(t, app.URL+"/prio?"+prioEveryFilterOff)
 		for _, status := range []string{"Triage", "DONE (This Sprint)", "Ready for Release", "Released / Deployed", "Canceled"} {
 			if !strings.Contains(all, `:status">`+status+`<`) {
-				t.Errorf("prio: not-done off should reveal %q", status)
+				t.Errorf("prio: every filter off should reveal %q", status)
 			}
 		}
 	})
