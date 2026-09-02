@@ -4,6 +4,13 @@ status: accepted
 
 # The Prio view spans the whole project and introduces synced priority + labels
 
+> **Superseded in part by [`0011`](./0011-prio-status-select.md).** The status
+> filter is no longer a pair of overlapping toggles: the argument below that the
+> Not done / Not started overlap was a deliberate "second gear" was tried and
+> found wanting, and a single Planned / Doing / Done / All select replaced both
+> (#214). Everything else here still holds; the reasoning is kept as the record
+> of what was tried.
+
 The [Prio view](../../CONTEXT.md#prio-view) is a prioritisation table whose
 universe is **every issue in the DCAI project** — any sprint, any status — not
 the active sprint. This is a deliberate departure from every other view (Board,

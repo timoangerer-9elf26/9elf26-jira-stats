@@ -6,7 +6,8 @@ package web
 // their panel fragment over HTMX; only the row type each filters over differs.
 // This file owns the pieces that are genuinely common: the round-trip param,
 // the hx-include selectors, and the two-state toggle control (view model + its
-// href rule), whose partial is "filter-toggle".
+// href rule), whose partial is "filter-toggle", plus the single-choice select
+// control (#214), whose partial is "filter-select".
 
 import "html/template"
 
@@ -49,6 +50,31 @@ type filterToggleView struct {
 	On          bool
 	ToggleHref  string
 	IncludeAttr template.HTMLAttr
+}
+
+// filterSelectView is the model of a single-choice filter <select> (the
+// "filter-select" partial), the bar's second control type alongside the pill: a
+// server-driven control that hx-GETs ResultsHref on change and swaps the caller's
+// panel. It differs from the pill in where its value lives — a pill encodes the
+// state it flips TO in its href, whereas the select IS the element carrying the
+// value, so the request picks its value up automatically and it hx-includes only
+// the other filters (IncludeAttr). Exactly one Option is Selected. Prefix is the
+// data-testid stem, Label the visible text, Param the query key it submits under.
+type filterSelectView struct {
+	Prefix      string
+	Label       string
+	Param       string
+	Options     []filterSelectOption
+	ResultsHref string
+	IncludeAttr template.HTMLAttr
+}
+
+// filterSelectOption is one choice of a filterSelectView: the URL value, the
+// visible label, and whether it is the current one.
+type filterSelectOption struct {
+	Value    string
+	Label    string
+	Selected bool
 }
 
 // toggleHref returns the results URL (rooted at basePath) that flips a two-state

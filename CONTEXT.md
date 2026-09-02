@@ -125,31 +125,30 @@ be changed on.
 
 ## Prio filters
 
-Four independent two-state toggles on the [Prio view](#prio-view), reusing the
-[Board's](#board-filters) URL-encoded, fragment-swapping filter scaffolding.
-All are plain on/off toggles (like the Board's no-estimate control), not the
-Board's multi-select assignee bar, and each is ANDed with the others. **All four
-default ON**, so a bare `/prio` opens on the narrowed, prioritisable slice —
-not-started, non-technical, top-of-tree work — rather than the raw project; each
-is encoded only in its *off* state (`<param>=0`), and any other value leaves it
-on.
+A **status select** plus **two two-state toggles** on the [Prio view](#prio-view),
+reusing the [Board's](#board-filters) URL-encoded, fragment-swapping filter
+scaffolding. Each control is ANDed with the others. Together they open a bare
+`/prio` on the narrowed, prioritisable slice — **planned, non-technical,
+top-of-tree work** — rather than the raw project, and every control encodes only
+its *non-default* state, so a bare `/prio` carries no params at all.
 
 The controls sit against the **right edge** of the filter bar; the card itself
 stays full-width, keeping its alignment with the page header and the table.
 They read left-to-right in registry order:
 
+- **Status** (`status=doing|done|all`) — a native `<select>`, the bar's first
+  control and its only non-pill one. It picks **one** of four categories, so the
+  table is always about exactly one phase of the workflow (see the category map
+  below). **Planned** is the default and is *never* encoded — a bare `/prio`
+  means Planned, and so does an unrecognised value (`?status=nonsense`, or the
+  retired `not-done` / `not-started` params an old bookmark carries, which are
+  now inert). Unlike the pills it carries its value in the control itself, so
+  changing it round-trips the *other* filters via `hx-include` and its own value
+  rides along as the requesting element.
 - **Non-Technical** (`non-technical=0` turns it off) — default **ON**. On hides
   tickets carrying the exact Jira label **`Technical`**, leaving only
   non-technical work; off shows every ticket. (There is no positive
   `non-technical` label — "non-technical" is simply the absence of `Technical`.)
-- **Not done** (`not-done=0`) — default **ON**. On narrows to tickets **not yet
-  in a done state**: the statuses Triage, Refinement, Ready To Do, In Progress,
-  Review / Testing. (This set **includes Triage**, which the Board keeps
-  off-board.) Toggling it off reveals the done and canceled tickets too — the
-  full ~1,400-row projection, dominated by Released / Deployed.
-- **Not started** (`not-started=0`) — default **ON**. On narrows to work nobody
-  has picked up yet: the statuses Triage, Refinement, Ready To Do. Off it
-  contributes nothing.
 - **No parent** (`no-parent=0` turns it off) — default **ON**. On narrows to
   the top of the issue tree: tickets whose **parent is empty**, which today
   means every Epic plus the unparented Tasks, Bugs and Stories. The rule is
@@ -162,14 +161,36 @@ They read left-to-right in registry order:
   default because parented tickets are already prioritised by whatever they
   hang under, so the default view is the work nothing else is ordering.
 
-**Not started is a strict subset of Not done**, so at the defaults Not done is a
-no-op. That overlap is deliberate, not a bug to merge away into a three-state
-status control: Not done earns its keep as the second gear — Not started off +
-Not done on = all open work, with the ~1,259 Released / Deployed rows still
-hidden.
+### The Prio status categories
 
-So the whole project is `?not-done=0&not-started=0&non-technical=0&no-parent=0`,
-not `?not-done=0` alone.
+| Category | Statuses |
+| --- | --- |
+| **Planned** (default) | Triage, Refinement, Ready To Do |
+| **Doing** | In Progress, Review / Testing |
+| **Done** | DONE (This Sprint), Ready for Release, Released / Deployed |
+| **All** | all nine statuses, **Canceled** included |
+
+Membership is an **explicit status set in our own code**, not Jira's
+`status_category` — as [Ticket status buckets](#ticket-status-buckets) records,
+live Jira files Canceled under `Done` and Triage under `To Do`, so a
+category-derived map would be wrong. **Canceled belongs to no category** and
+surfaces only under All. **Ready for Release is a done state** despite the name.
+
+This is a **second, Prio-local partition, deliberately different from the
+project-wide [ticket status buckets](#ticket-status-buckets)** (Triage / Open
+ticket / Finished / Canceled) — do not conflate the two vocabularies. The
+difference that matters: here **Triage sits inside Planned**, because on a
+prioritisation surface an untriaged ticket is exactly the unprioritised work you
+want to see, whereas the sprint rollups rightly treat Triage as pre-sprint and
+exclude it from every count.
+
+The select replaced two overlapping toggles, **Not done** and **Not started**
+(`docs/adr/0011`, superseding that part of `docs/adr/0009`): Not started was a
+strict subset of Not done, so no combination of the two could express "only work
+in flight" or "only finished work". A single-select over categories makes each
+phase of the workflow reachable in one move.
+
+So the whole project is `?status=all&non-technical=0&no-parent=0`.
 
 Rows are sorted by **priority**, Highest→Lowest, ties broken by issue key. The
 DCAI project uses the standard five-level priority scheme (Highest, High,

@@ -296,16 +296,17 @@ func TestStaticAssetsAreEmbedded(t *testing.T) {
 // (#212) end to end against the real binary: POST /prio/priority writes the
 // level into the fake Jira's in-memory issue, re-reads it and answers the whole
 // re-sorted panel with that row highlighted at its new value — so `make check`
-// exercises a live control, not a dead one. The request carries the every-
-// filter-off params, as the hidden filter inputs would, so the edited row is in
-// the rendered slice whatever its status or labels.
+// exercises a live control, not a dead one. The request carries the widest
+// filter state (status=all plus both pills off), as the hidden filter inputs
+// would, so the edited row is in the rendered slice whatever its status or
+// labels.
 func TestPrioPriorityEditWritesThroughTheFake(t *testing.T) {
 	base := startDashboard(t)
 	time.Sleep(1500 * time.Millisecond) // let the first sync backfill the fake dataset
 
 	form := url.Values{
 		"key": {"DCAI-1"}, "priority": {"Lowest"},
-		"not-done": {"0"}, "not-started": {"0"}, "non-technical": {"0"}, "no-parent": {"0"},
+		"status": {"all"}, "non-technical": {"0"}, "no-parent": {"0"},
 	}
 	resp, err := http.PostForm(base+"/prio/priority", form)
 	if err != nil {
@@ -321,7 +322,7 @@ func TestPrioPriorityEditWritesThroughTheFake(t *testing.T) {
 		`data-testid="prio:DCAI-1:priority-name">Lowest<`,
 		`data-key="DCAI-1" data-edited="true"`,
 		`data-testid="prio-filters"`, // the whole panel came back
-		`<input type="hidden" data-filterparam name="not-done" value="0">`,
+		`<input type="hidden" data-filterparam name="status" value="all">`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("priority edit response missing %q\n%s", want, body)
@@ -331,7 +332,7 @@ func TestPrioPriorityEditWritesThroughTheFake(t *testing.T) {
 		t.Errorf("priority edit reported a failure against the fake Jira\n%s", body)
 	}
 	// The write stuck: a fresh load of the every-filter-off table shows it too.
-	if code, page := get(t, base+"/prio?not-done=0&not-started=0&non-technical=0&no-parent=0"); code != http.StatusOK ||
+	if code, page := get(t, base+"/prio?status=all&non-technical=0&no-parent=0"); code != http.StatusOK ||
 		!strings.Contains(page, `data-testid="prio:DCAI-1:priority-name">Lowest<`) {
 		t.Errorf("GET /prio after the edit: status %d, projection did not keep Lowest", code)
 	}
