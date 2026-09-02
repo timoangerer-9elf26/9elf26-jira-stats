@@ -119,6 +119,10 @@ are Released / Deployed), the view leans on its filters — see
 **not part of the projection before this view** — the Prio view is what
 introduces syncing them; older rows only carry them once a full resync has run.
 
+The priority column is not just read: a row's priority is **editable in place**
+— see [Priority edit](#priority-edit). It is the one surface the priority can
+be changed on.
+
 ## Prio filters
 
 Four independent two-state toggles on the [Prio view](#prio-view), reusing the
@@ -349,9 +353,9 @@ ticket's size — S / M / L / no-estimate) is editable on the **Board** and on t
 Picking a value **writes it back to Jira** as the ticket's estimate, immediately,
 with no confirm step. Everywhere else the size is read-only display.
 
-This is **one of the two ways the dashboard writes to Jira** (the other is a
-[Board transition](#board-transition)); everything else it shows is a read-only
-projection. Jira stays the **source of truth**: the edit is a write *to Jira*, not to the
+This is **one of the three ways the dashboard writes to Jira** (the others are
+a [Board transition](#board-transition) and a [Priority edit](#priority-edit));
+everything else it shows is a read-only projection. Jira stays the **source of truth**: the edit is a write *to Jira*, not to the
 local projection — the projection only ever reflects what a Jira read returns, so
 after a successful write the changed ticket is re-read from Jira and the pill
 shows that authoritative value. A failed write leaves Jira (and the pill)
@@ -361,7 +365,8 @@ on the Sprint drill-down stays read-only (see `docs/adr/0005`).
 ## Board transition
 
 The second way a user can **change** Jira from the dashboard (the first is the
-[estimate edit](#estimate-edit)): moving a ticket on the
+[estimate edit](#estimate-edit), the third the [priority edit](#priority-edit)):
+moving a ticket on the
 [Board view](#board-view) into a different workflow **status**, written straight
 to Jira with no confirm step. Only statuses Jira actually offers a transition
 into are legal targets; anything else fails and moves nothing. As with the
@@ -401,3 +406,32 @@ transitions — one it writes, the other it reads back out of the changelog. A
 Board transition duly shows up afterwards as a Daily movement, and in the
 [Sprint view metrics](#sprint-view-metrics) and [Velocity](#velocity), exactly
 like a transition made in Jira itself.
+
+## Priority edit
+
+The third way a user can **change** Jira from the dashboard (after the
+[estimate edit](#estimate-edit) and the [Board transition](#board-transition)):
+on the [Prio view](#prio-view), a row's **priority** is editable in place.
+Clicking it offers the **five levels** — Highest, High, Medium, Low, Lowest —
+with the icons the column already draws, and picking one **writes it to Jira**
+as the ticket's priority, immediately, with no confirm step. There is **no
+"clear priority"**: the menu only ever writes one of the five levels, so a row
+showing a dash (a stale projection from before priority was synced) is fixed by
+picking a real level, never by clearing.
+
+Because the Prio table's whole job is "read top-down, decide what's next", the
+**table re-sorts around the change**: the edited row moves to its new rank
+(ties still by issue key) in the same response, and comes back **highlighted**
+so the eye can follow where it went. While the write is in flight the panel is
+visibly **busy**. The edit is indistinguishable from a filter toggle as far as
+the panel is concerned: the active [Prio filters](#prio-filters) stay applied
+and their toggles unchanged, and since there is no priority filter an edit can
+never make a row vanish from the current set.
+
+As with the other two writes, Jira stays the **source of truth**: the level is
+written to Jira by its name, that one ticket is re-read, and the projection is
+set from what the read returned. A failed write leaves both Jira and the table
+unchanged — the row stays where it was, with a small inline message on it, no
+global banner. The priority is editable only in the Prio table; anywhere else
+it would be read-only display (see `docs/adr/0005`, whose write shape this
+copies).

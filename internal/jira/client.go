@@ -131,10 +131,33 @@ type Client interface {
 	// "S"/"M"/"L", or "" to clear the estimate (no-estimate). It is the inverse of
 	// the mapSize read mapping.
 	UpdateIssueSize(ctx context.Context, key, size string) error
+	// UpdateIssuePriority writes the issue's priority level back to Jira BY NAME
+	// (one of Priorities), the Prio view's priority edit write path (#212). It
+	// copies the estimate write's shape: a plain field PUT, last-write-wins, no
+	// optimistic-locking guard; the caller re-reads the issue afterwards.
+	UpdateIssuePriority(ctx context.Context, key, priority string) error
 	// FetchTransitions reads the workflow transitions Jira currently offers for
 	// the issue, and TransitionIssue performs one by id. Together they are the
 	// status write path (docs/adr/0010): resolve the transition by its TARGET
 	// STATUS ID via TransitionTo, never by its name.
 	FetchTransitions(ctx context.Context, key string) ([]Transition, error)
 	TransitionIssue(ctx context.Context, key, transitionID string) error
+}
+
+// Priorities is the standard five-level Jira priority scheme the DCAI project
+// uses, Highest first. A priority's NAME is the level — it is what the app
+// reads (priorityDTO), stores and writes back (UpdateIssuePriority) — so the
+// list doubles as the write's whitelist: there is no "clear priority" and
+// nothing outside these five is ever written.
+var Priorities = []string{"Highest", "High", "Medium", "Low", "Lowest"}
+
+// ValidPriority reports whether name is exactly one of Priorities (case-sensitive,
+// as Jira's priority names are).
+func ValidPriority(name string) bool {
+	for _, p := range Priorities {
+		if p == name {
+			return true
+		}
+	}
+	return false
 }

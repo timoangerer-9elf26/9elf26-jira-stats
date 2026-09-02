@@ -22,6 +22,26 @@ type prioRow struct {
 	// rather than one joined display string so a label stays individually
 	// matchable.
 	Labels []string
+	// Editable makes the priority cell an interactive write-back control (#212):
+	// a popover of the five levels, each posting /prio/priority. The Prio table
+	// is the sole surface that sets it, so the same partial stays read-only
+	// display anywhere else — the gate the board card's Editable puts on the
+	// estimate pill.
+	Editable bool
+	// Edited marks the row a just-landed priority write changed, so the response
+	// can highlight where the row moved to. Per-response only; never persisted.
+	Edited bool
+	// Error is the inline message a failed priority write leaves on this row
+	// ("" when none). The row itself is unmoved, since the priority did not change.
+	Error string
+}
+
+// prioEdit is the outcome of a priority write the panel render reports on:
+// which row it targeted and, on failure, the inline message. The zero value
+// means "no edit in this response" (plain GET renders).
+type prioEdit struct {
+	Key   string
+	Error string
 }
 
 // prioView is the /prio page model: the projection's issues that survive the
@@ -50,7 +70,13 @@ func (s *Server) handlePrioResults(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderPrio(w http.ResponseWriter, r *http.Request, name string) {
-	view, err := s.prioView(r.URL.Query())
+	s.renderPrioWith(w, r.URL.Query(), name, prioEdit{})
+}
+
+// renderPrioWith renders the named Prio template for the filter params q,
+// annotating the rows with the outcome of a priority edit (if any).
+func (s *Server) renderPrioWith(w http.ResponseWriter, q url.Values, name string, edit prioEdit) {
+	view, err := s.prioView(q, edit)
 	if err != nil {
 		s.renderError(w)
 		return
@@ -63,7 +89,11 @@ func (s *Server) renderPrio(w http.ResponseWriter, r *http.Request, name string)
 
 // prioView reads the whole projection, drops the rows the active filters hide,
 // and maps the rest to table rows.
-func (s *Server) prioView(q url.Values) (prioView, error) {
+// prioView builds the Prio table for the filter params q. edit marks the row a
+// priority write just targeted: highlighted when the write landed, carrying the
+// inline error when it did not. Every row renders editable — the Prio table is
+// the one surface the priority is editable on.
+func (s *Server) prioView(q url.Values, edit prioEdit) (prioView, error) {
 	issues, err := s.rollups.PrioIssues()
 	if err != nil {
 		return prioView{}, err
@@ -83,6 +113,9 @@ func (s *Server) prioView(q url.Values) (prioView, error) {
 			Icon:     priorityIconFor(issue.Priority),
 			Href:     s.jiraIssueURL(issue.Key),
 			Labels:   issue.Labels,
+			Editable: true, // the Prio table is the sole surface the priority is editable on (#212)
+			Edited:   issue.Key == edit.Key && edit.Error == "",
+			Error:    pick(issue.Key == edit.Key, edit.Error, ""),
 		})
 	}
 	sortByPriority(rows)
@@ -109,15 +142,22 @@ type priorityIcon struct {
 // most important first, so a level's index IS its sort rank, and each level's
 // icon lives next to it. Adding or renaming a level is a one-line edit here —
 // nothing else in the app enumerates the levels.
-var priorityLevels = []struct {
+// priorityLevel is one of the five Jira levels as the Prio view draws it. Index
+// in priorityLevels is the sort rank; Name is the Jira priority name, which is
+// also the value the priority edit writes back (#212); Slug is the testid
+// suffix of its menu choice.
+type priorityLevel struct {
 	Name string
+	Slug string
 	Icon priorityIcon
-}{
-	{"Highest", priorityIcon{Color: "#E11D48", Path: "M2 7l5-4 5 4M2 12l5-4 5 4"}},
-	{"High", priorityIcon{Color: "#F97316", Path: "M2 9.5l5-4 5 4"}},
-	{"Medium", priorityIcon{Color: "#F59E0B", Path: "M2 5.5h10M2 9.5h10"}},
-	{"Low", priorityIcon{Color: "#0EA5E9", Path: "M2 4.5l5 4 5-4"}},
-	{"Lowest", priorityIcon{Color: "#38BDF8", Path: "M2 2l5 4 5-4M2 7l5 4 5-4"}},
+}
+
+var priorityLevels = []priorityLevel{
+	{"Highest", "highest", priorityIcon{Color: "#E11D48", Path: "M2 7l5-4 5 4M2 12l5-4 5 4"}},
+	{"High", "high", priorityIcon{Color: "#F97316", Path: "M2 9.5l5-4 5 4"}},
+	{"Medium", "medium", priorityIcon{Color: "#F59E0B", Path: "M2 5.5h10M2 9.5h10"}},
+	{"Low", "low", priorityIcon{Color: "#0EA5E9", Path: "M2 4.5l5 4 5-4"}},
+	{"Lowest", "lowest", priorityIcon{Color: "#38BDF8", Path: "M2 2l5 4 5-4M2 7l5 4 5-4"}},
 }
 
 // priorityRank orders the five levels most-important-first. An unknown or
@@ -154,4 +194,12 @@ func sortByPriority(rows []prioRow) {
 		}
 		return rows[i].Key < rows[j].Key
 	})
+}
+
+// pick returns a when cond holds, else b.
+func pick(cond bool, a, b string) string {
+	if cond {
+		return a
+	}
+	return b
 }

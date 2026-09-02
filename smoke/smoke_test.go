@@ -13,8 +13,10 @@ package smoke
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -288,4 +290,49 @@ func TestStaticAssetsAreEmbedded(t *testing.T) {
 		t.Fatalf("home page does not reference /static assets")
 	}
 	fmt.Fprintln(os.Stderr, "smoke: embedded assets served OK")
+}
+
+// TestPrioPriorityEditWritesThroughTheFake drives the Prio view's priority edit
+// (#212) end to end against the real binary: POST /prio/priority writes the
+// level into the fake Jira's in-memory issue, re-reads it and answers the whole
+// re-sorted panel with that row highlighted at its new value — so `make check`
+// exercises a live control, not a dead one. The request carries the every-
+// filter-off params, as the hidden filter inputs would, so the edited row is in
+// the rendered slice whatever its status or labels.
+func TestPrioPriorityEditWritesThroughTheFake(t *testing.T) {
+	base := startDashboard(t)
+	time.Sleep(1500 * time.Millisecond) // let the first sync backfill the fake dataset
+
+	form := url.Values{
+		"key": {"DCAI-1"}, "priority": {"Lowest"},
+		"not-done": {"0"}, "not-started": {"0"}, "non-technical": {"0"},
+	}
+	resp, err := http.PostForm(base+"/prio/priority", form)
+	if err != nil {
+		t.Fatalf("POST /prio/priority: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	body := string(raw)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /prio/priority: status %d, want 200\n%s", resp.StatusCode, body)
+	}
+	for _, want := range []string{
+		`data-testid="prio:DCAI-1:priority-name">Lowest<`,
+		`data-key="DCAI-1" data-edited="true"`,
+		`data-testid="prio-filters"`, // the whole panel came back
+		`<input type="hidden" data-filterparam name="not-done" value="0">`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("priority edit response missing %q\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `prio:DCAI-1:priority-error`) {
+		t.Errorf("priority edit reported a failure against the fake Jira\n%s", body)
+	}
+	// The write stuck: a fresh load of the every-filter-off table shows it too.
+	if code, page := get(t, base+"/prio?not-done=0&not-started=0&non-technical=0"); code != http.StatusOK ||
+		!strings.Contains(page, `data-testid="prio:DCAI-1:priority-name">Lowest<`) {
+		t.Errorf("GET /prio after the edit: status %d, projection did not keep Lowest", code)
+	}
 }

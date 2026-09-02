@@ -123,6 +123,23 @@ type Transitioner interface {
 	SetStatus(ctx context.Context, key, statusID string) (string, error)
 }
 
+// Prioritizer is the Prio view's priority edit write path (#212): the app's
+// third mutation of Jira, after the estimate (docs/adr/0005) and the transition
+// (docs/adr/0010), and shaped like both. SetPriority writes the level (one of
+// jira.Priorities, by NAME — a priority's name is the level, and is what the app
+// reads and stores) to Jira, re-reads that one issue and persists it. It hands
+// nothing back: the handler re-renders the whole Prio panel from the store
+// afterwards, which is what re-sorts the table around the change. An error
+// means the write (or its reconciliation read/save) failed and left BOTH Jira
+// and the projection unchanged, so the handler renders the same panel with the
+// row unmoved and an inline error on it. It is nil when the server is built
+// without one (most in-process tests): the cell still renders editable, but an
+// edit is then reported as a failure, never silently dropped. The running
+// *sync.Syncer satisfies it.
+type Prioritizer interface {
+	SetPriority(ctx context.Context, key, priority string) error
+}
+
 // Server holds the parsed templates and the rollup source, and implements
 // http.Handler via its router.
 type Server struct {
@@ -130,6 +147,7 @@ type Server struct {
 	resyncer        Resyncer
 	estimator       Estimator
 	transitioner    Transitioner
+	prioritizer     Prioritizer
 	templates       *template.Template
 	mux             *http.ServeMux
 	now             func() time.Time
@@ -197,6 +215,14 @@ func WithEstimator(e Estimator) Option {
 // error).
 func WithTransitioner(tr Transitioner) Option {
 	return func(s *Server) { s.transitioner = tr }
+}
+
+// WithPrioritizer wires the Prio view's priority edit write path into the
+// server, enabling POST /prio/priority to change a ticket's priority in Jira
+// (#212). Left unset, the priority cell still renders editable but an edit is
+// reported back as a failure (the row stays put and shows an inline error).
+func WithPrioritizer(p Prioritizer) Option {
+	return func(s *Server) { s.prioritizer = p }
 }
 
 // WithAuth gates the server behind the shared team login (#122), enabling the
@@ -270,6 +296,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /board/move", s.handleBoardMove)
 	s.mux.HandleFunc("GET /prio", s.handlePrio)
 	s.mux.HandleFunc("GET /prio/results", s.handlePrioResults)
+	s.mux.HandleFunc("POST /prio/priority", s.handlePrioPriority)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
 	s.mux.HandleFunc("GET /sprint", s.handleSprint)
@@ -368,6 +395,10 @@ func (s *Server) templateFuncs() template.FuncMap {
 		// {{template}} needs a static name. The Board filter chrome uses it to range
 		// over its pluggable filters, each naming its own control partial (#157).
 		"render": s.renderPartial,
+		// priorityLevels is the Prio priority popover's menu: the five Jira levels
+		// with their icons, Highest first (#212). Exposed as a func so the cell
+		// partial can range over it without every row carrying the list.
+		"priorityLevels": func() []priorityLevel { return priorityLevels },
 		// attr wraps a trusted, code-controlled literal as a full HTML attribute
 		// (e.g. an hx-include selector with quotes/brackets that attribute escaping
 		// would mangle). Only ever fed constant strings from the handlers — never

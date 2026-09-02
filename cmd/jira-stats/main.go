@@ -115,6 +115,10 @@ func run() error {
 		// persists it. Like the estimate edit it runs under the request context,
 		// so the Syncer satisfies web.Transitioner directly.
 		web.WithTransitioner(syncer),
+		// The Prio view's priority edit write path (#212): the same Syncer's
+		// SetPriority writes the level to Jira (by name), re-reads the issue and
+		// persists it; the Syncer satisfies web.Prioritizer directly.
+		web.WithPrioritizer(syncer),
 	}
 	// Only override the web clock when REVIEW_NOW is set; leaving it out keeps the
 	// server's default time.Now for every production deployment.

@@ -146,6 +146,24 @@ func (c *LiveClient) UpdateIssueSize(ctx context.Context, key, size string) erro
 	return nil
 }
 
+// UpdateIssuePriority writes the issue's priority back to Jira via
+// PUT /rest/api/3/issue/{key} — the Prio view's priority edit (#212), the third
+// write path after the estimate (docs/adr/0005) and the transition
+// (docs/adr/0010). The level goes BY NAME ({"priority":{"name":"High"}}): a
+// priority's name IS the level, and it is exactly what the app already reads
+// (priorityDTO), so there is no id to resolve. Anything outside jira.Priorities
+// is rejected here, before a request is made. Last-write-wins, as for the size.
+func (c *LiveClient) UpdateIssuePriority(ctx context.Context, key, priority string) error {
+	if !ValidPriority(priority) {
+		return fmt.Errorf("jira update priority %s: unknown level %q (want one of %v)", key, priority, Priorities)
+	}
+	body := map[string]any{"fields": map[string]any{"priority": map[string]any{"name": priority}}}
+	if err := c.put(ctx, "/rest/api/3/issue/"+url.PathEscape(key), body); err != nil {
+		return fmt.Errorf("jira update priority %s: %w", key, err)
+	}
+	return nil
+}
+
 // FetchTransitions reads the transitions Jira currently offers for the issue via
 // GET /rest/api/3/issue/{key}/transitions. The set is issue- and
 // workflow-specific and can differ per source status, so it is read fresh for
