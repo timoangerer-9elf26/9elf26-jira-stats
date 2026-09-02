@@ -3,7 +3,7 @@ package web_test
 // Integration tests for the Prio view's filter registry over the HTTP seam.
 //
 // Every toggle defaults ON, so a bare /prio shows the narrowed, prioritisable
-// slice — unstarted, non-technical, top-of-tree work — rather than the raw
+// slice — not-started, non-technical, top-of-tree work — rather than the raw
 // ~1,400-row project. A test that wants a wider universe must say so in the URL;
 // prioEveryFilterOff is that URL suffix. Since #213 that includes No parent,
 // which defaults ON and encodes only its off state as `no-parent=0`.
@@ -393,7 +393,7 @@ func TestPrioNoParentOnKeepsOnlyUnparentedTickets(t *testing.T) {
 func TestPrioNoParentOffShowsParentedTickets(t *testing.T) {
 	app := newTestApp(t, prioParentFixture())
 
-	for _, path := range []string{"/prio/results?no-parent=0", "/prio/results?" + prioEveryFilterOff} {
+	for _, path := range []string{"/prio?no-parent=0", "/prio/results?no-parent=0", "/prio/results?" + prioEveryFilterOff} {
 		fragment := get(t, app.URL+path)
 		assertPrioRows(t, fragment, []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-4"}, nil)
 		assertToggle(t, fragment, "prio-no-parent", false, "/prio/results")

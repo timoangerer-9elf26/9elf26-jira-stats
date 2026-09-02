@@ -130,7 +130,7 @@ Four independent two-state toggles on the [Prio view](#prio-view), reusing the
 All are plain on/off toggles (like the Board's no-estimate control), not the
 Board's multi-select assignee bar, and each is ANDed with the others. **All four
 default ON**, so a bare `/prio` opens on the narrowed, prioritisable slice —
-unstarted, non-technical, top-of-tree work — rather than the raw project; each
+not-started, non-technical, top-of-tree work — rather than the raw project; each
 is encoded only in its *off* state (`<param>=0`), and any other value leaves it
 on.
 

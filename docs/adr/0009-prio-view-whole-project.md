@@ -27,8 +27,10 @@ the projection — become first-class synced fields on the `issue` row.
 ## The non-obvious consequences
 
 - **The universe is dominated by done work.** ~1,259 of ~1,400 issues are
-  Released / Deployed. So the Prio filters that narrow by **status and label** —
-  unlike the Board's, which all default OFF — **default ON**: the view opens on
+  Released / Deployed. So the Prio filters that narrow towards the
+  prioritisable slice — by **status**, by **label**, and since #213 by
+  **position in the issue tree** — unlike the Board's, which all default OFF —
+  **default ON**: the view opens on
   the narrowed, prioritisable slice rather than its raw universe, and leans on
   filters to widen back out. A future reader comparing filter defaults across
   views should not "fix" this to match the Board; it is deliberate (see
