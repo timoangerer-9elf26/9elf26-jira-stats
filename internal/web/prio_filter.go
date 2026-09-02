@@ -75,18 +75,20 @@ func keepPrioIssue(filters []prioFilter, issue store.PrioIssue) bool {
 // four categories, not a set of overlapping toggles. It replaced the Not done and
 // Not started pills, whose overlap (Not started was a strict subset of Not done)
 // meant no combination could express "only work in flight" or "only finished
-// work" — see docs/adr/0011, which supersedes that part of ADR 0009.
+// work". docs/adr/0011 has the full argument and supersedes that part of ADR
+// 0009; CONTEXT.md → Prio filters documents the categories for readers.
 //
-// The categories are an EXPLICIT status set here in our code, deliberately NOT
-// derived from Jira's status_category: live Jira files Canceled under category
-// "Done" and Triage under "To Do", so a category-derived map would sweep Canceled
-// into Done and be wrong (CONTEXT.md → Ticket status buckets).
+// The two facts a reader of THIS file needs:
 //
-// This is a second, Prio-LOCAL partition. It is not the project-wide sprint
-// buckets (Triage / Open ticket / Finished / Canceled) and must not be conflated
-// with them: here Triage sits inside Planned, because on a prioritisation surface
-// an untriaged ticket is exactly the unprioritised work you want to see, while
-// the sprint rollups rightly treat Triage as pre-sprint and exclude it.
+//  1. Membership is an EXPLICIT status set right here, deliberately NOT derived
+//     from Jira's status_category — live Jira files Canceled under category
+//     "Done" and Triage under "To Do", so a derived map would sweep Canceled into
+//     Done and be wrong. The cost is that a new DCAI status is invisible to every
+//     category until someone adds it below.
+//  2. This is a second, Prio-LOCAL partition, NOT the project-wide sprint buckets
+//     (Triage / Open ticket / Finished / Canceled). They disagree on purpose:
+//     here Triage sits inside Planned, because on a prioritisation surface an
+//     untriaged ticket is exactly the unprioritised work you want to see.
 const (
 	statusParam = "status"
 	// statusPlanned is the default category, so it is the one value the URL never
@@ -95,42 +97,50 @@ const (
 )
 
 // prioStatusCategory is one option of the status select: the URL value, the label
-// on the option, and the statuses it keeps. A nil Statuses means "every status",
-// which is what makes All the only category Canceled surfaces under.
+// on the option, and the statuses it keeps — with keep the lower-cased index of
+// Statuses that Keeps actually consults.
 type prioStatusCategory struct {
 	Value    string
 	Label    string
-	Statuses []string
+	Statuses []string // nil = every status; see Keeps
+	keep     map[string]bool
 }
 
-// prioStatusCategories is the category map, in the select's option order. Note
-// Ready for Release is a DONE state despite the name (CONTEXT.md), and Canceled
-// belongs to no category at all — it appears only under All.
-var prioStatusCategories = []prioStatusCategory{
-	{statusPlanned, "Planned", []string{"Triage", "Refinement", "Ready To Do"}},
-	{"doing", "Doing", []string{"In Progress", "Review / Testing"}},
-	{"done", "Done", []string{"DONE (This Sprint)", "Ready for Release", "Released / Deployed"}},
-	{"all", "All", nil},
-}
-
-// prioStatusSets is each category's keep set, lower-cased. Matching is
+// Keeps reports whether a status falls in this category. Matching is
 // case-insensitive like every other status bucket in the app
 // (store.normalizeStatus), so a Jira casing quirk — "Ready to Do" for "Ready To
-// Do" — cannot silently drop a ticket out of its category. A nil set is All.
-var prioStatusSets = func() map[string]map[string]bool {
-	sets := make(map[string]map[string]bool, len(prioStatusCategories))
-	for _, category := range prioStatusCategories {
-		if category.Statuses == nil {
-			sets[category.Value] = nil
-			continue
-		}
-		set := make(map[string]bool, len(category.Statuses))
-		for _, status := range category.Statuses {
-			set[strings.ToLower(status)] = true
-		}
-		sets[category.Value] = set
+// Do" — cannot silently drop a ticket out of its category. The nil-Statuses
+// category is All, which keeps everything and is therefore the only one Canceled
+// (which belongs to no category) surfaces under.
+func (c prioStatusCategory) Keeps(status string) bool {
+	if c.keep == nil {
+		return true
 	}
-	return sets
+	return c.keep[strings.ToLower(status)]
+}
+
+// prioStatusCategories is the category map, in the select's option order, each
+// indexed for lookup as it is built. Note Ready for Release is a DONE state
+// despite the name (CONTEXT.md), and Canceled appears in no list — it reaches the
+// table only through All.
+var prioStatusCategories = func() []prioStatusCategory {
+	categories := []prioStatusCategory{
+		{Value: statusPlanned, Label: "Planned", Statuses: []string{"Triage", "Refinement", "Ready To Do"}},
+		{Value: "doing", Label: "Doing", Statuses: []string{"In Progress", "Review / Testing"}},
+		{Value: "done", Label: "Done", Statuses: []string{"DONE (This Sprint)", "Ready for Release", "Released / Deployed"}},
+		{Value: "all", Label: "All", Statuses: nil},
+	}
+	for i, category := range categories {
+		if category.Statuses == nil {
+			continue // All: no index, Keeps short-circuits
+		}
+		keep := make(map[string]bool, len(category.Statuses))
+		for _, status := range category.Statuses {
+			keep[strings.ToLower(status)] = true
+		}
+		categories[i].keep = keep
+	}
+	return categories
 }()
 
 // prioStatusCategoryFor resolves a URL value to a category, falling back to
@@ -148,11 +158,16 @@ func prioStatusCategoryFor(value string) prioStatusCategory {
 
 // statusPrioFilter narrows the table to one category of the workflow (#214).
 //
-// It round-trips like the pills but in its own idiom: the <select> carries
-// name="status" and is the element issuing the request, so its value rides along
-// automatically and it hx-includes only the OTHER filters. It is therefore NOT
-// itself marked data-filterparam; instead a non-default category is re-emitted as
-// a hidden param, so toggling a pill preserves the chosen category.
+// Round-trip shape, which differs from BOTH existing controls and is worth the
+// paragraph. Like the Board's search box (see the "search-box" partial) the value
+// lives in the control, so the request carries it automatically and the select
+// hx-includes only the OTHER filters. Unlike the search box, the select is NOT
+// itself marked data-filterparam; the filter re-emits a non-default category as a
+// hidden param instead. The reason is the bar's "default state is never encoded"
+// convention: a marked select would make every sibling control's request carry
+// status=planned, since a select always has a value and cannot render "absent".
+// Only the server can drop the default, so the mirror is where that decision
+// lives — and it is what makes toggling a pill preserve the chosen category.
 func statusPrioFilter(q url.Values) prioFilter {
 	selected := prioStatusCategoryFor(q.Get(statusParam))
 
@@ -179,11 +194,7 @@ func statusPrioFilter(q url.Values) prioFilter {
 	}
 
 	keep := func(issue store.PrioIssue) bool {
-		set := prioStatusSets[selected.Value]
-		if set == nil {
-			return true // All: every status, Canceled included
-		}
-		return set[strings.ToLower(issue.Status)]
+		return selected.Keeps(issue.Status)
 	}
 
 	return prioFilter{Control: "filter-select", Data: view, Params: params, Keep: keep}
@@ -191,7 +202,7 @@ func statusPrioFilter(q url.Values) prioFilter {
 
 // nonTechnicalParam is the URL/query key carrying the Non-Technical toggle state.
 // Since #209 it defaults ON and so encodes the OFF state (non-technical=0),
-// exactly like not-done: the toggle is on iff the param is anything but "0", which
+// exactly like No parent: the toggle is on iff the param is anything but "0", which
 // means the explicit non-technical=1 an older bookmark may carry still reads as on.
 //
 // technicalLabel is the canonical stored Jira label, matched exactly (capital T,

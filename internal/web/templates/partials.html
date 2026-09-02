@@ -1032,9 +1032,9 @@
 {{end}}
 
 {{/* filter-toggle is the shared two-state filter pill behind every on/off filter
-     in the app: the Board's "No estimates" (#158) and "Active in last 24h"
-     (#159) controls and the Prio view's "Non-Technical" (#203) and "No parent"
-     (#210) controls. It is server-driven:
+     in the app: the Board's "No estimates" (#158) and "Active in last 24h" (#159)
+     controls and the Prio view's "Non-Technical" (#203) and "No parent" (#210)
+     controls. It is server-driven:
      it hx-GETs its ToggleHref — the results URL encoding the state that RESULTS
      from flipping it — and swaps the caller's panel, so the control re-renders
      pressed or not. The href already carries its own resulting state, so it
@@ -1055,17 +1055,20 @@
 </div>
 {{end}}
 
-{{/* filter-select is the shared single-choice filter dropdown — the filter bar's
-     second control type alongside the pill, introduced by the Prio status select
-     (#214). Server-driven like the pill: on change it hx-GETs ResultsHref and
-     swaps the caller's panel, so the control re-renders with the new choice.
+{{/* filter-select is the shared single-choice filter dropdown, introduced by the
+     Prio status select (#214) — the first non-pill control on that bar.
+     Server-driven like the pill: on change it hx-GETs ResultsHref and swaps the
+     caller's panel, so the control re-renders with the new choice.
 
-     The difference from the pill is WHERE the value lives. A pill encodes the
-     state it flips to in its href; the select IS the element issuing the request,
-     so htmx picks its value up automatically from name/Param — which is why it
-     hx-includes only the OTHER filters (IncludeAttr) and is deliberately NOT
-     marked data-filterparam: the filter re-emits its non-default value as a
-     hidden param instead, so a sibling control's request carries it too.
+     Where its value lives puts it between the other two controls. A pill encodes
+     the state it flips to in its href; "search-box" below carries its value in
+     the input and marks itself data-filterparam so the control round-trips its
+     own term. The select IS the element issuing the request, so htmx picks its
+     value up automatically from name/Param — but it is deliberately NOT marked
+     data-filterparam, because a select always has a value and would then make
+     every sibling's request carry the default. The owning filter re-emits only a
+     NON-default value as a hidden param instead, which is why IncludeAttr is the
+     pill's "all but self" selector rather than include-all.
 
      Takes a filterSelectView (Prefix, Label, Param, Options, ResultsHref,
      IncludeAttr). */}}
@@ -1174,8 +1177,8 @@
 {{end}}
 
 {{/* prio-filters is the Prio view's filter chrome (#202, #203, #209, #210, #213,
-     #214) — the Board's
-     filter-agnostic region (see "board-filters") pointed at #prio-panel. One
+     #214) — the Board's filter-agnostic region (see "board-filters") pointed at
+     #prio-panel. One
      <form> that, on any control change, swaps the whole panel via HTMX so filter
      state stays URL-encoded and bookmarkable without a full-page reload. It
      re-emits every registered filter's current params as hidden inputs marked

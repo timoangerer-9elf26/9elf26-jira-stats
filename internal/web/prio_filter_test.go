@@ -110,14 +110,23 @@ func assertToggle(t *testing.T, body, prefix string, wantOn bool, wantHref strin
 // on one <option>, not aria-pressed on the control.
 func assertStatusSelect(t *testing.T, body, want string) {
 	t.Helper()
-	if tag := openingTag(body, `data-testid="prio-status-select"`); tag == "" {
+	tag := openingTag(body, `data-testid="prio-status-select"`)
+	if tag == "" {
 		t.Fatalf("no status select rendered\n%s", body)
 	}
-	if !strings.Contains(body, `<option value="`+want+`" selected>`) {
-		t.Errorf("status select should have %q selected\n%s", want, body)
+	// Read the options out of the select itself, so unrelated markup elsewhere on
+	// the page can neither satisfy nor break the assertion.
+	start := strings.Index(body, tag)
+	end := strings.Index(body[start:], "</select>")
+	if end < 0 {
+		t.Fatalf("status select is never closed\n%s", body)
 	}
-	if n := strings.Count(body, `" selected>`); n != 1 {
-		t.Errorf("status select marked %d options selected, want 1\n%s", n, body)
+	options := body[start : start+end]
+	if !strings.Contains(options, `<option value="`+want+`" selected>`) {
+		t.Errorf("status select should have %q selected\n%s", want, options)
+	}
+	if n := strings.Count(options, ` selected>`); n != 1 {
+		t.Errorf("status select marked %d options selected, want 1\n%s", n, options)
 	}
 }
 

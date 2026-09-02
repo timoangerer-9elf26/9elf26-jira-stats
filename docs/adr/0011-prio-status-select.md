@@ -75,15 +75,22 @@ on", "what is finished", "everything".
   you came to look at. A reader who assumes one partition is the other will
   mis-read either the rollups or this view; `CONTEXT.md` states the split
   explicitly for that reason. Do not "unify" them.
-- **The filter bar now has two control types.** The registry was already
+- **The Prio bar now has two control types.** The registry was already
   control-agnostic — each filter names the partial that renders it — so the
-  select slotted in with no change to the chrome, the route or the handler. The
-  select does differ in *where its value lives*: a pill encodes the state it
-  flips to in its href, whereas the select **is** the element issuing the
-  request, so htmx picks its value up automatically. It is therefore not marked
-  `data-filterparam` (that would double-count); its non-default value is
-  re-emitted as a hidden param instead, so toggling a *pill* preserves the
-  chosen category.
+  select slotted in with no change to the chrome, the route or the handler.
+
+  It is not the app's first value-carrying control: the Board's search box
+  (#193) got there first, and it took the *other* option — the input marks
+  itself `data-filterparam`, so the control round-trips its own value and
+  hx-includes everything. The select deliberately does **not** copy that,
+  because a `<select>` always has a value and cannot render "absent". Marked, it
+  would make every sibling control's request carry `status=planned` and break
+  the bar's "the default state is never encoded" convention. Dropping the
+  default is a decision only the server can take, so the owning filter re-emits
+  a **non-default** category as a hidden param instead — which is also what
+  makes toggling a *pill* preserve the chosen category. Two shapes for
+  value-carrying controls therefore coexist on purpose; which one a future
+  control wants depends on whether its default is expressible in the DOM.
 - **Only the non-default category reaches the URL.** `planned` is omitted, so a
   bare `/prio` is still a bare URL — the same convention the pills follow with
   their `<param>=0` off-encoding. An unrecognised value falls back to Planned
