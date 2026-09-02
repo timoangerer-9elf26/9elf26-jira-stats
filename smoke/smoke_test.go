@@ -305,7 +305,7 @@ func TestPrioPriorityEditWritesThroughTheFake(t *testing.T) {
 
 	form := url.Values{
 		"key": {"DCAI-1"}, "priority": {"Lowest"},
-		"not-done": {"0"}, "not-started": {"0"}, "non-technical": {"0"},
+		"not-done": {"0"}, "not-started": {"0"}, "non-technical": {"0"}, "no-parent": {"0"},
 	}
 	resp, err := http.PostForm(base+"/prio/priority", form)
 	if err != nil {
@@ -331,7 +331,7 @@ func TestPrioPriorityEditWritesThroughTheFake(t *testing.T) {
 		t.Errorf("priority edit reported a failure against the fake Jira\n%s", body)
 	}
 	// The write stuck: a fresh load of the every-filter-off table shows it too.
-	if code, page := get(t, base+"/prio?not-done=0&not-started=0&non-technical=0"); code != http.StatusOK ||
+	if code, page := get(t, base+"/prio?not-done=0&not-started=0&non-technical=0&no-parent=0"); code != http.StatusOK ||
 		!strings.Contains(page, `data-testid="prio:DCAI-1:priority-name">Lowest<`) {
 		t.Errorf("GET /prio after the edit: status %d, projection did not keep Lowest", code)
 	}

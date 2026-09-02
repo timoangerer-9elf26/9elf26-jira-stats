@@ -177,18 +177,18 @@ func TestPrioPriorityWriteResortsAndHighlightsTheRow(t *testing.T) {
 func TestPrioPriorityWritePreservesActiveFilters(t *testing.T) {
 	app := newPriorityApp(t, prioFixture())
 
-	// Non-default state: Not started OFF (In Progress work visible), No parent ON.
-	vals := url.Values{"key": {"DCAI-1"}, "priority": {"Lowest"}, "not-started": {"0"}, "no-parent": {"1"}}
+	// Non-default state: Not started OFF (In Progress work visible), No parent OFF.
+	vals := url.Values{"key": {"DCAI-1"}, "priority": {"Lowest"}, "not-started": {"0"}, "no-parent": {"0"}}
 	code, body := postForm(t, app.URL+"/prio/priority", vals)
 	if code != http.StatusOK {
 		t.Fatalf("POST /prio/priority: status %d, want 200", code)
 	}
 	assertToggle(t, body, "prio-not-started", false, "/prio/results")
-	assertToggle(t, body, "prio-no-parent", true, "/prio/results")
+	assertToggle(t, body, "prio-no-parent", false, "/prio/results")
 	assertToggle(t, body, "prio-not-done", true, "/prio/results?not-done=0")
 	for _, want := range []string{
 		`<input type="hidden" data-filterparam name="not-started" value="0">`,
-		`<input type="hidden" data-filterparam name="no-parent" value="1">`,
+		`<input type="hidden" data-filterparam name="no-parent" value="0">`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("filter state not re-emitted: %q\n%s", want, body)
@@ -204,7 +204,7 @@ func TestPrioPriorityWritePreservesActiveFilters(t *testing.T) {
 	// Without any filter params the panel comes back at its defaults.
 	_, dflt := postForm(t, app.URL+"/prio/priority", url.Values{"key": {"DCAI-6"}, "priority": {"Low"}})
 	assertToggle(t, dflt, "prio-not-started", true, "/prio/results?not-started=0")
-	assertToggle(t, dflt, "prio-no-parent", false, "/prio/results?no-parent=1")
+	assertToggle(t, dflt, "prio-no-parent", true, "/prio/results?no-parent=0")
 }
 
 // A failed write changes nothing in Jira or the projection; the panel comes back

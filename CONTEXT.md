@@ -128,12 +128,11 @@ be changed on.
 Four independent two-state toggles on the [Prio view](#prio-view), reusing the
 [Board's](#board-filters) URL-encoded, fragment-swapping filter scaffolding.
 All are plain on/off toggles (like the Board's no-estimate control), not the
-Board's multi-select assignee bar, and each is ANDed with the others. The first
-**three default ON**, so a bare `/prio` opens on the narrowed, prioritisable
-slice — not-started, non-technical work — rather than the raw project; those
-three are encoded only in their *off* state (`<param>=0`), and any other value
-leaves them on. **No parent defaults OFF** and so uses the ordinary encoding:
-`no-parent=1` turns it on, a bare URL leaves it off.
+Board's multi-select assignee bar, and each is ANDed with the others. **All four
+default ON**, so a bare `/prio` opens on the narrowed, prioritisable slice —
+unstarted, non-technical, top-of-tree work — rather than the raw project; each
+is encoded only in its *off* state (`<param>=0`), and any other value leaves it
+on.
 
 The controls sit against the **right edge** of the filter bar; the card itself
 stays full-width, keeping its alignment with the page header and the table.
@@ -151,7 +150,7 @@ They read left-to-right in registry order:
 - **Not started** (`not-started=0`) — default **ON**. On narrows to work nobody
   has picked up yet: the statuses Triage, Refinement, Ready To Do. Off it
   contributes nothing.
-- **No parent** (`no-parent=1` turns it *on*) — default **OFF**. On narrows to
+- **No parent** (`no-parent=0` turns it off) — default **ON**. On narrows to
   the top of the issue tree: tickets whose **parent is empty**, which today
   means every Epic plus the unparented Tasks, Bugs and Stories. The rule is
   literally "has no parent", not "is an Epic or has no parent" — the two select
@@ -159,7 +158,9 @@ They read left-to-right in registry order:
   Initiative would genuinely stop being top-of-tree and drops out. Reads
   `issue.parent_key`, synced since migration `00008` and so needing no resync.
   The table shows no parent column, so it does not surface *why* a row
-  qualified; a parent/epic pill column is a separate feature.
+  qualified; a parent/epic pill column is a separate feature. It is on by
+  default because parented tickets are already prioritised by whatever they
+  hang under, so the default view is the work nothing else is ordering.
 
 **Not started is a strict subset of Not done**, so at the defaults Not done is a
 no-op. That overlap is deliberate, not a bug to merge away into a three-state
@@ -167,8 +168,8 @@ status control: Not done earns its keep as the second gear — Not started off +
 Not done on = all open work, with the ~1,259 Released / Deployed rows still
 hidden.
 
-So the whole project is `?not-done=0&not-started=0&non-technical=0`, not
-`?not-done=0` alone.
+So the whole project is `?not-done=0&not-started=0&non-technical=0&no-parent=0`,
+not `?not-done=0` alone.
 
 Rows are sorted by **priority**, Highest→Lowest, ties broken by issue key. The
 DCAI project uses the standard five-level priority scheme (Highest, High,
