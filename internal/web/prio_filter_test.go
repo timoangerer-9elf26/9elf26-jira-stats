@@ -2,10 +2,12 @@ package web_test
 
 // Integration tests for the Prio view's filter registry over the HTTP seam.
 //
-// After #209 all three toggles default ON, so a bare /prio shows the narrowed,
-// prioritisable slice — not-started, non-technical work — rather than the raw
-// ~1,400-row project. A test that wants a wider universe must say so in the URL;
-// prioEveryFilterOff is that URL suffix.
+// After #209 the three status/label toggles default ON, so a bare /prio shows
+// the narrowed, prioritisable slice — not-started, non-technical work — rather
+// than the raw ~1,400-row project. A test that wants a wider universe must say so
+// in the URL; prioEveryFilterOff is that URL suffix. No parent (#210) is the
+// exception: it defaults OFF, contributes nothing at a bare /prio, and so is
+// deliberately absent from that const — a test turns it ON with `no-parent=1`.
 //
 // Note the accepted overlap: Not-started (Triage / Refinement / Ready To Do) is
 // a strict subset of Not-done, so at the defaults Not-done changes nothing. The
@@ -278,6 +280,7 @@ func TestPrioTogglesRenderInRegistryOrder(t *testing.T) {
 		`data-testid="prio-non-technical"`,
 		`data-testid="prio-not-done"`,
 		`data-testid="prio-not-started"`,
+		`data-testid="prio-no-parent"`,
 	)
 	if !strings.Contains(openingTag(body, `data-testid="prio-filters"`), "justify-end") {
 		t.Errorf("the filter controls should sit against the right edge\n%s", body)
@@ -330,6 +333,104 @@ func TestPrioNonTechnicalMatchesTheExactLabel(t *testing.T) {
 
 	body := get(t, app.URL+"/prio")
 	assertPrioRows(t, body, []string{"DCAI-2", "DCAI-3"}, []string{"DCAI-1"})
+}
+
+// prioParentFixture pairs parented and unparented tickets, including the case the
+// "is an Epic" shortcut would get wrong: an Epic that itself has a parent. Every
+// row is Triage and unlabelled, so the three default-on filters keep all four and
+// No parent is the filter under test.
+func prioParentFixture() *jira.FakeClient {
+	return &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
+		{Key: "DCAI-1", Type: "Epic", Summary: "Top-level epic", Status: "Triage", StatusCategory: "To Do", Priority: "High"},
+		{Key: "DCAI-2", Type: "Task", Summary: "Child of the epic", Status: "Triage", StatusCategory: "To Do", Priority: "High", ParentKey: "DCAI-1"},
+		{Key: "DCAI-3", Type: "Bug", Summary: "Unfiled bug", Status: "Triage", StatusCategory: "To Do", Priority: "Medium"},
+		{Key: "DCAI-4", Type: "Epic", Summary: "Epic under an initiative", Status: "Triage", StatusCategory: "To Do", Priority: "Medium", ParentKey: "DCAI-99"},
+	}}
+}
+
+func TestPrioNoParentToggleRendersDefaultOff(t *testing.T) {
+	app := newTestApp(t, prioParentFixture())
+	body := get(t, app.URL+"/prio")
+
+	for _, want := range []string{
+		`data-testid="prio-no-parent"`,
+		`data-testid="prio-no-parent-toggle"`,
+		"No parent",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("prio filter chrome missing %q\n%s", want, body)
+		}
+	}
+	// Default OFF, so the href encodes the ON state — the opposite of its
+	// default-on neighbours.
+	assertToggle(t, body, "prio-no-parent", false, "/prio/results?no-parent=1")
+	if strings.Contains(body, `name="no-parent"`) {
+		t.Errorf("the default-off No parent filter should emit no param\n%s", body)
+	}
+}
+
+// Off (the default) it contributes nothing: parented and unparented rows alike.
+func TestPrioNoParentOffShowsParentedTickets(t *testing.T) {
+	app := newTestApp(t, prioParentFixture())
+
+	for _, path := range []string{"/prio", "/prio/results?no-parent=0", "/prio/results?" + prioEveryFilterOff} {
+		assertPrioRows(t, get(t, app.URL+path), []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-4"}, nil)
+	}
+}
+
+// On, only rows with an empty parent survive — the rule is "has no parent", not
+// "is an Epic": the child Task goes, and so does the Epic filed under DCAI-99.
+func TestPrioNoParentOnKeepsOnlyUnparentedTickets(t *testing.T) {
+	app := newTestApp(t, prioParentFixture())
+	fragment := get(t, app.URL+"/prio/results?no-parent=1")
+
+	assertPrioRows(t, fragment, []string{"DCAI-1", "DCAI-3"}, []string{"DCAI-2", "DCAI-4"})
+	assertToggle(t, fragment, "prio-no-parent", true, "/prio/results")
+	if !strings.Contains(fragment, `<input type="hidden" data-filterparam name="no-parent" value="1">`) {
+		t.Errorf("the on state should be re-emitted as a filter param\n%s", fragment)
+	}
+	if !strings.Contains(fragment, `hx-include="[data-filterparam]:not([name='no-parent'])"`) {
+		t.Errorf("No parent toggle should hx-include only the other filters\n%s", fragment)
+	}
+}
+
+// It is ANDed with the rest, and its param round-trips both ways.
+func TestPrioNoParentCombinesWithTheOtherFilters(t *testing.T) {
+	app := newTestApp(t, &jira.FakeClient{Sprints: activeSprintKW29(), Issues: []jira.Issue{
+		{Key: "DCAI-1", Type: "Epic", Summary: "Open epic", Status: "Triage", StatusCategory: "To Do", Priority: "High"},
+		{Key: "DCAI-2", Type: "Epic", Summary: "Shipped epic", Status: "Released / Deployed", StatusCategory: "Done", Priority: "High"},
+		{Key: "DCAI-3", Type: "Task", Summary: "Technical, unparented", Status: "Triage", StatusCategory: "To Do", Priority: "High", Labels: []string{"Technical"}},
+		{Key: "DCAI-4", Type: "Task", Summary: "Open child", Status: "Triage", StatusCategory: "To Do", Priority: "High", ParentKey: "DCAI-1"},
+	}})
+
+	for _, tc := range []struct {
+		name   string
+		query  string
+		want   []string
+		absent []string
+	}{
+		{"no-parent alone still hides done and technical work", "?no-parent=1", []string{"DCAI-1"}, []string{"DCAI-2", "DCAI-3", "DCAI-4"}},
+		{"with non-technical off the technical unparented task returns", "?no-parent=1&non-technical=0", []string{"DCAI-1", "DCAI-3"}, []string{"DCAI-2", "DCAI-4"}},
+		{"with every other filter off only the parent rule applies", "?no-parent=1&" + prioEveryFilterOff, []string{"DCAI-1", "DCAI-2", "DCAI-3"}, []string{"DCAI-4"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertPrioRows(t, get(t, app.URL+"/prio"+tc.query), tc.want, tc.absent)
+		})
+	}
+
+	// On alongside the defaults: it round-trips and the others stay bare.
+	on := get(t, app.URL+"/prio?no-parent=1")
+	if !strings.Contains(on, `<input type="hidden" data-filterparam name="no-parent" value="1">`) {
+		t.Errorf("no-parent on should round-trip alone\n%s", on)
+	}
+	for _, param := range []string{"not-done", "not-started", "non-technical"} {
+		if strings.Contains(on, `name="`+param+`"`) {
+			t.Errorf("%s is at its default and should emit no param\n%s", param, on)
+		}
+	}
+
+	// And the other toggles' hrefs never carry it — it rides along via hx-include.
+	assertToggle(t, on, "prio-not-done", true, "/prio/results?not-done=0")
 }
 
 // --- The registry as a whole -------------------------------------------------

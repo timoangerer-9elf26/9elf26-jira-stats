@@ -1155,13 +1155,15 @@
      data-filterparam (so a change to one filter round-trips the others), then
      renders each filter's control partial by name via the render func. Adding a
      filter means slotting it into the prioFilters registry; this region does not
-     change (as the #203 Non-Technical and #209 Not started toggles showed).
+     change (as the #203 Non-Technical, #209 Not started and #210 No parent
+     toggles showed).
 
      The controls sit against the RIGHT edge (#209, justify-end) while the card
      itself stays full-width, so it keeps its alignment with the page header
      above and the table below — the Board's assignee bar (#186) does the same
      with ml-auto. They read left-to-right in registry order against that edge:
-     Non-Technical, Not done, Not started. Takes a prioView (needs .Filters). */}}
+     Non-Technical, Not done, Not started, No parent — the first three lit by
+     default, No parent unlit. Takes a prioView (needs .Filters). */}}
 {{define "prio-filters"}}
 <form data-testid="prio-filters"
       hx-target="#prio-panel" hx-swap="innerHTML"
