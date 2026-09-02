@@ -27,17 +27,24 @@ the projection — become first-class synced fields on the `issue` row.
 ## The non-obvious consequences
 
 - **The universe is dominated by done work.** ~1,259 of ~1,400 issues are
-  Released / Deployed. So the Prio filters that narrow by **status and label** —
-  unlike the Board's, which all default OFF — **default ON**: the view opens on
+  Released / Deployed. So the Prio filters that narrow towards the
+  prioritisable slice — by **status**, by **label**, and since #213 by
+  **position in the issue tree** — unlike the Board's, which all default OFF —
+  **default ON**: the view opens on
   the narrowed, prioritisable slice rather than its raw universe, and leans on
   filters to widen back out. A future reader comparing filter defaults across
   views should not "fix" this to match the Board; it is deliberate (see
   [Prio filters](../../CONTEXT.md#prio-filters)).
 
-  The registry is **not uniform** in this, and must not be assumed to be. A
-  filter that narrows on some *other* axis is an ordinary default-OFF filter
-  taking the usual `<param>=1`-means-on encoding — No parent (#210) is the
-  first. Only the default-ON ones flip that round, encoding their OFF state instead.
+  Every filter in the registry defaults ON today — No parent joined them in
+  #213, on the same reasoning: parented tickets are already prioritised by
+  whatever they hang under, so top-of-tree work is the default slice. But the
+  registry is **not uniform** by rule, and must not be assumed to be. Default-ON
+  is a property of what each filter narrows to, decided filter by filter; a
+  filter whose narrowing is a lens the user reaches for rather than part of the
+  default slice is an ordinary default-OFF filter taking the usual
+  `<param>=1`-means-on encoding. Only the default-ON ones flip that round,
+  encoding their OFF state instead — do not copy the `=0` form blindly.
 
 - **Existing rows are blank until a full resync.** Because `priority` and `labels`
   are additive projection columns, historical tickets carry them only after a

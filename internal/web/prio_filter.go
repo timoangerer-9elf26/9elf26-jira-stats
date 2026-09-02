@@ -42,9 +42,11 @@ type prioFilter struct {
 // Non-Technical (#203) goes FIRST in this slice — prepended, not appended — and
 // new filters append, as No parent (#210) did.
 //
-// The registry is not uniform in its default, and must not be assumed to be: the
-// first three default ON and so encode only their OFF state (`<param>=0`), while
-// No parent defaults OFF and uses the ordinary `no-parent=1`-means-on encoding.
+// Every filter here currently defaults ON and so encodes only its OFF state
+// (`<param>=0`), No parent included since #213. That uniformity is a coincidence
+// of the current set, not a rule: a filter whose ON state is the unusual one is
+// an ordinary default-OFF filter taking the `<param>=1`-means-on encoding, and
+// must not copy the inverted form from its neighbours.
 func prioFilters(q url.Values) []prioFilter {
 	return []prioFilter{
 		nonTechnicalPrioFilter(q),
@@ -218,14 +220,13 @@ func notStartedPrioFilter(q url.Values) prioFilter {
 	return prioFilter{Control: "filter-toggle", Data: toggle, Params: params, Keep: keep}
 }
 
-// noParentParam is the URL/query key carrying the No-parent toggle state. Unlike
-// the three filters above it defaults OFF, so it keeps the ORDINARY encoding the
-// registry started with: only the ON state is in the URL, as `no-parent=1`, and a
-// bare /prio leaves it off. Do not copy the inverted `=0` form from its
-// neighbours — that form exists only because those filters default on.
+// noParentParam is the URL/query key carrying the No-parent toggle state. Like
+// the three filters above it defaults ON (#213), so only its OFF state is in the
+// URL, as `no-parent=0`; any other value — including the `no-parent=1` old
+// bookmarks carry — leaves it on.
 const (
 	noParentParam = "no-parent"
-	noParentOn    = "1"
+	noParentOff   = "0"
 )
 
 // noParentPrioFilter narrows to the top of the issue tree: tickets with no parent
@@ -238,25 +239,24 @@ const (
 // an Epic is parented under an Initiative it is genuinely no longer
 // top-of-tree and should drop out of this filter.
 //
-// It defaults OFF because it is a narrowing lens, not part of the "what should I
-// be prioritising" default slice the other three define: a user reaches for it to
-// prioritise at the Epic/unfiled level, and a bare /prio must still show the
-// parented work that makes up most of the project.
+// It defaults ON (#213): parented tickets are already prioritised by whatever
+// they hang under, so the default slice is the top of the tree — the work nothing
+// else is ordering. Off widens back out to the parented majority of the project.
 func noParentPrioFilter(q url.Values) prioFilter {
-	on := q.Get(noParentParam) == noParentOn
+	on := q.Get(noParentParam) != noParentOff
 
 	toggle := filterToggleView{
 		Prefix: "prio-no-parent",
 		Label:  "No parent",
 		On:     on,
-		// No-parent defaults OFF, so it is the ON state the href must encode.
-		ToggleHref:  toggleHref("/prio/results", noParentParam, noParentOn, !on),
+		// Default ON, so it is the OFF state the href encodes.
+		ToggleHref:  toggleHref("/prio/results", noParentParam, noParentOff, on),
 		IncludeAttr: filterIncludeExceptSelf(noParentParam),
 	}
 
 	var params []filterParam
-	if on {
-		params = append(params, filterParam{Name: noParentParam, Value: noParentOn})
+	if !on {
+		params = append(params, filterParam{Name: noParentParam, Value: noParentOff})
 	}
 
 	keep := func(issue store.PrioIssue) bool {
