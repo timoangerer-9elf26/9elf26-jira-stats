@@ -121,15 +121,14 @@ func TestBoardDeclaresTheDragSurface(t *testing.T) {
 			t.Errorf("column %q must not be a drag target", status)
 		}
 	}
-	// The frozen columns' cards cannot be dragged either (one rule, not two).
-	for _, key := range []string{"DCAI-6", "DCAI-7"} {
-		if !cardIsDragLocked(body, key) {
-			t.Errorf("card %s in a frozen column must not be draggable", key)
-		}
-	}
-	for _, key := range []string{"DCAI-1", "DCAI-3", "DCAI-5"} {
-		if cardIsDragLocked(body, key) {
-			t.Errorf("card %s in a legal column must stay draggable", key)
+	// Native HTML5 drag is off on every card, frozen or not. The card is an
+	// anchor, so leaving it on lets a link drag start and haul the label around
+	// instead of the card; the drag library runs forceFallback and never wants
+	// it. Which cards may move is decided by the column binding above and by the
+	// server, not by this attribute.
+	for _, key := range []string{"DCAI-1", "DCAI-3", "DCAI-5", "DCAI-6", "DCAI-7"} {
+		if !cardSuppressesNativeDrag(body, key) {
+			t.Errorf("card %s must render draggable=\"false\"", key)
 		}
 	}
 
@@ -153,7 +152,7 @@ func columnHasDragTarget(body, status string) bool {
 	return false
 }
 
-func cardIsDragLocked(body, key string) bool {
+func cardSuppressesNativeDrag(body, key string) bool {
 	i := strings.Index(body, `data-key="`+key+`"`)
 	if i < 0 {
 		return false
