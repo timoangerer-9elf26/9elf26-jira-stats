@@ -49,12 +49,6 @@ type boardCard struct {
 	// "" when the card has no recorded activity or on the Sprint drill-down, in
 	// which case no timestamp renders.
 	Activity string
-	// DragLocked marks a card the Board deliberately keeps out of the drag system
-	// (#195): the cards in Ready for Release and Released / Deployed, which are
-	// neither drop targets nor drag sources. It renders draggable="false" on the
-	// card so the browser cannot start even a native link drag on it. Cards off
-	// the Board (the Sprint drill-down) leave it false and are unaffected.
-	DragLocked bool
 }
 
 // boardColumn is one workflow-status column and its cards.
@@ -161,7 +155,6 @@ func (s *Server) boardView(q url.Values) (boardView, error) {
 				EpicName:     c.EpicName,
 				EpicColorHex: epicPillColor(c.EpicColor),
 				Activity:     boardActivityLabel(c.LatestActivity, s.loc),
-				DragLocked:   !draggable,
 			})
 		}
 		view.Columns = append(view.Columns, boardColumn{Status: col.Status, Cards: cards, Draggable: draggable})

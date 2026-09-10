@@ -235,17 +235,22 @@
 {{/* board-card is one issue on the sprint board: key, title, an estimated-time
      chip (S/M/L or "no estimate") and a type badge. Takes a boardCard. When
      Href is set the whole card links to the Jira issue in a new tab; when it is
-     empty (no Jira base URL configured) the card renders without a link. A card
-     the Board keeps out of the drag system (DragLocked — the Ready for Release
-     and Released / Deployed columns, #195) renders draggable="false" so not even
-     a native link drag can start on it; every other card leaves the attribute
-     off and stays draggable. */}}
+     empty (no Jira base URL configured) the card renders without a link.
+
+     Every card renders draggable="false", unconditionally — the card is an
+     anchor, and a native link drag competes with the real one. Treat this as a
+     declaration of intent, not the enforcement: Sortable owns the draggable
+     attribute on the elements it binds and rewrites it, so the guarantee comes
+     from the dragstart guard in board-drag.js. Which cards may actually be
+     dragged is settled by the library binding only to the participating
+     columns (#195) and by the server rejecting any other target, never by this
+     attribute. */}}
 {{define "board-card"}}
 {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener"
    class="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
-   data-testid="board-card" data-key="{{.Key}}"{{if .DragLocked}} draggable="false"{{end}}>{{else}}<div
+   data-testid="board-card" data-key="{{.Key}}" draggable="false">{{else}}<div
    class="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
-   data-testid="board-card" data-key="{{.Key}}"{{if .DragLocked}} draggable="false"{{end}}>{{end}}
+   data-testid="board-card" data-key="{{.Key}}" draggable="false">{{end}}
   <div class="flex items-center justify-between gap-2">
     <span class="font-mono text-xs font-semibold text-slate-500" data-testid="card:{{.Key}}:key">{{.Key}}</span>
     {{template "type-badge" (dict "Type" .Type "Testid" (printf "card:%s:type" .Key))}}
@@ -388,7 +393,13 @@
      native HTML5 drag) never starts. That is why a card would only pick up
      after being nudged vertically first — the vertical move resolved the
      gesture as "not a pan". pan-y hands horizontal gestures to us while leaving
-     vertical page scrolling from a card alone. */}}
+     vertical page scrolling from a card alone.
+
+     Selection is deliberately left alone. The obvious companion fix is
+     user-select: none, and it is not needed: the drag library suppresses
+     selection for the duration of a drag by itself, so cards stay selectable
+     for copying a key. The gesture that really competed was native HTML5 drag,
+     and board-drag.js cancels that at the dragstart event. */}}
 {{define "board-drag-style"}}
 <style>
   [data-drag-target="true"] [data-testid="board-card"] {

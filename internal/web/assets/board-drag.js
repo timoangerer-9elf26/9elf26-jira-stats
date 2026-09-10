@@ -214,6 +214,26 @@
 
   // Re-bind after any HTMX swap that touched the board panel (a filter change
   // swaps the whole panel, destroying every binding inside it).
+  // Kill native HTML5 drag on board cards, at the event rather than via the
+  // draggable attribute. The card is an anchor, so a press starts a link drag:
+  // the browser fires dragstart and then pointercancel, the pointer stream dies
+  // and the fallback drag below never gets its moves — the label is hauled
+  // around and the card stays put. draggable="false" in the markup does not
+  // survive, because Sortable owns that attribute and rewrites it on init, so
+  // the guard has to live here. Capture phase, so it lands before anything else
+  // can act on the event. We never want native drag: the library runs
+  // forceFallback and works purely off pointer events.
+  document.addEventListener(
+    "dragstart",
+    function (evt) {
+      var t = evt.target;
+      if (t && t.closest && t.closest('[data-testid="board-card"]')) {
+        evt.preventDefault();
+      }
+    },
+    true
+  );
+
   document.addEventListener("htmx:afterSwap", function (evt) {
     var t = evt.target;
     if (!t || !t.closest) return;
