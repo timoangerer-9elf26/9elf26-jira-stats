@@ -378,10 +378,23 @@
      utilities (no rebuild needed): the legal-drop outline every participating
      column shows on drag start, the stronger fill on the hovered one, the muted
      pending card while its write is in flight, the drag ghost, and the inline
-     error a failed move leaves on the snapped-back card. */}}
+     error a failed move leaves on the snapped-back card.
+
+     touch-action is load-bearing, not decoration. The card strip is
+     overflow-x-auto and really does overflow, so with the default touch-action
+     the browser is entitled to read a horizontal drag beginning on a card as a
+     pan of that scroller: it claims the gesture, fires pointercancel, and the
+     drag library (forceFallback, so it listens on pointer events rather than
+     native HTML5 drag) never starts. That is why a card would only pick up
+     after being nudged vertically first — the vertical move resolved the
+     gesture as "not a pan". pan-y hands horizontal gestures to us while leaving
+     vertical page scrolling from a card alone. */}}
 {{define "board-drag-style"}}
 <style>
-  [data-drag-target="true"] [data-testid="board-card"] { cursor: grab; }
+  [data-drag-target="true"] [data-testid="board-card"] {
+    cursor: grab;
+    touch-action: pan-y;
+  }
   [data-drag-target="true"] .bd-chosen { cursor: grabbing; }
   .bd-legal {
     outline: 2px dashed #94a3b8; /* slate-400 */
