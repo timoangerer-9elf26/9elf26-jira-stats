@@ -11,13 +11,11 @@
       {{template "board-panel" .}}
     </div>
   </main>
-  {{/* card-control.js gives [data-card-control] its link opt-out and belongs on
-       every page that renders an editable card control, so daily.html loads it
-       too (#221). The other two are Board drag-and-drop (#195, docs/adr/0010)
-       and load only here: dragging is Board-only. All three are vendored or
-       first-party, embedded in the binary and served from /static — no CDN, no
-       npm in the build path. */}}
-  <script src="/static/card-control.js"></script>
+  {{/* Board drag-and-drop (#195, docs/adr/0010). Both scripts are vendored and
+       embedded in the binary and served from /static — no CDN, no npm in the
+       build path — and load only here: dragging is Board-only. (card-control.js,
+       which the drag script's filter shares a marker with, is global — see
+       page-head.) */}}
   <script src="/static/sortable.min.js"></script>
   <script src="/static/board-drag.js"></script>
 </body>

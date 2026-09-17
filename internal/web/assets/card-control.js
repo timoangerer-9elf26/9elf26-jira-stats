@@ -12,6 +12,13 @@
 // `data-card-control` is that attribute: this file gives it the link opt-out,
 // and the Sortable `filter` in board-drag.js reads the same attribute for the
 // drag opt-out.
+//
+// ONE RULE ON ANYTHING THAT USES THE MARKER: do not call stopPropagation() on a
+// click between a marked control and the document. The listener below is
+// delegated, so a marked control whose own handler (or a wrapper's) stops the
+// click short of the document is correctly marked and still navigates away —
+// the same silent failure, re-created. A control needing to suppress a sibling
+// handler should aim narrower than stopPropagation.
 (function () {
   "use strict";
 

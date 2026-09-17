@@ -2,7 +2,13 @@
      embedded favicon, the embedded Tailwind stylesheet and vendored HTMX, and
      a per-page <title> (the string argument). The icon is linked as a served
      file rather than inlined as a data: URI — html/template rewrites those to
-     #ZgotmplZ (#192). */}}
+     #ZgotmplZ (#192).
+
+     card-control.js is loaded here, globally, rather than by the pages that
+     render an editable card control today (#221). Per-page loading would be a
+     second thing to remember per surface, and forgetting it fails exactly as
+     silently as the split opt-out this marker replaced. Its listener is a
+     delegated no-op on a page with no marked control. */}}
 {{define "page-head"}}
 <head>
   <meta charset="utf-8">
@@ -17,6 +23,7 @@
     button:not(:disabled) { cursor: pointer; }
   </style>
   <script src="/static/htmx.min.js"></script>
+  <script src="/static/card-control.js"></script>
 </head>
 {{end}}
 
@@ -246,11 +253,10 @@
      columns (#195) and by the server rejecting any other target, never by this
      attribute.
 
-     Because the card is a link AND a drag source, an interactive control placed
-     on it (the estimate pill today) must opt out of both. One attribute does
-     both: put data-card-control on the control's root and assets/card-control.js
-     stops the card link while board-drag.js stops the drag. See
-     assets/card-control.js for why the two are not arranged separately. */}}
+     An interactive control placed on a card (the estimate pill today) carries
+     data-card-control on its root, which is the single marker for "neither
+     follows the card's link nor starts a drag". assets/card-control.js owns
+     that contract and its rules. */}}
 {{define "board-card"}}
 {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener"
    class="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
@@ -282,13 +288,10 @@
      [data-card-control]) to the authoritative value — or, on failure, back to
      the prior value plus an inline error. The control lives INSIDE the whole-card
      <a>, so the interactive parts are spans (valid non-interactive content in an
-     anchor, unlike <button>/<details>). data-card-control on the root is what
-     keeps the pill from acting like the card underneath it: assets/card-control.js
-     cancels the click's default action so activating the pill does not follow the
-     card link (htmx's own listener on the span still fires), and board-drag.js
-     feeds the same attribute to Sortable's filter so pressing the pill on the
-     drag surface does not pick the card up. One marker, both opt-outs — marking
-     a control for one and not the other fails silently. The popover reveals via
+     anchor, unlike <button>/<details>), and data-card-control on the root is
+     what stops the pill behaving like the card underneath it — see
+     assets/card-control.js for that marker's contract. htmx's own listener on
+     the span still fires. The popover reveals via
      :focus-within (clicking the tabbable trigger focuses it) — the same JS-free
      mechanism as the resync/sprint tooltips. Editability is Board-only: it renders
      solely when boardCard.Editable, so the shared board-card stays read-only on

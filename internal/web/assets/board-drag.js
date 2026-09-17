@@ -65,11 +65,12 @@
     span.setAttribute("data-move-error", "");
     span.setAttribute("data-testid", "card:" + key + ":move-error");
     span.setAttribute("role", "alert");
-    // The card is a link to Jira; clicking its error message must not follow it.
-    span.addEventListener("click", function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    });
+    // The card is a link to Jira and a drag source; its error message is
+    // neither. The same marker every card control uses buys both opt-outs, so
+    // this element does not hand-roll its own click handler — card-control.js
+    // (loaded wherever this script is) cancels the link, and the Sortable
+    // filter below reads the same attribute.
+    span.setAttribute("data-card-control", "");
     span.textContent = message;
     card.appendChild(span);
   }
@@ -175,11 +176,9 @@
           draggable: '[data-testid="board-card"]',
           // A control marked data-card-control (the estimate popover today) is
           // not a drag handle: it lives inside the card and stays clickable.
-          // This is half of that marker's contract; card-control.js has the
-          // other half (the control does not follow the card's link). Keyed off
-          // the marker rather than a per-control selector, so marking a new
-          // control is all it takes — and so the two halves cannot drift apart,
-          // which they would do silently.
+          // This is the drag half of that marker's contract — card-control.js
+          // owns it and the link half. Keyed off the marker rather than a
+          // per-control selector, so marking a new control is all it takes.
           filter: "[data-card-control]",
           preventOnFilter: false,
           animation: 120,
