@@ -19,13 +19,15 @@ type memberClient struct {
 	jira.Client // unused reads panic loudly if ever called
 
 	members []jira.ProjectMember
-	err     error
+	issues  []jira.Issue // the backfill set
+	updated []jira.Issue // the incremental set
+	err     error        // fails the member read alone, leaving the issue reads healthy
 	calls   int
 }
 
-func (c *memberClient) FetchIssues(context.Context) ([]jira.Issue, error) { return nil, nil }
+func (c *memberClient) FetchIssues(context.Context) ([]jira.Issue, error) { return c.issues, nil }
 func (c *memberClient) FetchIssuesUpdatedSince(context.Context, time.Time) ([]jira.Issue, error) {
-	return nil, nil
+	return c.updated, nil
 }
 func (c *memberClient) FetchSprints(context.Context) ([]jira.Sprint, error) { return nil, nil }
 func (c *memberClient) FetchProjectMembers(context.Context) ([]jira.ProjectMember, error) {
@@ -97,12 +99,65 @@ func TestCycleHandsJirasAnswerStraightToTheStore(t *testing.T) {
 	}
 }
 
-func TestCycleFailsWhenTheMemberFetchFails(t *testing.T) {
-	client := &memberClient{err: errors.New("jira down")}
+// A failing member fetch must NOT abort the cycle. Jira gates its user search on
+// a permission separate from issue read, so a token allowed to read issues but
+// not to browse users would otherwise stale the whole dashboard — issues and
+// sprints included — over a list that feeds a popover.
+func TestFailedMemberFetchStillSyncsIssues(t *testing.T) {
+	client := &memberClient{
+		issues: []jira.Issue{{Key: "DCAI-1", Type: "Task", Summary: "Still synced"}},
+		err:    errors.New("jira: you do not have permission to browse users"),
+	}
 	store := &recordingStore{}
 	s := NewSyncer(client, store, time.Minute)
 
-	if err := s.Cycle(context.Background()); err == nil {
-		t.Fatal("Cycle succeeded despite a failed member fetch")
+	if err := s.Cycle(context.Background()); err != nil {
+		t.Fatalf("Cycle aborted on a failed member fetch: %v", err)
+	}
+	if len(store.saved) != 1 || store.saved[0].Key != "DCAI-1" {
+		t.Fatalf("saved issues = %+v, want DCAI-1 synced despite the member failure", store.saved)
+	}
+	// The stored list is left exactly as it was — no empty write wipes it.
+	if len(store.members) != 0 {
+		t.Fatalf("member replaces = %+v, want none (the previous list must survive)", store.members)
+	}
+}
+
+// The same on the incremental path, which is what a live dashboard runs almost
+// all the time.
+func TestFailedMemberFetchStillSyncsIncrementally(t *testing.T) {
+	client := &memberClient{
+		updated: []jira.Issue{{Key: "DCAI-2", Type: "Bug", Summary: "Changed"}},
+		err:     errors.New("jira: you do not have permission to browse users"),
+	}
+	store := &recordingStore{saved: []jira.Issue{{Key: "DCAI-1"}}}
+	s := NewSyncer(client, store, time.Minute)
+
+	if err := s.Cycle(context.Background()); err != nil {
+		t.Fatalf("incremental Cycle aborted on a failed member fetch: %v", err)
+	}
+	if len(store.saved) != 2 || store.saved[1].Key != "DCAI-2" {
+		t.Fatalf("saved issues = %+v, want DCAI-2 synced despite the member failure", store.saved)
+	}
+	if len(store.members) != 0 {
+		t.Fatalf("member replaces = %+v, want none (the previous list must survive)", store.members)
+	}
+}
+
+// A store write that fails is equally non-fatal: the cycle carries on and the
+// previously stored list stands.
+func TestFailedMemberSaveStillSyncsIssues(t *testing.T) {
+	client := &memberClient{
+		issues:  []jira.Issue{{Key: "DCAI-1", Type: "Task", Summary: "Still synced"}},
+		members: []jira.ProjectMember{adaMember()},
+	}
+	store := &recordingStore{memberSaveErr: errors.New("database is locked")}
+	s := NewSyncer(client, store, time.Minute)
+
+	if err := s.Cycle(context.Background()); err != nil {
+		t.Fatalf("Cycle aborted on a failed member save: %v", err)
+	}
+	if len(store.saved) != 1 {
+		t.Fatalf("saved issues = %+v, want DCAI-1 synced despite the member save failure", store.saved)
 	}
 }

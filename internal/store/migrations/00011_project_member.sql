@@ -5,7 +5,10 @@
 -- popover renders from SQLite and no read path makes a Jira call (docs/adr/0012).
 -- Jira's app accounts are filtered out before they ever reach this table — only
 -- people are members. Rows are REPLACED wholesale on every sync, so someone who
--- leaves the project disappears within one cycle; nothing here accumulates.
+-- leaves the project disappears within one cycle; nothing here accumulates. A
+-- sync that cannot reach Jira's user search leaves the previous list standing
+-- rather than emptying the table, and never aborts the cycle (see
+-- refreshProjectMembers) — nothing load-bearing reads this table.
 -- Part of the rebuildable projection: Reset clears it and a full resync
 -- repopulates it, exactly like the sprint table.
 --

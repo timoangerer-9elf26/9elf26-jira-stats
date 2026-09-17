@@ -35,9 +35,9 @@ a re-sync, not real data.
 Every view carries a **refresh-icon button** (top-right of the nav, tooltip
 "Resync full database") that rebuilds the SQLite projection from Jira on demand:
 it clears the projection and re-runs the full backfill (all issues, complete
-changelog history, sprints, and project members). Use it to heal data gaps or pick up past
-capture/schema fixes **without shell access** — it supersedes the old "stop the
-server, `rm jira-stats.db`, restart" step.
+changelog history, sprints, and project members). Use it to heal data gaps or
+pick up past capture/schema fixes **without shell access** — it supersedes the
+old "stop the server, `rm jira-stats.db`, restart" step.
 
 The rebuild runs in the background: clicking the icon returns immediately, the
 icon spins and the label shows **Resyncing…** while it runs (a full backfill
