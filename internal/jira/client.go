@@ -116,6 +116,14 @@ type AssignableUser struct {
 	AccountType string // AccountTypePerson or AccountTypeApp
 }
 
+// UnassignedAccountID is the account id that clears an issue's assignee. An
+// unassigned ticket is a legitimate state on this project, so the assignee write
+// offers it as a target like any person (CONTEXT.md -> Assignee edit). It is
+// spelled out rather than left as a bare "" at call sites, and it is NOT
+// store.UnassignedAssignee — that one is a query sentinel for reading the
+// no-assignee tickets, this one is what Jira is told to write.
+const UnassignedAccountID = ""
+
 // ProjectMember is a person who can be assigned work on the project: the
 // identity, display name and avatar of one Jira user (see CONTEXT.md "Project
 // member"). App accounts are never members — the assign popover offering a bot
@@ -188,6 +196,13 @@ type Client interface {
 	// copies the estimate write's shape: a plain field PUT, last-write-wins, no
 	// optimistic-locking guard; the caller re-reads the issue afterwards.
 	UpdateIssuePriority(ctx context.Context, key, priority string) error
+	// UpdateIssueAssignee writes the issue's assignee back to Jira by ACCOUNT ID,
+	// the Board's assignee edit write path (#223, docs/adr/0012), or clears it
+	// when accountID is UnassignedAccountID. Jira has no assign-by-name, so the
+	// id comes from the project members the projection carries. Same shape as
+	// the other field writes: last-write-wins, no locking guard, and the caller
+	// re-reads the issue afterwards.
+	UpdateIssueAssignee(ctx context.Context, key, accountID string) error
 	// FetchTransitions reads the workflow transitions Jira currently offers for
 	// the issue, and TransitionIssue performs one by id. Together they are the
 	// status write path (docs/adr/0010): resolve the transition by its TARGET

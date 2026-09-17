@@ -70,6 +70,10 @@ func (c *gatedClient) UpdateIssuePriority(context.Context, string, string) error
 	return nil
 }
 
+func (c *gatedClient) UpdateIssueAssignee(context.Context, string, string) error {
+	return nil
+}
+
 func (c *gatedClient) FetchTransitions(context.Context, string) ([]jira.Transition, error) {
 	return jira.DCAITransitions(), nil
 }
