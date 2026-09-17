@@ -190,9 +190,10 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 		{"/version", "dev"}, // unstamped build reports the "dev" default
 		{"/static/output.css", ""},
 		{"/static/htmx.min.js", ""},
-		{"/static/sortable.min.js", "Sortable"}, // vendored drag library (#195)
-		{"/static/board-drag.js", "board/move"}, // the Board's drag-and-drop glue (#195)
-		{"/static/favicon.svg", "<svg"},         // tab icon, embedded like the rest (#192)
+		{"/static/sortable.min.js", "Sortable"},          // vendored drag library (#195)
+		{"/static/board-drag.js", "board/move"},          // the Board's drag-and-drop glue (#195)
+		{"/static/card-control.js", "data-card-control"}, // the card-control link opt-out (#221)
+		{"/static/favicon.svg", "<svg"},                  // tab icon, embedded like the rest (#192)
 	}
 
 	for _, tc := range cases {
