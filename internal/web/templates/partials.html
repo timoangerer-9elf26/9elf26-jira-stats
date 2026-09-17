@@ -274,10 +274,79 @@
     {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "")}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
     <span class="flex min-w-0 items-center gap-2">
       {{if .Activity}}<span class="shrink-0 text-xs tabular-nums text-slate-400" data-testid="card:{{.Key}}:activity">{{.Activity}}</span>{{end}}
-      {{template "card-avatar" .}}
+      {{if .AssignEditable}}{{template "board-assignee" .}}{{else}}{{template "card-avatar" .}}{{end}}
     </span>
   </div>
+  {{/* data-card-control because this message sits at CARD level — outside the
+       board-assignee root, unlike the estimate's error, which is inside its
+       control and covered by that root's marker. Without it, clicking the error
+       text follows the card's link to Jira: the exact silent hazard the marker
+       exists for (#221, docs/adr/0012). */}}
+  {{if .AssignError}}<p data-card-control class="ba-error" data-testid="card:{{.Key}}:assignee-error" role="alert">{{.AssignError}}</p>{{end}}
 {{if .Href}}</a>{{else}}</div>{{end}}
+{{end}}
+
+{{/* board-assignee is the editable assignee avatar on the Board (#224,
+     docs/adr/0012): the app's fourth write path to Jira. The avatar itself is
+     the trigger — the same read-only card-avatar drawing, wrapped rather than
+     modified, so the partial the Daily board, the Sprint drill-down and the
+     assignee filter's chips share stays exactly what it was. Each choice
+     hx-posts /board/assignee, which assigns (or clears) the ticket in Jira,
+     re-reads it and swaps the WHOLE board panel to the authoritative projection
+     — that whole-panel swap, rather than swapping just this control, is what
+     lets a card reassigned outside an active assignee filter be absent from the
+     response, the rule docs/adr/0010 set for a transition.
+
+     Two things about the shape are load-bearing rather than stylistic. The
+     control lives INSIDE the whole-card <a>, so its interactive parts are spans
+     (valid non-interactive content in an anchor, unlike <button>/<details>), and
+     the popover reveals via :focus-within — clicking the tabbable trigger
+     focuses it, no JS toggle, the same mechanism as the estimate pill. And
+     data-card-control on the root is the single marker that stops the avatar
+     behaving like the card underneath it (neither following the card's link nor
+     starting a drag); nothing here calls stopPropagation, which would re-create
+     the silent failure that marker exists to prevent — see
+     assets/card-control.js for the contract.
+
+     It renders only when boardCard.AssignEditable, which the Board alone sets,
+     and only while the project has members: with an empty member table the
+     avatar is simply the read-only drawing, never an empty popover. Takes a
+     boardCard. */}}
+{{define "board-assignee"}}
+<span data-card-control data-testid="card:{{.Key}}:assignee" class="ba">
+  {{/* The accessible name spells the current assignee out, because aria-label
+       REPLACES the trigger's content for assistive tech — and that content is
+       the avatar, i.e. the only place the current assignee is stated. */}}
+  <span class="ba-trigger" data-testid="card:{{.Key}}:assignee-trigger" role="button" tabindex="0"
+        aria-haspopup="menu"
+        aria-label="Assign {{.Key}} (currently {{if .Assignee}}{{.Assignee}}{{else}}unassigned{{end}})">{{template "card-avatar" .}}</span>
+  <span class="ba-menu" role="menu" aria-label="Assignee for {{.Key}}"
+        hx-target="#board-panel" hx-swap="innerHTML" hx-include="[data-filterparam]">
+    {{range .AssignOptions}}{{template "board-assignee-opt" (dict "Key" $.Key "Opt" .)}}{{end}}
+  </span>
+</span>
+{{end}}
+
+{{/* board-assignee-opt is one choice in the assign popover: a project member, or
+     the trailing Unassigned choice that clears the ticket. It hx-posts the
+     target to /board/assignee; the sibling filter inputs ride along via the
+     menu's hx-include, so the panel comes back filtered exactly as it is on
+     screen.
+
+     Clearing posts clear=1 and NO account, deliberately: the account id that
+     clears an assignee is the empty string, so a single field would let an
+     account id that arrived empty read as "unassign" — see the handler's
+     assignTarget, which rejects both an empty account and a clear carrying one.
+
+     It needs no opt-out of its own: it sits inside the [data-card-control] root,
+     which is what keeps the enclosing card link from firing; htmx still handles
+     the click on this same element. Takes a dict of Key and Opt (an
+     assignOption). */}}
+{{define "board-assignee-opt"}}
+<span class="ba-opt{{if .Opt.Selected}} ba-opt--sel{{end}}" role="menuitem" tabindex="0"
+      data-testid="card:{{.Key}}:assignee-opt:{{.Opt.OptKey}}"{{if .Opt.Selected}} aria-current="true"{{end}}
+      hx-post="/board/assignee" hx-trigger="click"
+      {{if .Opt.Clear}}hx-vals='{"key":"{{.Key}}","clear":"1"}'{{else}}hx-vals='{"key":"{{.Key}}","account":"{{.Opt.AccountID}}"}'{{end}}>{{.Opt.Name}}</span>
 {{end}}
 
 {{/* board-estimate is the editable estimate pill on the Board (#108,
@@ -385,6 +454,74 @@
     margin-top: 0.25rem;
     font-size: 0.6875rem;
     line-height: 1.2;
+    color: #e11d48; /* rose-600 */
+  }
+</style>
+{{end}}
+
+{{/* board-assignee-style holds the CSS for the Board's Assignee edit popover
+     (#224), kept out of the per-card partial (which renders once per card) and
+     included ONCE per Board page, OUTSIDE #board-panel so it survives every
+     panel swap. It is Board-only, unlike board-estimate-style, because the
+     avatar is editable on the Board alone.
+
+     It mirrors board-estimate-style deliberately: the same :focus-within reveal
+     (JS-free, so nothing here can re-create the stopPropagation hazard
+     assets/card-control.js warns about), the same panel treatment, the same rose
+     inline error. The one difference is the anchor — the avatar sits at the
+     card's right edge, so the menu hangs from the right rather than the left, or
+     it would overflow the card. None of it is a Tailwind utility (no rebuild is
+     required for this block). */}}
+{{define "board-assignee-style"}}
+<style>
+  .ba { position: relative; display: inline-flex; }
+  .ba-trigger { cursor: pointer; display: inline-flex; border-radius: 9999px; outline-offset: 2px; }
+  .ba-trigger:hover { opacity: 0.85; }
+  .ba-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 30;
+    min-width: 10rem;
+    max-width: 14rem;
+    padding: 0.25rem;
+    background: #ffffff;
+    border: 1px solid #e2e8f0; /* slate-200 */
+    border-radius: 0.5rem;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.14);
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.1s ease, visibility 0.1s ease;
+  }
+  .ba:focus-within .ba-menu {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+  .ba-opt {
+    cursor: pointer;
+    border-radius: 0.375rem;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.25rem;
+    color: #475569; /* slate-600 */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    outline: none;
+  }
+  .ba-opt:hover,
+  .ba-opt:focus-visible { background: #f1f5f9; } /* slate-100 */
+  .ba-opt--sel { font-weight: 600; color: #0f172a; background: #f8fafc; } /* slate-900 on slate-50 */
+  .ba-error {
+    margin-top: 0.25rem;
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    text-align: right;
     color: #e11d48; /* rose-600 */
   }
 </style>

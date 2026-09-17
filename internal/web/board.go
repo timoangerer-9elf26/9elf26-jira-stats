@@ -49,6 +49,72 @@ type boardCard struct {
 	// "" when the card has no recorded activity or on the Sprint drill-down, in
 	// which case no timestamp renders.
 	Activity string
+	// AssignEditable turns the assignee avatar into the Assignee edit control
+	// (#224, docs/adr/0012). It is DELIBERATELY not Editable: the estimate pill is
+	// editable on the Daily board too, and the avatar must not be — so the two
+	// surfaces need two flags, not one. Set ONLY by the Board, and only while
+	// there are project members to offer, so an empty member table (between a
+	// deploy and the first sync) leaves a plain read-only avatar rather than an
+	// empty popover.
+	AssignEditable bool
+	// AssignOptions are this card's assign choices: every project member plus the
+	// trailing Unassigned one, with the card's current assignee marked. Only
+	// consumed when AssignEditable.
+	AssignOptions []assignOption
+	// AssignError is the inline message a failed assignee write leaves on THIS
+	// card ("" when none) — a failed write is a rendered outcome, not an HTTP
+	// error, and never a global banner.
+	AssignError string
+}
+
+// assignOption is one choice in a card's assign popover: a project member, or
+// the trailing Unassigned choice that clears the ticket.
+//
+// Clear is carried as its own flag rather than inferred from an empty AccountID,
+// because jira.UnassignedAccountID IS the empty string: an id that arrived empty
+// through a bug would otherwise read as "clear" and silently unassign the
+// ticket. Clearing is an explicit input end to end — this flag, the form's own
+// "clear" field, and its own branch in the handler.
+type assignOption struct {
+	AccountID string
+	Name      string
+	// OptKey is the choice's stable testid suffix: the account id, or "unassigned".
+	OptKey   string
+	Clear    bool
+	Selected bool
+}
+
+// assignOptionsFor builds a card's popover choices from the project's members
+// (docs/adr/0012: the PROJECT's people, not the board's), marking the one the
+// card currently carries. The match is by display name because an issue does not
+// store an account id — which also means a card assigned to someone no longer on
+// the project marks nothing: she still shows on the card but is not offered, so
+// it can be reassigned away from her and never back.
+func assignOptionsFor(members []store.ProjectMember, assignee string) []assignOption {
+	opts := make([]assignOption, 0, len(members)+1)
+	for _, m := range members {
+		opts = append(opts, assignOption{
+			AccountID: m.AccountID,
+			Name:      m.DisplayName,
+			OptKey:    m.AccountID,
+			Selected:  assignee != "" && m.DisplayName == assignee,
+		})
+	}
+	return append(opts, assignOption{
+		Name:     "Unassigned",
+		OptKey:   assignUnassignedOptKey,
+		Clear:    true,
+		Selected: assignee == "",
+	})
+}
+
+// boardEdit is the outcome of a card write the board render reports on: which
+// card it targeted and, on failure, the inline message that card carries. The
+// zero value means "no edit in this response" (every plain GET render). It
+// mirrors prioEdit, which the Prio view's priority edit uses for the same job.
+type boardEdit struct {
+	Key   string
+	Error string
 }
 
 // boardColumn is one workflow-status column and its cards.
@@ -104,7 +170,14 @@ func (s *Server) renderBoard(w http.ResponseWriter, r *http.Request, name string
 // move handler can re-render the fragment through the filters the client posted
 // alongside the drop (POST body, not query string).
 func (s *Server) renderBoardValues(w http.ResponseWriter, q url.Values, name string) {
-	view, err := s.boardView(q)
+	s.renderBoardWith(w, q, name, boardEdit{})
+}
+
+// renderBoardWith is renderBoardValues annotated with the outcome of a card
+// write (if any), so a failed assignee write comes back as the same board panel
+// with an inline message on the one card it targeted.
+func (s *Server) renderBoardWith(w http.ResponseWriter, q url.Values, name string, edit boardEdit) {
+	view, err := s.boardView(q, edit)
 	if err != nil {
 		s.renderError(w)
 		return
@@ -119,13 +192,20 @@ func (s *Server) renderBoardValues(w http.ResponseWriter, q url.Values, name str
 // Jira link and the active-sprint name, then applies the query's filters: a card
 // failing any filter is hidden, but every column is kept (filtering hides cards,
 // never columns).
-func (s *Server) boardView(q url.Values) (boardView, error) {
+func (s *Server) boardView(q url.Values, edit boardEdit) (boardView, error) {
 	filters, err := s.boardFilters(q)
 	if err != nil {
 		return boardView{}, err
 	}
 
 	board, err := s.rollups.ActiveSprintBoard()
+	if err != nil {
+		return boardView{}, err
+	}
+
+	// The assign popover's candidates, read once per render and shared by every
+	// card. An empty list means no card's avatar is editable at all.
+	members, err := s.rollups.ProjectMembers()
 	if err != nil {
 		return boardView{}, err
 	}
@@ -155,6 +235,11 @@ func (s *Server) boardView(q url.Values) (boardView, error) {
 				EpicName:     c.EpicName,
 				EpicColorHex: epicPillColor(c.EpicColor),
 				Activity:     boardActivityLabel(c.LatestActivity, s.loc),
+				// The Board is the sole surface the assignee avatar is editable on, and
+				// only while there are members to offer (docs/adr/0012).
+				AssignEditable: len(members) > 0,
+				AssignOptions:  assignOptionsFor(members, c.Assignee),
+				AssignError:    assignErrorFor(edit, c.Key),
 			})
 		}
 		view.Columns = append(view.Columns, boardColumn{Status: col.Status, Cards: cards, Draggable: draggable})
@@ -169,6 +254,16 @@ func (s *Server) boardView(q url.Values) (boardView, error) {
 		view.HasSprint = true
 	}
 	return view, nil
+}
+
+// assignErrorFor is the inline message the given card carries in this render:
+// the edit's message when this is the card the write targeted, "" otherwise — so
+// a failed write marks one card and never the board.
+func assignErrorFor(edit boardEdit, key string) string {
+	if edit.Key == key {
+		return edit.Error
+	}
+	return ""
 }
 
 // boardActivityLabel formats a card's latest-activity instant as the compact

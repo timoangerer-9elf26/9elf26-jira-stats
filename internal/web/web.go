@@ -79,6 +79,12 @@ type Rollups interface {
 	// projection (any sprint, any status), key-ordered. It is deliberately the one
 	// read not scoped to the active sprint.
 	PrioIssues() ([]store.PrioIssue, error)
+	// ProjectMembers lists the people who may be assigned work on the project
+	// (CONTEXT.md → Project member), display-name ordered. It is the assign
+	// popover's candidate list — read from the projection like everything else, so
+	// no read path calls Jira (docs/adr/0012). It is EMPTY between a deploy and the
+	// first sync, which is what makes the avatar simply not editable until then.
+	ProjectMembers() ([]store.ProjectMember, error)
 }
 
 // Resyncer triggers a full rebuild of the SQLite projection from Jira and
@@ -140,6 +146,28 @@ type Prioritizer interface {
 	SetPriority(ctx context.Context, key, priority string) error
 }
 
+// Assigner is the Board's Assignee edit write path (#224, docs/adr/0012): the
+// app's fourth mutation of Jira, shaped like the other three. SetAssignee
+// assigns the issue to the person behind accountID — or clears it, when
+// accountID is jira.UnassignedAccountID — re-reads that one issue, persists it
+// and returns the authoritative assignee display name the re-read carried ("" for
+// unassigned). The handler ignores that name and re-renders the board from the
+// projection instead, which is what lets a reassigned card leave an active
+// filter in the same response.
+//
+// Its errors come in two kinds and the handler MUST tell them apart: a plain
+// error means nothing changed anywhere, while an error wrapping
+// sync.ErrWriteLanded means Jira DID change and only the projection is behind.
+// Reporting the second as a failed write is the defect #195/#206 shipped on the
+// drag path and #207 had to fix.
+//
+// It is nil when the server is built without one (most in-process tests): the
+// avatar still renders editable, but an edit is then reported as a failure,
+// never silently dropped. The running *sync.Syncer satisfies it.
+type Assigner interface {
+	SetAssignee(ctx context.Context, key, accountID string) (string, error)
+}
+
 // Server holds the parsed templates and the rollup source, and implements
 // http.Handler via its router.
 type Server struct {
@@ -148,6 +176,7 @@ type Server struct {
 	estimator       Estimator
 	transitioner    Transitioner
 	prioritizer     Prioritizer
+	assigner        Assigner
 	templates       *template.Template
 	mux             *http.ServeMux
 	now             func() time.Time
@@ -225,6 +254,15 @@ func WithPrioritizer(p Prioritizer) Option {
 	return func(s *Server) { s.prioritizer = p }
 }
 
+// WithAssigner wires the Board's Assignee edit write path into the server,
+// enabling POST /board/assignee to assign (or unassign) a ticket in Jira
+// (docs/adr/0012). Left unset, the avatar still renders editable but an edit is
+// reported back as a failure (the card is unchanged and carries an inline
+// error).
+func WithAssigner(a Assigner) Option {
+	return func(s *Server) { s.assigner = a }
+}
+
 // WithAuth gates the server behind the shared team login (#122), enabling the
 // /login form and session middleware for the given shared credential. Left
 // unset, auth is disabled and every route is served unauthenticated (the
@@ -294,6 +332,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /board/results", s.handleBoardResults)
 	s.mux.HandleFunc("POST /board/estimate", s.handleBoardEstimate)
 	s.mux.HandleFunc("POST /board/move", s.handleBoardMove)
+	s.mux.HandleFunc("POST /board/assignee", s.handleBoardAssignee)
 	s.mux.HandleFunc("GET /prio", s.handlePrio)
 	s.mux.HandleFunc("GET /prio/results", s.handlePrioResults)
 	s.mux.HandleFunc("POST /prio/priority", s.handlePrioPriority)
