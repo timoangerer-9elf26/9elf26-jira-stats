@@ -41,7 +41,8 @@ type FakeClient struct {
 	// paths).
 	Err error
 	// WriteErr, if set, is returned by every write (UpdateIssueSize,
-	// UpdateIssuePriority, TransitionIssue) instead of applying it, so a test can
+	// UpdateIssuePriority, UpdateIssueAssignee, TransitionIssue) instead of
+	// applying it, so a test can
 	// exercise a write path's failure branch (the control reverts / shows an
 	// inline error, with Jira left unchanged).
 	WriteErr error
@@ -119,9 +120,9 @@ func (c *FakeClient) FetchProjectMembers(ctx context.Context) ([]ProjectMember, 
 }
 
 // FetchIssue returns the current in-memory snapshot of one issue by key (or the
-// configured error). It reflects any prior UpdateIssueSize write, so the Board
-// estimate edit's post-write reconciliation read returns the authoritative
-// value in fake mode, exactly as it would against live Jira.
+// configured error). It reflects every prior write this fake applied, so each
+// edit's post-write reconciliation read returns the authoritative value in fake
+// mode, exactly as it would against live Jira.
 func (c *FakeClient) FetchIssue(ctx context.Context, key string) (Issue, error) {
 	if c.Err != nil {
 		return Issue{}, c.Err
@@ -171,6 +172,48 @@ func (c *FakeClient) UpdateIssuePriority(ctx context.Context, key, priority stri
 	for i := range c.Issues {
 		if c.Issues[i].Key == key {
 			c.Issues[i].Priority = priority
+			return nil
+		}
+	}
+	return fmt.Errorf("fake jira: issue %q not found", key)
+}
+
+// UpdateIssueAssignee applies the assignee write in memory (or returns
+// WriteErr), so the Board's assign popover is a working control in local dev and
+// the smoke suite (#223). It takes an ACCOUNT ID like live Jira does and
+// resolves it against the whole assignable-user set, rejecting an id that
+// belongs to nobody — which is what live Jira answers a 400 to. An accountID of
+// UnassignedAccountID clears the assignee.
+//
+// Note it resolves against AssignableUsers and not projectMembers: keeping app
+// accounts off the popover is a product rule that lives in FetchProjectMembers
+// alone (docs/adr/0012 — "if agents start owning tickets, drop the filter"), and
+// live Jira would assign one happily. A fake that refused would be stricter than
+// production, which is the one direction a fake must never be.
+//
+// An issue stores its assignee as a display name and an avatar URL, so the
+// resolved user's are what land on it.
+func (c *FakeClient) UpdateIssueAssignee(ctx context.Context, key, accountID string) error {
+	if c.WriteErr != nil {
+		return c.WriteErr
+	}
+	var assignee AssignableUser
+	if accountID != UnassignedAccountID {
+		known := false
+		for _, u := range c.AssignableUsers {
+			if u.AccountID == accountID {
+				assignee, known = u, true
+				break
+			}
+		}
+		if !known {
+			return fmt.Errorf("fake jira: %q is not an assignable account on this project", accountID)
+		}
+	}
+	for i := range c.Issues {
+		if c.Issues[i].Key == key {
+			c.Issues[i].Assignee = assignee.DisplayName
+			c.Issues[i].AssigneeAvatarURL = assignee.AvatarURL
 			return nil
 		}
 	}

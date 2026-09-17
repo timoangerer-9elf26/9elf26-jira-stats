@@ -200,6 +200,28 @@ func (c *LiveClient) UpdateIssuePriority(ctx context.Context, key, priority stri
 	return nil
 }
 
+// UpdateIssueAssignee writes the issue's assignee back to Jira via
+// PUT /rest/api/3/issue/{key}/assignee — the Board's assignee edit (#223), the
+// fourth write path (docs/adr/0012). Jira's assignee endpoint takes an ACCOUNT
+// ID and nothing else: there is no assign-by-name, which is why the project's
+// people are carried in the projection for the caller to pick an id from.
+// accountID == UnassignedAccountID clears the assignee, which Jira wants as an
+// explicit JSON null rather than an omitted key or an empty string. The id is not
+// validated here — only Jira knows who may be assigned — so a bad id comes back
+// as a 4xx and the caller leaves the projection untouched. Last-write-wins, as
+// for the size and the priority.
+func (c *LiveClient) UpdateIssueAssignee(ctx context.Context, key, accountID string) error {
+	var target any
+	if accountID != UnassignedAccountID {
+		target = accountID
+	}
+	body := map[string]any{"accountId": target}
+	if err := c.put(ctx, "/rest/api/3/issue/"+url.PathEscape(key)+"/assignee", body); err != nil {
+		return fmt.Errorf("jira update assignee %s: %w", key, err)
+	}
+	return nil
+}
+
 // FetchTransitions reads the transitions Jira currently offers for the issue via
 // GET /rest/api/3/issue/{key}/transitions. The set is issue- and
 // workflow-specific and can differ per source status, so it is read fresh for

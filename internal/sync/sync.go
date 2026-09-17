@@ -5,6 +5,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -253,8 +254,11 @@ func (s *Syncer) SetPriority(ctx context.Context, key, priority string) error {
 // the issue's currently offered set by target status id (jira.TransitionTo).
 // When Jira offers no transition into that status the call fails with
 // jira.ErrNoTransition and nothing is written — never a fallback to some other
-// transition. Any failure (lookup, write, or the reconciliation read/save) is
-// returned and leaves both Jira and the projection unchanged.
+// transition. A failure up to and including the transition itself is returned
+// and leaves both Jira and the projection unchanged; a failure in the
+// reconciliation read/save is returned too, but by then Jira HAS moved and only
+// the projection is behind (see ErrWriteLanded, which SetAssignee marks that
+// case with).
 //
 // As with SetEstimate, only the SaveIssue persist takes the sync mutex, so the
 // Jira round-trips never block on an in-flight cycle.
@@ -282,6 +286,45 @@ func (s *Syncer) SetStatus(ctx context.Context, key, statusID string) (string, e
 		return "", fmt.Errorf("save issue: %w", err)
 	}
 	return iss.Status, nil
+}
+
+// ErrWriteLanded marks an error raised AFTER a Jira write has already
+// succeeded: the follow-up single-issue re-read, or the persist of what it
+// returned. It separates "Jira changed but the projection has not caught up yet"
+// from "nothing changed anywhere", which a caller needs before it tells a user a
+// write failed — reporting a landed write as a failure is exactly the defect
+// #207 had to fix on the drag path. The next sync cycle reconciles the
+// projection either way, so a marked error is stale, never wrong.
+var ErrWriteLanded = errors.New("the Jira write landed; the follow-up did not")
+
+// SetAssignee is the Board's assignee write (#223, docs/adr/0012): assign the
+// issue to the person behind accountID — or clear it, when accountID is
+// jira.UnassignedAccountID — then re-read that one issue and persist what the
+// read returned, so the projection is only ever set from Jira. It returns the
+// authoritative assignee display name from the re-read ("" when unassigned),
+// which need not be the person asked for if something else moved the ticket
+// first: last-write-wins, no locking guard, as for the other three writes.
+//
+// A failed write persists nothing and leaves Jira untouched. A failure past that
+// point is wrapped with ErrWriteLanded, because the assignment is a fact in Jira
+// by then. The Jira round-trips deliberately run OUTSIDE the sync mutex — only
+// the persist takes it — so a slow Jira does not hold up a sync cycle.
+func (s *Syncer) SetAssignee(ctx context.Context, key, accountID string) (string, error) {
+	if err := s.client.UpdateIssueAssignee(ctx, key, accountID); err != nil {
+		return "", fmt.Errorf("update assignee: %w", err)
+	}
+	iss, err := s.client.FetchIssue(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("re-fetch issue: %w: %w", ErrWriteLanded, err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	syncedAt := time.Now().UTC().Format(time.RFC3339)
+	if err := s.store.SaveIssue(iss, syncedAt); err != nil {
+		return "", fmt.Errorf("save issue: %w: %w", ErrWriteLanded, err)
+	}
+	return iss.Assignee, nil
 }
 
 // resync clears the projection and re-backfills the whole project — a full
