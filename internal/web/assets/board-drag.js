@@ -173,8 +173,14 @@
           // user's to set and must not look like it is.
           sort: false,
           draggable: '[data-testid="board-card"]',
-          // The estimate popover lives inside the card and stays clickable.
-          filter: "[data-estimate-control]",
+          // A control marked data-card-control (the estimate popover today) is
+          // not a drag handle: it lives inside the card and stays clickable.
+          // This is half of that marker's contract; card-control.js has the
+          // other half (the control does not follow the card's link). Keyed off
+          // the marker rather than a per-control selector, so marking a new
+          // control is all it takes — and so the two halves cannot drift apart,
+          // which they would do silently.
+          filter: "[data-card-control]",
           preventOnFilter: false,
           animation: 120,
           // The fallback (mouse-event) driver rather than native HTML5 drag: a

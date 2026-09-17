@@ -244,7 +244,13 @@
      from the dragstart guard in board-drag.js. Which cards may actually be
      dragged is settled by the library binding only to the participating
      columns (#195) and by the server rejecting any other target, never by this
-     attribute. */}}
+     attribute.
+
+     Because the card is a link AND a drag source, an interactive control placed
+     on it (the estimate pill today) must opt out of both. One attribute does
+     both: put data-card-control on the control's root and assets/card-control.js
+     stops the card link while board-drag.js stops the drag. See
+     assets/card-control.js for why the two are not arranged separately. */}}
 {{define "board-card"}}
 {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener"
    class="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
@@ -273,12 +279,16 @@
      popover (CSS-only, no JS toggle) offering S · M · L · No estimate; each
      choice hx-posts /board/estimate, which writes the size to Jira, re-reads the
      issue and swaps this whole control (hx-swap="outerHTML" on the closest
-     [data-estimate-control]) to the authoritative value — or, on failure, back to
+     [data-card-control]) to the authoritative value — or, on failure, back to
      the prior value plus an inline error. The control lives INSIDE the whole-card
      <a>, so the interactive parts are spans (valid non-interactive content in an
-     anchor, unlike <button>/<details>) that preventDefault+stopPropagation on
-     click so activating the pill neither follows the card link nor bubbles to it;
-     htmx's own listener on the same span still fires. The popover reveals via
+     anchor, unlike <button>/<details>). data-card-control on the root is what
+     keeps the pill from acting like the card underneath it: assets/card-control.js
+     cancels the click's default action so activating the pill does not follow the
+     card link (htmx's own listener on the span still fires), and board-drag.js
+     feeds the same attribute to Sortable's filter so pressing the pill on the
+     drag surface does not pick the card up. One marker, both opt-outs — marking
+     a control for one and not the other fails silently. The popover reveals via
      :focus-within (clicking the tabbable trigger focuses it) — the same JS-free
      mechanism as the resync/sprint tooltips. Editability is Board-only: it renders
      solely when boardCard.Editable, so the shared board-card stays read-only on
@@ -288,11 +298,10 @@
      asserted exactly as the read-only chip's. All popover styling is inline / in
      the board-estimate-style block (no Tailwind rebuild). */}}
 {{define "board-estimate"}}
-<span data-estimate-control data-testid="card:{{.Key}}:estimate" class="be" style="position:relative;display:inline-flex;flex-direction:column;align-items:flex-start">
+<span data-card-control data-testid="card:{{.Key}}:estimate" class="be" style="position:relative;display:inline-flex;flex-direction:column;align-items:flex-start">
   <span class="be-trigger inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600"
         data-testid="card:{{.Key}}:estimate-trigger" role="button" tabindex="0"
-        aria-haspopup="menu" aria-label="Edit estimate for {{.Key}}"
-        onclick="event.preventDefault();event.stopPropagation()">
+        aria-haspopup="menu" aria-label="Edit estimate for {{.Key}}">
     <span class="text-slate-400">est</span>
     <span class="tabular-nums text-slate-800" data-testid="card:{{.Key}}:size">{{.Display}}</span>
   </span>
@@ -309,8 +318,9 @@
 {{/* board-estimate-opt is one choice in the estimate popover. It hx-posts the
      chosen size (and the current value as "prior", the revert target on failure)
      to /board/estimate, swapping the whole control with the server's response.
-     The click handler prevents the enclosing card link from firing; htmx still
-     handles the click on this same element. The currently-selected value is
+     It needs no opt-out of its own: it sits inside the [data-card-control] root,
+     which is what keeps the enclosing card link from firing; htmx still handles
+     the click on this same element. The currently-selected value is
      marked (aria-current + a highlighted style). Takes a dict of Key, OptKey (the
      testid suffix), Label, Size (the value this choice writes) and Cur (the card's
      current raw size). */}}
@@ -318,10 +328,9 @@
 <span class="be-opt{{if eq .Size .Cur}} be-opt--sel{{end}}" role="menuitem" tabindex="0"
       data-testid="card:{{.Key}}:estimate-opt:{{.OptKey}}"
       {{if eq .Size .Cur}}aria-current="true"{{end}}
-      onclick="event.preventDefault();event.stopPropagation()"
       hx-post="/board/estimate" hx-trigger="click"
       hx-vals='{"key":"{{.Key}}","size":"{{.Size}}","prior":"{{.Cur}}"}'
-      hx-target="closest [data-estimate-control]" hx-swap="outerHTML">{{.Label}}</span>
+      hx-target="closest [data-card-control]" hx-swap="outerHTML">{{.Label}}</span>
 {{end}}
 
 {{/* board-estimate-style holds the CSS for the editable estimate popover, kept
