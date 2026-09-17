@@ -17,6 +17,11 @@ the seam (`jira.Client.FetchTransitions` / `TransitionIssue`, `jira.TransitionTo
 "first and only write path".** There are now two writes to Jira. Everything else
 0005 decided still holds — and this one deliberately copies its shape.
 
+> **Later count (2026-09):** two became four — the Prio view's priority edit
+> (#212) and the Board's assignee edit (`docs/adr/0012`). The sentence above is
+> left as written, since it records what was true when this decision was made;
+> `CONTEXT.md` carries the live count.
+
 ## The decision that actually needed making
 
 Until now the dashboard **measured** the workflow. It now also **changes** it,
