@@ -338,3 +338,91 @@ func TestPrioPriorityEditWritesThroughTheFake(t *testing.T) {
 		t.Errorf("GET /prio after the edit: status %d, projection did not keep Lowest", code)
 	}
 }
+
+// waitForAssignableBoard blocks until the Board offers the given assign option,
+// which takes both the issues AND the project members having been synced: with
+// an empty member table the avatar is read-only and the handler answers 400.
+// The gate is an explicit poll rather than a sleep so a slow first sync cannot
+// turn into a flake — or, worse, into a 400 the test mistakes for a verdict.
+func waitForAssignableBoard(t *testing.T, base, marker string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		code, body := get(t, base+"/board")
+		if code == http.StatusOK && strings.Contains(body, marker) {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatalf("/board never offered %s within the timeout (project members not synced?)", marker)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// postAssignee posts one assignee edit and returns the re-rendered board panel,
+// failing the test on anything but a 200.
+func postAssignee(t *testing.T, base string, form url.Values) string {
+	t.Helper()
+	resp, err := http.PostForm(base+"/board/assignee", form)
+	if err != nil {
+		t.Fatalf("POST /board/assignee %v: %v", form, err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	body := string(raw)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /board/assignee %v: status %d, want 200\n%s", form, resp.StatusCode, body)
+	}
+	return body
+}
+
+// TestBoardAssigneeEditWritesThroughTheFake drives the Board's assignee edit
+// (#224) end to end against the real binary (#225), the way the Prio priority
+// edit already is: POST /board/assignee writes the account id into the fake
+// Jira's in-memory issue, re-reads it and answers the whole board panel with the
+// card's new avatar. Both directions are exercised because clearing is a
+// SEPARATE form field (clear=1, no account) — the account id that unassigns is
+// the empty string, so one field could not tell "unassign" from "an id that
+// arrived empty", and only posting an account would leave that branch unproven.
+func TestBoardAssigneeEditWritesThroughTheFake(t *testing.T) {
+	const graceOpt = `data-testid="card:DCAI-4:assignee-opt:acct-grace"`
+	base := startDashboard(t)
+	waitForAssignableBoard(t, base, graceOpt)
+
+	// DCAI-4 is the canned dataset's unassigned card in the active sprint, so
+	// the assign below is a real change and not a no-op that would pass anyway.
+	if _, board := get(t, base+"/board"); !strings.Contains(board, `data-testid="card:DCAI-4:avatar-empty"`) {
+		t.Fatalf("DCAI-4 is not unassigned before the edit; the canned dataset changed under this test")
+	}
+
+	body := postAssignee(t, base, url.Values{"key": {"DCAI-4"}, "account": {"acct-grace"}})
+	for _, want := range []string{
+		`data-testid="card:DCAI-4:avatar-img" src="/static/avatars/grace.svg" alt="Grace"`, // the re-read assignee
+		graceOpt + ` aria-current="true"`,                                                  // the popover marks Grace as current
+		`data-testid="board"`,                                                              // the whole panel came back
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("assignee edit response missing %q\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `card:DCAI-4:assignee-error`) {
+		t.Errorf("assignee edit reported a failure against the fake Jira\n%s", body)
+	}
+	// The write stuck: a fresh load of the Board shows it too.
+	if code, page := get(t, base+"/board"); code != http.StatusOK ||
+		!strings.Contains(page, `data-testid="card:DCAI-4:avatar-img" src="/static/avatars/grace.svg" alt="Grace"`) {
+		t.Fatalf("GET /board after the edit: status %d, the projection did not keep Grace", code)
+	}
+
+	body = postAssignee(t, base, url.Values{"key": {"DCAI-4"}, "clear": {"1"}})
+	if !strings.Contains(body, `data-testid="card:DCAI-4:avatar-empty"`) {
+		t.Errorf("clearing the assignee did not render the unassigned circle\n%s", body)
+	}
+	if strings.Contains(body, `card:DCAI-4:assignee-error`) {
+		t.Errorf("clearing the assignee reported a failure against the fake Jira\n%s", body)
+	}
+	if code, page := get(t, base+"/board"); code != http.StatusOK ||
+		!strings.Contains(page, `data-testid="card:DCAI-4:avatar-empty"`) {
+		t.Fatalf("GET /board after the clear: status %d, the projection did not keep it unassigned", code)
+	}
+}
