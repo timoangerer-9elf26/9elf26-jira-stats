@@ -4,7 +4,7 @@ status: accepted
 
 # Editable estimate on the Board writes back to Jira
 
-> **Amended (2026-09, #212): there are now three write paths** — this estimate edit, the [Board transition](../CONTEXT.md#board-transition) (`docs/adr/0010`) and the Prio view's [Priority edit](../CONTEXT.md#priority-edit), the latter two copying this ADR's write → re-read → persist shape (no new ADR).
+> **Amended (2026-09): there are now four write paths** — this estimate edit, the [Board transition](../CONTEXT.md#board-transition) (`docs/adr/0010`), the Prio view's [Priority edit](../CONTEXT.md#priority-edit) (#212) and the Board's [Assignee edit](../CONTEXT.md#assignee-edit) (`docs/adr/0012`). All three copy this ADR's write → re-read → persist shape; only the assignee edit needed its own ADR, and for what it had to add (people in the projection) rather than for the write. See also the correction below: this ADR's "optimistic pill" was never built.
 
 > **Amended (2026-07): editing is no longer Board-only.** When the Daily view
 > became a board (`docs/adr/0003`) it adopted the same board-style card, so the
@@ -48,6 +48,22 @@ re-read *that one issue* from Jira and `SaveIssue` it, so the projection is set
 within the same request and the read-only-projection invariant is preserved
 (the projection still originates entirely from Jira). Cost is one extra GET per
 edit — negligible at this scale.
+
+> **Correction (2026-09): the pill was never built optimistically.** The
+> paragraph above describes an intent the code did not follow. The pill does not
+> change on select; it changes when the response arrives, and it then shows the
+> value the re-read returned rather than the one clicked
+> (`internal/web/board_estimate.go`). The reconciliation half of the paragraph —
+> write, re-read that one issue, persist — is accurate and is the half the later
+> writes copy. Only the optimism is wrong, and it stayed wrong in this document
+> alone: the word appears nowhere else in `CONTEXT.md` or in any other ADR, so
+> nothing downstream inherited it.
+>
+> Worth keeping straight, because the app *does* have one optimistic surface and
+> it is easy to conflate with this one: the Board drag (`docs/adr/0010`) moves
+> the card immediately and leaves it visibly **pending** until the server
+> re-renders. That is optimism in the *rendering*, not in the write — the drag's
+> server-side shape is this ADR's write → re-read → persist, unchanged.
 
 - *Alternative rejected — optimistic + rely on the next sync:* write the new size
   into the local `size` column and let the ~60s incremental sync reconcile.
