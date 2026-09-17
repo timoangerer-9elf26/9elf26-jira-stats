@@ -64,8 +64,8 @@ card). Unlike the Daily board, the **Done set is three separate columns here**,
 not one collapsed Done — the Board shows exactly where a done ticket sits.
 
 Each **card** is the [board card](#estimate-edit) (key linking to Jira, type
-badge, title, an **editable estimate**, the assignee **avatar**, and the parent
-**epic pill**) placed in its **current** status column, plus a subtle
+badge, title, an **editable estimate**, an **editable assignee avatar**, and
+the parent **epic pill**) placed in its **current** status column, plus a subtle
 **latest-activity timestamp**. The Board deliberately carries **no movement
 chrome** — no origin badge, no [movement-kind](#daily-movement) colour — because
 it is a snapshot, not a movement view; those stay Daily-only. That holds even
@@ -375,8 +375,9 @@ ticket's size — S / M / L / no-estimate) is editable on the **Board** and on t
 Picking a value **writes it back to Jira** as the ticket's estimate, immediately,
 with no confirm step. Everywhere else the size is read-only display.
 
-This is **one of the three ways the dashboard writes to Jira** (the others are
-a [Board transition](#board-transition) and a [Priority edit](#priority-edit));
+This is **one of the four ways the dashboard writes to Jira** (the others are
+a [Board transition](#board-transition), a [Priority edit](#priority-edit) and
+an [Assignee edit](#assignee-edit));
 everything else it shows is a read-only projection. Jira stays the **source of truth**: the edit is a write *to Jira*, not to the
 local projection — the projection only ever reflects what a Jira read returns, so
 after a successful write the changed ticket is re-read from Jira and the pill
@@ -387,7 +388,8 @@ on the Sprint drill-down stays read-only (see `docs/adr/0005`).
 ## Board transition
 
 The second way a user can **change** Jira from the dashboard (the first is the
-[estimate edit](#estimate-edit), the third the [priority edit](#priority-edit)):
+[estimate edit](#estimate-edit), the third the [priority edit](#priority-edit),
+the fourth the [assignee edit](#assignee-edit)):
 moving a ticket on the
 [Board view](#board-view) into a different workflow **status**, written straight
 to Jira with no confirm step. Only statuses Jira actually offers a transition
@@ -432,7 +434,8 @@ like a transition made in Jira itself.
 ## Priority edit
 
 The third way a user can **change** Jira from the dashboard (after the
-[estimate edit](#estimate-edit) and the [Board transition](#board-transition)):
+[estimate edit](#estimate-edit) and the [Board transition](#board-transition),
+before the [assignee edit](#assignee-edit)):
 on the [Prio view](#prio-view), a row's **priority** is editable in place.
 Clicking it offers the **five levels** — Highest, High, Medium, Low, Lowest —
 with the icons the column already draws, and picking one **writes it to Jira**
@@ -457,3 +460,57 @@ unchanged — the row stays where it was, with a small inline message on it, no
 global banner. The priority is editable only in the Prio table; anywhere else
 it would be read-only display (see `docs/adr/0005`, whose write shape this
 copies).
+
+## Assignee edit
+
+The fourth way a user can **change** Jira from the dashboard (after the
+[estimate edit](#estimate-edit), the [Board transition](#board-transition) and
+the [priority edit](#priority-edit)): on the [Board view](#board-view), a card's
+**assignee avatar** is editable in place. Clicking it offers every
+[project member](#project-member) plus **Unassigned**, and picking one **writes
+the assignee to Jira** immediately, with no confirm step. Unlike the
+[priority edit](#priority-edit), clearing *is* offered — an unassigned ticket is
+a legitimate state, not a stale projection, and handing work back to nobody is a
+real standup move.
+
+The candidates are the **project's** people, not the board's: the popover
+deliberately reaches past the cards on screen, so a ticket can be assigned to
+someone who has nothing in the sprint yet. That is the whole point of the
+control, and it is why this list and the [assignee filter](#board-filters)'s
+chips are **different sets** — the filter narrows to people who *have* work, the
+popover reaches anyone who *could*. A card assigned to someone no longer on the
+project still shows them, but they are not offered: it can be reassigned away
+from them, never back.
+
+As with the other three writes, Jira stays the **source of truth**: the assignee
+is written, that one ticket is re-read, and the projection is set from what the
+read returned — so the avatar only ever shows an assignee the write actually
+achieved. A failed write leaves both Jira and the card unchanged, with a small
+inline message on that card and no global banner. The avatar is editable only on
+the Board; everywhere else it is read-only display, including the
+[assignee filter](#board-filters)'s chips, which draw the same avatar.
+
+An assignee edit is **not** a [Daily movement](#daily-movement) and does not make
+a card match the Board's *Active in last 24h* filter — that lens is about
+**status** movement, and a ticket changing hands without changing status has not
+moved (see `docs/adr/0012`).
+
+## Project member
+
+A person who can be **assigned** work on the project: the identity, display name
+and avatar of one Jira user, [synced](#sync) into the projection alongside
+issues and sprints rather than looked up when needed. Project members are what
+the [assignee edit](#assignee-edit)'s popover offers.
+
+Only **people** are members — Jira's app accounts (the automation acting on the
+project) are excluded, so a card can never be assigned to a bot by a mis-click.
+Membership is Jira's answer to "who may be assigned here", not a locally curated
+team list, so someone joining or leaving the project appears or disappears
+without the dashboard being told; the cost is that the list can lag Jira by up
+to one [sync](#sync) cycle, which for a directory that changes a few times a
+year is invisible.
+
+A project member is **not** the same set as the assignees the
+[Board filters](#board-filters) show: the filter lists the people with work on
+the board right now, which is neither a subset nor a superset (a member may have
+nothing in the sprint; an assignee may have left the project).
