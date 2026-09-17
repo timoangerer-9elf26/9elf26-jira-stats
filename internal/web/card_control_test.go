@@ -41,6 +41,36 @@ func TestEditableControlsCarryTheCardControlMarker(t *testing.T) {
 	}
 }
 
+// TestAssignControlCarriesTheCardControlMarker asserts the Board's Assignee edit
+// (#224) opts out through the SAME marker rather than arranging its own link and
+// drag opt-outs. The avatar sits at the card's bottom-right, on the drag surface,
+// inside the card's link: carrying only half the wiring would fail silently —
+// either the popover never opens and the card drags instead, or picking a person
+// navigates to Jira.
+func TestAssignControlCarriesTheCardControlMarker(t *testing.T) {
+	app := newAssignApp(t, assignFixture(), web.WithJiraBaseURL("https://9elf26.atlassian.net/"))
+	body := get(t, app.URL+"/board")
+
+	want := `data-card-control data-testid="card:DCAI-11:assignee"`
+	if !strings.Contains(body, want) {
+		t.Errorf("the Board assign control is missing %q\n%s", want, body)
+	}
+}
+
+// TestAssignControlDoesNotStopClickPropagation asserts the rule
+// assets/card-control.js states outright: the marker's link opt-out is a
+// DELEGATED document listener, so a control that stops a click short of the
+// document is correctly marked and still navigates away. The assign popover is
+// CSS-only precisely so it never needs to — this pins that it stays that way.
+func TestAssignControlDoesNotStopClickPropagation(t *testing.T) {
+	app := newAssignApp(t, assignFixture(), web.WithJiraBaseURL("https://9elf26.atlassian.net/"))
+	body := get(t, app.URL+"/board")
+
+	if strings.Contains(body, "stopPropagation") {
+		t.Errorf("the Board markup calls stopPropagation, which silently breaks the card-control marker\n%s", body)
+	}
+}
+
 // TestEveryPageLoadsTheCardControlScript asserts the script that gives the
 // marker its link opt-out is loaded from the shared head, not per page — a page
 // that renders a marked control without it would follow the card's link with no

@@ -6,6 +6,7 @@
     {{/* board-estimate-style sits OUTSIDE #board-panel so the popover CSS is
          included exactly once and survives every HTMX panel swap. */}}
     {{template "board-estimate-style"}}
+    {{template "board-assignee-style"}}
     {{template "board-drag-style"}}
     <div id="board-panel">
       {{template "board-panel" .}}

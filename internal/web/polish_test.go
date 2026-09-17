@@ -141,6 +141,9 @@ func (failingRollups) ActiveSprintAssignees() ([]store.SprintAssignee, error) {
 func (failingRollups) PrioIssues() ([]store.PrioIssue, error) {
 	return nil, errBoom
 }
+func (failingRollups) ProjectMembers() ([]store.ProjectMember, error) {
+	return nil, errBoom
+}
 
 var errBoom = &boomError{}
 
