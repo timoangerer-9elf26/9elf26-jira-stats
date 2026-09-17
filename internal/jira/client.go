@@ -97,6 +97,53 @@ type Sprint struct {
 	CompletedAt time.Time // completion instant (zero until the sprint is completed)
 }
 
+// Jira account types, as reported by the user endpoints. The project's
+// assignable users mix both: the people who work on it and the automation that
+// acts on it.
+const (
+	AccountTypePerson = "atlassian" // a human Jira account
+	AccountTypeApp    = "app"       // automation (a Jira app / agent account)
+)
+
+// AssignableUser is one candidate from Jira's answer to "who may be assigned
+// work on this project" — a person OR an app account, which is why it is not
+// yet a ProjectMember. It exists so the person/app distinction is made in
+// exactly one place (projectMembers) rather than once per Client implementation.
+type AssignableUser struct {
+	AccountID   string
+	DisplayName string
+	AvatarURL   string
+	AccountType string // AccountTypePerson or AccountTypeApp
+}
+
+// ProjectMember is a person who can be assigned work on the project: the
+// identity, display name and avatar of one Jira user (see CONTEXT.md "Project
+// member"). App accounts are never members — the assign popover offering a bot
+// reads as a mis-click (docs/adr/0012).
+type ProjectMember struct {
+	AccountID   string // Jira accountId, the id an assignee write targets
+	DisplayName string
+	AvatarURL   string // largest available avatar image, "" when the user has none
+}
+
+// projectMembers keeps only the people among the project's assignable users.
+// Both the live and the fake client map through it, so a dataset carrying an app
+// account is filtered identically wherever it comes from.
+func projectMembers(users []AssignableUser) []ProjectMember {
+	var members []ProjectMember
+	for _, u := range users {
+		if u.AccountType != AccountTypePerson {
+			continue
+		}
+		members = append(members, ProjectMember{
+			AccountID:   u.AccountID,
+			DisplayName: u.DisplayName,
+			AvatarURL:   u.AvatarURL,
+		})
+	}
+	return members
+}
+
 // ChangelogEntry is a single field change recorded in a Jira issue's history.
 // ID is the stable Jira changelog entry id used to dedup transitions on re-sync.
 type ChangelogEntry struct {
@@ -121,6 +168,11 @@ type Client interface {
 	// its actual lifecycle instants (see Sprint). It is fetched on every sync so
 	// the store's sprint entities track Jira.
 	FetchSprints(ctx context.Context) ([]Sprint, error)
+	// FetchProjectMembers returns the people who can be assigned work on the
+	// project, app accounts already excluded. It is fetched on every sync so the
+	// projection carries the assign popover's candidates and no read path ever
+	// has to ask Jira for them (docs/adr/0012).
+	FetchProjectMembers(ctx context.Context) ([]ProjectMember, error)
 	// FetchIssue re-reads a single issue by key (with its changelog), the
 	// post-write reconciliation read behind the Board estimate edit: after a
 	// successful size write the changed issue is re-fetched so the projection is

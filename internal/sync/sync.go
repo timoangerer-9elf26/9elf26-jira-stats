@@ -19,6 +19,7 @@ import (
 type Store interface {
 	SaveIssue(iss jira.Issue, syncedAt string) error
 	SaveSprint(sp jira.Sprint) error
+	ReplaceProjectMembers(members []jira.ProjectMember) error
 	IssueCount() (int, error)
 	LastSync() (t time.Time, ok bool, err error)
 	SetLastSync(t time.Time) error
@@ -39,6 +40,9 @@ type Store interface {
 // snapshot is stamped with a single shared synced_at timestamp.
 func Backfill(ctx context.Context, client jira.Client, store Store) (int, error) {
 	if err := syncSprints(ctx, client, store); err != nil {
+		return 0, err
+	}
+	if err := syncProjectMembers(ctx, client, store); err != nil {
 		return 0, err
 	}
 	issues, err := client.FetchIssues(ctx)
@@ -71,6 +75,22 @@ func syncSprints(ctx context.Context, client jira.Client, store Store) error {
 	return nil
 }
 
+// syncProjectMembers refreshes the people who can be assigned work on the
+// project. Jira's answer REPLACES the stored list rather than merging into it,
+// so someone removed from the project stops being a member on this very cycle
+// (docs/adr/0012). It runs on every cycle, backfill and incremental alike: the
+// list is short and the projection is what every read path uses.
+func syncProjectMembers(ctx context.Context, client jira.Client, store Store) error {
+	members, err := client.FetchProjectMembers(ctx)
+	if err != nil {
+		return fmt.Errorf("fetch project members: %w", err)
+	}
+	if err := store.ReplaceProjectMembers(members); err != nil {
+		return fmt.Errorf("save project members: %w", err)
+	}
+	return nil
+}
+
 // Once runs a single full-project backfill, discarding the issue count. It is
 // the entry point used by the web integration harness.
 func Once(ctx context.Context, client jira.Client, store Store) error {
@@ -83,6 +103,9 @@ func Once(ctx context.Context, client jira.Client, store Store) error {
 // store by changelog entry id).
 func incremental(ctx context.Context, client jira.Client, store Store, since time.Time) error {
 	if err := syncSprints(ctx, client, store); err != nil {
+		return err
+	}
+	if err := syncProjectMembers(ctx, client, store); err != nil {
 		return err
 	}
 	issues, err := client.FetchIssuesUpdatedSince(ctx, since)

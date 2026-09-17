@@ -23,6 +23,7 @@ import (
 type gatedClient struct {
 	Issues  []jira.Issue
 	Sprints []jira.Sprint
+	Members []jira.ProjectMember
 	entered chan struct{}
 	release chan struct{}
 }
@@ -51,6 +52,10 @@ func (c *gatedClient) FetchIssuesUpdatedSince(context.Context, time.Time) ([]jir
 
 func (c *gatedClient) FetchSprints(context.Context) ([]jira.Sprint, error) {
 	return c.Sprints, nil
+}
+
+func (c *gatedClient) FetchProjectMembers(context.Context) ([]jira.ProjectMember, error) {
+	return c.Members, nil
 }
 
 func (c *gatedClient) FetchIssue(context.Context, string) (jira.Issue, error) {
@@ -89,7 +94,15 @@ func TestTriggerResyncRebuildsProjectionAndGuardsOverlap(t *testing.T) {
 		{Key: "DCAI-1", Type: "Story", Summary: "Fresh", Status: "In Progress",
 			StatusCategory: "In Progress", Size: "M", ActiveSprint: "KW29"},
 	}
+	// A stale member who is no longer on the project must go the same way.
+	if err := st.ReplaceProjectMembers([]jira.ProjectMember{
+		{AccountID: "acct-gone", DisplayName: "Gone Person"},
+	}); err != nil {
+		t.Fatalf("seed stale member: %v", err)
+	}
+
 	client := newGatedClient(fresh, []jira.Sprint{{ID: 29, Name: "KW29", State: "active"}})
+	client.Members = []jira.ProjectMember{{AccountID: "acct-ada", DisplayName: "Ada"}}
 	syncer := sync.NewSyncer(client, st, 2*time.Minute)
 
 	if !syncer.TriggerResync(context.Background()) {
@@ -125,6 +138,11 @@ func TestTriggerResyncRebuildsProjectionAndGuardsOverlap(t *testing.T) {
 	assertEq(t, "stale issue dropped", countRows(t, st, "SELECT COUNT(*) FROM issue WHERE key='DCAI-STALE'"), 0)
 	assertEq(t, "fresh issue backfilled", countRows(t, st, "SELECT COUNT(*) FROM issue WHERE key='DCAI-1'"), 1)
 	assertEq(t, "sprint backfilled", countRows(t, st, "SELECT COUNT(*) FROM sprint"), 1)
+	// The member table is rebuilt like every other table: the stale member is
+	// gone and Jira's current answer is what remains.
+	assertEq(t, "stale member dropped",
+		countRows(t, st, "SELECT COUNT(*) FROM project_member WHERE account_id='acct-gone'"), 0)
+	assertEq(t, "members rebuilt", countRows(t, st, "SELECT COUNT(*) FROM project_member"), 1)
 	if _, ok, err := st.LastSync(); err != nil || !ok {
 		t.Fatalf("last_sync not recorded after resync (ok=%v err=%v)", ok, err)
 	}

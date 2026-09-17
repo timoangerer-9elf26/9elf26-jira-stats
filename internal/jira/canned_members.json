@@ -1,0 +1,38 @@
+[
+  {
+    "AccountID": "acct-ada",
+    "DisplayName": "Ada",
+    "AvatarURL": "/static/avatars/ada.svg",
+    "AccountType": "atlassian"
+  },
+  {
+    "AccountID": "acct-alan",
+    "DisplayName": "Alan",
+    "AvatarURL": "/static/avatars/alan.svg",
+    "AccountType": "atlassian"
+  },
+  {
+    "AccountID": "acct-grace",
+    "DisplayName": "Grace",
+    "AvatarURL": "/static/avatars/grace.svg",
+    "AccountType": "atlassian"
+  },
+  {
+    "AccountID": "acct-lise",
+    "DisplayName": "Lise",
+    "AvatarURL": "",
+    "AccountType": "atlassian"
+  },
+  {
+    "AccountID": "acct-coding-agent",
+    "DisplayName": "Jira Coding Agent",
+    "AvatarURL": "",
+    "AccountType": "app"
+  },
+  {
+    "AccountID": "acct-triage-agent",
+    "DisplayName": "Jira Triage Agent",
+    "AvatarURL": "",
+    "AccountType": "app"
+  }
+]

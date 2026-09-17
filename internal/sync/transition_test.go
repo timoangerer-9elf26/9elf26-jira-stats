@@ -18,6 +18,7 @@ import (
 
 type recordingStore struct {
 	saved   []jira.Issue
+	members [][]jira.ProjectMember // one entry per ReplaceProjectMembers call
 	saveErr error
 }
 
@@ -28,7 +29,11 @@ func (s *recordingStore) SaveIssue(iss jira.Issue, syncedAt string) error {
 	s.saved = append(s.saved, iss)
 	return nil
 }
-func (s *recordingStore) SaveSprint(jira.Sprint) error       { return nil }
+func (s *recordingStore) SaveSprint(jira.Sprint) error { return nil }
+func (s *recordingStore) ReplaceProjectMembers(members []jira.ProjectMember) error {
+	s.members = append(s.members, members)
+	return nil
+}
 func (s *recordingStore) IssueCount() (int, error)           { return len(s.saved), nil }
 func (s *recordingStore) LastSync() (time.Time, bool, error) { return time.Time{}, false, nil }
 func (s *recordingStore) SetLastSync(time.Time) error        { return nil }

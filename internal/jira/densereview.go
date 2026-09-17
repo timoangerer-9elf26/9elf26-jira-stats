@@ -32,6 +32,9 @@ const (
 	denseCarla = "Carla Mendez-Ortiz"
 	denseDev   = "Devraj Subramaniam"
 	denseEka   = "Ekaterina Vasilyeva"
+	// denseFreya is on the project but has no issue in this fixture: the member
+	// the assign popover can reach who the board never shows.
+	denseFreya = "Freya Lindqvist"
 )
 
 // Dense dataset statuses (the authoritative DCAI workflow — see store.doneStatuses
@@ -58,7 +61,32 @@ const (
 // NewDenseFakeClient returns a FakeClient loaded with the dense/adversarial review
 // dataset (issue #104) instead of the canonical canned dataset.
 func NewDenseFakeClient() *FakeClient {
-	return &FakeClient{Issues: denseIssues(), Sprints: denseSprints()}
+	return &FakeClient{Issues: denseIssues(), Sprints: denseSprints(), AssignableUsers: denseAssignableUsers()}
+}
+
+// denseAssignableUsers is the dense dataset's answer to "who may be assigned
+// here": the five dataset assignees — including DenseAlexandra, whose long name
+// stresses the popover's width — plus a person with NOTHING on the board
+// (denseFreya), because reaching past the cards on screen is the assign
+// popover's whole point (docs/adr/0012), plus the app accounts that must never
+// be offered.
+func denseAssignableUsers() []AssignableUser {
+	person := func(name string) AssignableUser {
+		return AssignableUser{AccountID: "dense-" + name, DisplayName: name, AccountType: AccountTypePerson}
+	}
+	app := func(name string) AssignableUser {
+		return AssignableUser{AccountID: "dense-" + name, DisplayName: name, AccountType: AccountTypeApp}
+	}
+	return []AssignableUser{
+		person(DenseAlexandra),
+		person(denseBo),
+		person(denseCarla),
+		person(denseDev),
+		person(denseEka),
+		person(denseFreya),
+		app("Jira Coding Agent"),
+		app("Nelf OpenClaw"),
+	}
 }
 
 // mustInstant parses an RFC3339 instant for the fixture, panicking on a malformed

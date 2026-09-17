@@ -165,6 +165,21 @@ func TestBackfillProjectsFakeJiraIntoStore(t *testing.T) {
 		t.Fatalf("members of sprint 42 at activation = %v, want [DCAI-1]", members)
 	}
 
+	// --- Project members (the real client's assignable-user read) ---
+	// The project's two people are persisted; the app account Jira reports on the
+	// same endpoint is not a member (docs/adr/0012).
+	people, err := st.ProjectMembers()
+	if err != nil {
+		t.Fatalf("ProjectMembers: %v", err)
+	}
+	if len(people) != 2 {
+		t.Fatalf("project members = %+v, want the two people only", people)
+	}
+	assertEq(t, "first project member", people[0].DisplayName, "Ada")
+	assertEq(t, "first project member account id", people[0].AccountID, "acct-ada")
+	assertEq(t, "first project member avatar", people[0].AvatarURL, "https://avatar.example/ada/48.png")
+	assertEq(t, "second project member", people[1].DisplayName, "Grace")
+
 	// --- Dedup on re-sync ---
 	if _, err := sync.Backfill(context.Background(), client, st); err != nil {
 		t.Fatalf("re-backfill: %v", err)
