@@ -34,6 +34,7 @@ const (
 	searchPageSize    = 100
 	changelogPageSize = 100
 	sprintPageSize    = 50 // Jira Agile's usual sprint page cap
+	memberPageSize    = 50 // assignable-user search page size (Jira's default)
 )
 
 // Config holds the connection settings for the live Jira client, populated from
@@ -111,6 +112,41 @@ func (c *LiveClient) FetchSprints(ctx context.Context) ([]Sprint, error) {
 		}
 	}
 	return sprints, nil
+}
+
+// FetchProjectMembers walks Jira's assignable-user search for the project
+// (GET /rest/api/3/user/assignable/search), startAt-paginated until a short page
+// arrives, and keeps only the people (projectMembers drops the app accounts that
+// share the endpoint). The result is what the syncer persists, so no read path
+// ever pays for this call (docs/adr/0012).
+func (c *LiveClient) FetchProjectMembers(ctx context.Context) ([]ProjectMember, error) {
+	var users []AssignableUser
+	startAt := 0
+	for {
+		q := url.Values{}
+		q.Set("project", c.cfg.ProjectKey)
+		q.Set("startAt", strconv.Itoa(startAt))
+		q.Set("maxResults", strconv.Itoa(memberPageSize))
+
+		var page []assignableUserDTO
+		if err := c.get(ctx, "/rest/api/3/user/assignable/search", q, &page); err != nil {
+			return nil, fmt.Errorf("jira assignable users: %w", err)
+		}
+		for _, dto := range page {
+			users = append(users, AssignableUser{
+				AccountID:   dto.AccountID,
+				DisplayName: dto.DisplayName,
+				AvatarURL:   largestAvatarURL(dto.AvatarUrls),
+				AccountType: dto.AccountType,
+			})
+		}
+
+		startAt += len(page)
+		if len(page) < memberPageSize {
+			break
+		}
+	}
+	return projectMembers(users), nil
 }
 
 // FetchIssue re-reads a single issue by key (with its changelog expanded) and
@@ -484,6 +520,17 @@ type userDTO struct {
 	AvatarUrls  avatarUrlsDTO `json:"avatarUrls"`
 }
 
+// assignableUserDTO is one entry from the assignable-user search. accountType
+// is what separates a person from the automation on the project, and accountId
+// is the id an assignee write targets — neither is carried on the issue's
+// assignee (userDTO), which is only ever displayed.
+type assignableUserDTO struct {
+	AccountID   string        `json:"accountId"`
+	AccountType string        `json:"accountType"`
+	DisplayName string        `json:"displayName"`
+	AvatarUrls  avatarUrlsDTO `json:"avatarUrls"`
+}
+
 // avatarUrlsDTO is Jira's per-user avatar image set, keyed by pixel size. The
 // board captures the largest for a crisp render in its small circle.
 type avatarUrlsDTO struct {
@@ -653,15 +700,23 @@ func assigneeName(u *userDTO) string {
 }
 
 // assigneeAvatarURL returns the largest available avatar image URL for a user,
-// or "" when there is no user or no avatar. Jira always populates the full size
-// set together, but each is checked so a partial payload still yields a URL.
+// or "" when there is no user or no avatar.
 func assigneeAvatarURL(u *userDTO) string {
 	if u == nil {
 		return ""
 	}
-	for _, url := range []string{u.AvatarUrls.Size48, u.AvatarUrls.Size32, u.AvatarUrls.Size24, u.AvatarUrls.Size16} {
-		if url != "" {
-			return url
+	return largestAvatarURL(u.AvatarUrls)
+}
+
+// largestAvatarURL picks the biggest avatar image Jira offers, for a crisp
+// render in a small circle. Jira always populates the full size set together,
+// but each is checked so a partial payload still yields a URL. It is the one
+// avatar choice in the package — the issue assignee and the project member pick
+// the same way.
+func largestAvatarURL(urls avatarUrlsDTO) string {
+	for _, u := range []string{urls.Size48, urls.Size32, urls.Size24, urls.Size16} {
+		if u != "" {
+			return u
 		}
 	}
 	return ""

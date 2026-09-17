@@ -19,6 +19,7 @@ import (
 type Store interface {
 	SaveIssue(iss jira.Issue, syncedAt string) error
 	SaveSprint(sp jira.Sprint) error
+	ReplaceProjectMembers(members []jira.ProjectMember) error
 	IssueCount() (int, error)
 	LastSync() (t time.Time, ok bool, err error)
 	SetLastSync(t time.Time) error
@@ -41,6 +42,7 @@ func Backfill(ctx context.Context, client jira.Client, store Store) (int, error)
 	if err := syncSprints(ctx, client, store); err != nil {
 		return 0, err
 	}
+	refreshProjectMembers(ctx, client, store)
 	issues, err := client.FetchIssues(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("fetch issues: %w", err)
@@ -71,6 +73,38 @@ func syncSprints(ctx context.Context, client jira.Client, store Store) error {
 	return nil
 }
 
+// refreshProjectMembers refreshes the people who can be assigned work on the
+// project. Jira's answer REPLACES the stored list rather than merging into it,
+// so someone removed from the project stops being a member on this very cycle
+// (docs/adr/0012). It runs on every cycle, backfill and incremental alike: the
+// list is short and the projection is what every read path uses.
+//
+// It is BEST-EFFORT and returns no error, deliberately: it must never abort a
+// sync cycle. Jira gates its user search on a permission separate from issue
+// read, so a token allowed to read issues but not to browse users fails here on
+// every single cycle — and propagating that would stop issues and sprints
+// syncing too, silently staling the whole dashboard over a list of seven names.
+// Unlike sprints, nothing load-bearing reads this table. On failure the stored
+// list is left exactly as it was (no empty write), which is the staleness
+// docs/adr/0012 already accepts.
+//
+// Backfill is deliberately treated the SAME way rather than hard-failing: the
+// cold-start backfill is precisely where an unusable token would otherwise leave
+// the dashboard permanently empty, and an empty member table is a state the ADR
+// already provides for — "between a deploy and the first sync the member table
+// is empty, so the avatar is simply not editable. It self-heals within one
+// cycle."
+func refreshProjectMembers(ctx context.Context, client jira.Client, store Store) {
+	members, err := client.FetchProjectMembers(ctx)
+	if err != nil {
+		log.Printf("sync: project members not refreshed, keeping the stored list: %v", err)
+		return
+	}
+	if err := store.ReplaceProjectMembers(members); err != nil {
+		log.Printf("sync: project members not saved, keeping the stored list: %v", err)
+	}
+}
+
 // Once runs a single full-project backfill, discarding the issue count. It is
 // the entry point used by the web integration harness.
 func Once(ctx context.Context, client jira.Client, store Store) error {
@@ -85,6 +119,7 @@ func incremental(ctx context.Context, client jira.Client, store Store, since tim
 	if err := syncSprints(ctx, client, store); err != nil {
 		return err
 	}
+	refreshProjectMembers(ctx, client, store)
 	issues, err := client.FetchIssuesUpdatedSince(ctx, since)
 	if err != nil {
 		return fmt.Errorf("fetch updated issues: %w", err)

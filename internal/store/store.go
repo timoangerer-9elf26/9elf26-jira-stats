@@ -340,6 +340,77 @@ func (s *Store) Sprints() ([]Sprint, error) {
 	return sprints, nil
 }
 
+// ProjectMember is a person who can be assigned work on the project, as stored
+// in the projection (see CONTEXT.md "Project member"). App accounts never get
+// this far — the Jira client filters them out.
+type ProjectMember struct {
+	AccountID   string // Jira accountId, the id an assignee write targets
+	DisplayName string
+	AvatarURL   string // largest available avatar image, "" when the user has none
+}
+
+// ReplaceProjectMembers swaps the stored member list for the one Jira just
+// reported, in a single transaction. It replaces rather than upserts because the
+// member table MIRRORS Jira's answer to "who may be assigned here": someone
+// removed from the project must stop being a member on the next cycle, which an
+// upsert alone could never achieve. An empty list therefore empties the table.
+func (s *Store) ReplaceProjectMembers(members []jira.ProjectMember) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM project_member`); err != nil {
+		return fmt.Errorf("clear project members: %w", err)
+	}
+	for _, m := range members {
+		var avatarURL any
+		if m.AvatarURL != "" {
+			avatarURL = m.AvatarURL
+		}
+		// The table was just emptied, so the upsert only absorbs a duplicate
+		// WITHIN this batch — which startAt pagination over a directory changing
+		// mid-walk can genuinely produce. A plain insert would fail the sync.
+		if _, err := tx.Exec(
+			`INSERT INTO project_member (account_id, display_name, avatar_url) VALUES (?, ?, ?)
+			 ON CONFLICT(account_id) DO UPDATE SET
+			     display_name=excluded.display_name, avatar_url=excluded.avatar_url`,
+			m.AccountID, m.DisplayName, avatarURL,
+		); err != nil {
+			return fmt.Errorf("insert project member %s: %w", m.AccountID, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// ProjectMembers returns the project's members ordered by display name, so the
+// list a caller renders is stable between renders. It is the only read of the
+// member table — the assign popover's candidates come from here, never from a
+// Jira call in the request path (docs/adr/0012).
+func (s *Store) ProjectMembers() ([]ProjectMember, error) {
+	rows, err := s.db.Query(
+		`SELECT account_id, display_name, COALESCE(avatar_url, '')
+		 FROM project_member ORDER BY display_name, account_id`)
+	if err != nil {
+		return nil, fmt.Errorf("list project members: %w", err)
+	}
+	defer rows.Close()
+
+	var members []ProjectMember
+	for rows.Next() {
+		var m ProjectMember
+		if err := rows.Scan(&m.AccountID, &m.DisplayName, &m.AvatarURL); err != nil {
+			return nil, fmt.Errorf("scan project member: %w", err)
+		}
+		members = append(members, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate project members: %w", err)
+	}
+	return members, nil
+}
+
 // ActiveSprint is the active sprint window derived from the sprint entity: its
 // name and its activation instant, which is the sprint window START
 // (docs/adr/0002). The window is open-ended (end = now), resolved by the caller,
@@ -580,13 +651,13 @@ func (s *Store) SetLastFullResync(t time.Time) error {
 }
 
 // Reset empties the whole rebuildable projection: every issue snapshot, the
-// status- and sprint-membership transition logs, the sprint entities, and the
-// last_sync bookkeeping row. It backs the full-resync button (#52): after Reset
-// the store looks cold, so the next sync cycle re-backfills all issues, full
-// changelog history and sprints from Jira. Child tables are deleted before the
-// issue table they reference (foreign keys are not enforced on the connection),
-// and the whole wipe runs in one transaction so a resync never observes a
-// half-cleared projection. Only last_sync is removed so the cold-store
+// status- and sprint-membership transition logs, the sprint entities, the
+// project members, and the last_sync bookkeeping row. It backs the full-resync
+// button (#52): after Reset the store looks cold, so the next sync cycle
+// re-backfills all issues, full changelog history, sprints and members from
+// Jira. Child tables are deleted before the issue table they reference (foreign
+// keys are not enforced on the connection), and the whole wipe runs in one
+// transaction so a resync never observes a half-cleared projection. Only last_sync is removed so the cold-store
 // re-backfill path is taken; every other meta row is preserved — crucially the
 // last_full_resync stamp, which MUST survive Reset since a full resync is Reset
 // then re-backfill then record last_full_resync.
@@ -603,6 +674,7 @@ func (s *Store) Reset() error {
 		`DELETE FROM status_transition`,
 		`DELETE FROM issue`,
 		`DELETE FROM sprint`,
+		`DELETE FROM project_member`,
 	}
 	for _, stmt := range tables {
 		if _, err := tx.Exec(stmt); err != nil {

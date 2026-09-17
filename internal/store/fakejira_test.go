@@ -22,6 +22,8 @@ func fakeJira(w http.ResponseWriter, r *http.Request) {
 		fakeIssueChangelog(w, r)
 	case r.URL.Path == "/rest/agile/1.0/board/8/sprint":
 		writeJSON(w, sprintsPage)
+	case r.URL.Path == "/rest/api/3/user/assignable/search":
+		writeJSON(w, assignableUsersPage)
 	default:
 		http.Error(w, "unexpected path: "+r.URL.Path, http.StatusNotFound)
 	}
@@ -42,6 +44,19 @@ var sprintsPage = `{
          "startDate": "2026-07-13T07:00:00.000Z", "endDate": "2026-07-20T07:00:00.000Z"}
       ]
     }`
+
+// assignableUsersPage is the project's assignable users in the exact shape Jira
+// Cloud returns: a bare array mixing people (accountType "atlassian") with the
+// app accounts that act on the project. Only the people may become project
+// members (docs/adr/0012).
+var assignableUsersPage = `[
+      {"accountId": "acct-ada", "accountType": "atlassian", "displayName": "Ada",
+       "avatarUrls": {"48x48": "https://avatar.example/ada/48.png", "32x32": "https://avatar.example/ada/32.png"}},
+      {"accountId": "acct-bot", "accountType": "app", "displayName": "Jira Coding Agent",
+       "avatarUrls": {"48x48": "https://avatar.example/bot/48.png"}},
+      {"accountId": "acct-grace", "accountType": "atlassian", "displayName": "Grace",
+       "avatarUrls": {"48x48": "https://avatar.example/grace/48.png"}}
+    ]`
 
 func fakeSearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, searchPages[r.URL.Query().Get("nextPageToken")])

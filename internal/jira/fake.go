@@ -14,6 +14,9 @@ var cannedIssuesJSON []byte
 //go:embed canned_sprints.json
 var cannedSprintsJSON []byte
 
+//go:embed canned_members.json
+var cannedMembersJSON []byte
+
 // FakeClient is an in-memory Client backed by a fixed set of issues. It is the
 // reusable test double for the whole pipeline: sync it into a store and drive
 // the real handlers against the result.
@@ -26,6 +29,11 @@ type FakeClient struct {
 	// Sprints is returned by FetchSprints (the board's sprint entities); a test
 	// sets it to an active/closed/future mix to exercise the sprint lifecycle.
 	Sprints []Sprint
+	// AssignableUsers is the project's assignable-user set: the raw candidates
+	// FetchProjectMembers filters to people. It deliberately mixes people with
+	// app accounts, exactly as the live project does, so a regression that stops
+	// excluding automation fails a test instead of shipping.
+	AssignableUsers []AssignableUser
 	// SinceCalls records the bounds FetchIssuesUpdatedSince was called with, so
 	// tests can assert the incremental query was issued and how it was bounded.
 	SinceCalls []time.Time
@@ -66,7 +74,11 @@ func NewFakeClient() *FakeClient {
 	if err != nil {
 		panic(fmt.Sprintf("jira: invalid canned sprints: %v", err))
 	}
-	return &FakeClient{Issues: issues, Sprints: sprints, Transitions: DCAITransitions()}
+	members, err := cannedMembers()
+	if err != nil {
+		panic(fmt.Sprintf("jira: invalid canned members: %v", err))
+	}
+	return &FakeClient{Issues: issues, Sprints: sprints, AssignableUsers: members, Transitions: DCAITransitions()}
 }
 
 // FetchIssues returns the canned issues (or the configured error).
@@ -93,6 +105,17 @@ func (c *FakeClient) FetchSprints(ctx context.Context) ([]Sprint, error) {
 		return nil, c.Err
 	}
 	return c.Sprints, nil
+}
+
+// FetchProjectMembers returns the people among the configured assignable users
+// (or the configured error), filtered through the same projectMembers rule the
+// live client uses — so the app accounts in the fake's dataset never reach the
+// projection.
+func (c *FakeClient) FetchProjectMembers(ctx context.Context) ([]ProjectMember, error) {
+	if c.Err != nil {
+		return nil, c.Err
+	}
+	return projectMembers(c.AssignableUsers), nil
 }
 
 // FetchIssue returns the current in-memory snapshot of one issue by key (or the
@@ -216,4 +239,12 @@ func cannedSprints() ([]Sprint, error) {
 		return nil, err
 	}
 	return sprints, nil
+}
+
+func cannedMembers() ([]AssignableUser, error) {
+	var users []AssignableUser
+	if err := json.Unmarshal(cannedMembersJSON, &users); err != nil {
+		return nil, err
+	}
+	return users, nil
 }
