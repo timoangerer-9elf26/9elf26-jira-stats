@@ -183,6 +183,7 @@ type Server struct {
 	estimator       Estimator
 	transitioner    Transitioner
 	prioritizer     Prioritizer
+	prioRefresher   prioIssueRefresher
 	assigner        Assigner
 	templates       *template.Template
 	mux             *http.ServeMux
@@ -345,6 +346,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /prio", s.handlePrio)
 	s.mux.HandleFunc("GET /prio/results", s.handlePrioResults)
 	s.mux.HandleFunc("POST /prio/priority", s.handlePrioPriority)
+	s.mux.HandleFunc("POST /prio/ticket", s.handlePrioTicket)
 	s.mux.HandleFunc("POST /prio/meeting/complete", s.handlePrioMeetingComplete)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)

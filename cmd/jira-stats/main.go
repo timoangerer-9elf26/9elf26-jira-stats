@@ -115,6 +115,7 @@ func run() error {
 		// SetPriority writes the level to Jira (by name), re-reads the issue and
 		// persists it; the Syncer satisfies web.Prioritizer directly.
 		web.WithPrioritizer(syncer),
+		web.WithPrioIssueRefresher(syncer),
 		// The Board's Assignee edit write path (#224, docs/adr/0012): the same
 		// Syncer's SetAssignee assigns (or clears) the ticket in Jira by account id,
 		// re-reads the issue and persists it; the Syncer satisfies web.Assigner

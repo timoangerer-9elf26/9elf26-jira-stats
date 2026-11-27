@@ -28,12 +28,6 @@ type prioAgendaStep struct {
 	Total                    int
 }
 
-type prioTicketPanel struct {
-	Row     prioRow
-	Detail  store.IssueDetail
-	History []prioHistoryItem
-}
-
 type prioAgendaView struct {
 	CanonicalHref                          string
 	PriorityChange                         string
@@ -59,6 +53,8 @@ type prioAgendaView struct {
 	MeetingEnd, MeetingLabel               string
 	CanComplete                            bool
 	RecentHref, AllHref                    string
+	CanCreateEpic                          bool
+	TicketResult                           prioTicketResult
 }
 
 func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (prioAgendaView, error) {
@@ -115,6 +111,8 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 		CutoffInput: cutoff.In(s.prioLocation).Format(prioCutoffInput), CutoffSource: source,
 		Overview: step == prioOverview, Preset: preset, InvalidCutoff: invalidCutoff,
 	}
+	_, _, view.CanCreateEpic = s.prioTicketClient(ctx)
+	view.TicketResult, _ = ctx.Value(prioTicketResultKey{}).(prioTicketResult)
 	issues, err := s.rollups.PrioIssues()
 	if err != nil {
 		return prioAgendaView{}, err
@@ -154,27 +152,26 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	current := steps[index]
 	sortAgendaRows(current.Rows, step == prioBacklog && view.OldestFirst)
 	selection := q.Get("ticket")
-	selectedIndex := slices.IndexFunc(current.Rows, func(row prioRow) bool { return row.Key == selection })
-	if index != 0 && selectedIndex < 0 {
-		selection = ""
-		if len(current.Rows) > 0 {
-			selectedIndex = 0
-			selection = current.Rows[0].Key
-		}
-	}
 	if selection != "" {
-		detail, found, err := s.rollups.IssueDetail(selection)
+		view.Selected, err = s.prioTicketPanel(ctx, selection, changes[selection], cutoff, edit)
 		if err != nil {
 			return prioAgendaView{}, err
 		}
-		if found {
-			row := s.makePrioRow(detail.PrioIssue, edit)
-			row.Markers = prioEvents(detail.PrioIssue, changes[selection], cutoff).markers()
-			if view.Overview {
-				row.Editable = false // the overview row already provides its priority control
-			}
-			view.Selected = &prioTicketPanel{Row: row, Detail: detail, History: prioHistory(changes[selection], cutoff, s.prioLocation)}
+		if view.Selected == nil && index != 0 {
+			selection = ""
 		}
+	}
+	if index != 0 && selection == "" && len(current.Rows) > 0 {
+		selection = current.Rows[0].Key
+		view.Selected, err = s.prioTicketPanel(ctx, selection, changes[selection], cutoff, edit)
+		if err != nil {
+			return prioAgendaView{}, err
+		}
+	}
+	selectedIndex := slices.IndexFunc(current.Rows, func(row prioRow) bool { return row.Key == selection })
+	if view.Selected != nil {
+		view.Selected.Focused = !view.Overview
+		view.Selected.Result = view.TicketResult
 	}
 	view.SelectedKey = selection
 	if edit.Key != "" && edit.Error == "" {
@@ -212,7 +209,7 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 			view.PrevHref = steps[index-2].Href
 		}
 	}
-	if selectedIndex >= 0 && selectedIndex+1 < len(current.Rows) {
+	if index > 0 && selectedIndex+1 < len(current.Rows) {
 		view.NextHref = current.Rows[selectedIndex+1].SelectHref
 	} else if index == 0 && steps[1].Total == 0 {
 		view.NextHref = steps[2].Href
@@ -227,6 +224,9 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 				view.CutoffParams = append(view.CutoffParams, param)
 			}
 		}
+	}
+	if view.Selected != nil {
+		view.Selected.Params = view.Params
 	}
 	if meeting.ID != 0 {
 		view.MeetingEnd = meeting.EndedAt.Format(time.RFC3339Nano)

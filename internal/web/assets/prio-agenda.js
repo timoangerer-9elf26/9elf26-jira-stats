@@ -14,6 +14,7 @@
   let state = loadState(agenda().dataset.window);
   let nextFocus = '';
   let closeTicket = '';
+  let editFieldsOpen = false;
   let renderedStep = agenda().dataset.step;
 
   function saveState() {
@@ -75,6 +76,16 @@
       }
     }
     if (state.windowID !== windowID) state = loadState(windowID);
+    if (editFieldsOpen) {
+      const fields = view.querySelector('[data-prio-edit-fields]');
+      if (fields) fields.open = true;
+      editFieldsOpen = false;
+    }
+    if (nextFocus) {
+      const focus = view.querySelector(nextFocus) || view.querySelector('[aria-current="step"]');
+      focus?.focus({preventScroll: true});
+    }
+    nextFocus = '';
     const saved = state.scroll[step];
     if (saved) {
       for (const area of view.querySelectorAll('[data-prio-scroll]')) {
@@ -95,11 +106,6 @@
       if (row.bottom > bounds.bottom) queue.scrollTop += row.bottom - bounds.bottom;
     }
 
-    if (nextFocus) {
-      const focus = view.querySelector(nextFocus) || view.querySelector('[aria-current="step"]');
-      focus?.focus({preventScroll: true});
-    }
-    nextFocus = '';
     rememberView();
     renderProgress();
   }
@@ -141,6 +147,8 @@
       const ticket = closeTicket || view.dataset.ticket;
       nextFocus = `[data-prio-ticket="${CSS.escape(ticket)}"]`;
     }
+    if (target.closest('[data-prio-epic-open]')) view.querySelector('#prio-epic-dialog').showModal();
+    if (target.closest('[data-prio-epic-close]')) view.querySelector('#prio-epic-dialog').close();
     if (target.closest('[data-prio-summary]')) {
       renderProgress();
       view.querySelector('#prio-summary').showModal();
@@ -172,7 +180,17 @@
     if (step && state.cells[step]) event.detail.parameters.ticket = state.cells[step];
   });
   document.addEventListener('htmx:beforeSwap', event => {
-    if (event.detail.target === panel) rememberView();
+    if (event.detail.target !== panel || !event.detail.shouldSwap) return;
+    rememberView();
+    const form = event.detail.requestConfig.elt;
+    const action = form?.dataset.prioTicketAction;
+    if (action) {
+      editFieldsOpen = !!agenda()?.querySelector('[data-prio-edit-fields][open]');
+      const focused = form.contains(document.activeElement) && document.activeElement.id
+        ? document.activeElement : form.querySelector('button[type="submit"]');
+      nextFocus = action === 'epic' ? '[data-prio-epic-open]' :
+        focused?.id ? `#${CSS.escape(focused.id)}` : '';
+    }
   });
   document.addEventListener('htmx:afterSettle', event => {
     if (event.detail.target !== panel) return;

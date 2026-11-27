@@ -446,6 +446,10 @@ func (c *LiveClient) post(ctx context.Context, path string, body any) error {
 // no-content success (Jira answers 204 both to a successful issue edit and to a
 // performed transition). It is the write counterpart to get and uses the same credentials.
 func (c *LiveClient) write(ctx context.Context, method, path string, body any) error {
+	return c.writeJSON(ctx, method, path, body, nil)
+}
+
+func (c *LiveClient) writeJSON(ctx context.Context, method, path string, body, result any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -468,6 +472,9 @@ func (c *LiveClient) write(ctx context.Context, method, path string, body any) e
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("%s %s: status %d: %s", method, path, resp.StatusCode, b)
+	}
+	if result != nil {
+		return json.NewDecoder(resp.Body).Decode(result)
 	}
 	return nil
 }
@@ -545,9 +552,11 @@ type transitionsResponse struct {
 }
 
 type transitionDTO struct {
-	ID   string      `json:"id"`
-	Name string      `json:"name"`
-	To   toStatusDTO `json:"to"`
+	ID        string               `json:"id"`
+	Name      string               `json:"name"`
+	To        toStatusDTO          `json:"to"`
+	Fields    map[string]EditField `json:"fields"`
+	HasScreen bool                 `json:"hasScreen"`
 }
 
 type toStatusDTO struct {

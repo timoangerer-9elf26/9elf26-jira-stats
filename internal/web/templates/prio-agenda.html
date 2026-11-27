@@ -15,7 +15,7 @@
   <div hx-boost="true" hx-target="#prio-panel" hx-swap="innerHTML show:none"
        hx-sync="#prio-panel:drop" hx-history="false" data-prio-agenda
        data-step="{{.Step}}" data-ticket="{{.SelectedKey}}" data-window="{{.Meeting.ID}}"
-       {{if .PriorityChange}}data-prio-change="{{.PriorityChange}}"{{end}}>
+       {{if .TicketResult.Change}}data-prio-change="{{.TicketResult.Change}}"{{else if .PriorityChange}}data-prio-change="{{.PriorityChange}}"{{end}}>
   {{range .Params}}<input type="hidden" data-filterparam name="{{.Name}}" value="{{.Value}}">{{end}}
   <header class="my-3 flex flex-wrap items-end justify-between gap-3">
     <div>
@@ -39,9 +39,12 @@
       {{if .MeetingEnd}}
       <time class="text-sm text-muted-foreground" datetime="{{.MeetingEnd}}" title="Abgeschlossen von {{.Meeting.AccountID}}">{{.MeetingLabel}}</time>
       {{end}}
+      {{if .CanCreateEpic}}<button class="btn" data-variant="outline" type="button" data-prio-epic-open>Epic anlegen</button>{{end}}
       <button class="btn" type="button" data-prio-summary>Meeting abschließen</button>
     </div>
   </header>
+  {{if .CanCreateEpic}}{{template "prio-epic-dialog" .}}{{end}}
+  {{if not .Selected}}{{template "prio-ticket-result" .TicketResult}}{{end}}
   <dialog id="prio-summary" class="app-surface m-auto w-full max-w-lg p-5 backdrop:bg-black/40" aria-labelledby="prio-summary-title">
     <h2 id="prio-summary-title" class="text-lg font-bold">Meeting abschließen</h2>
     <p class="mt-2 font-medium">Zusammenfassung</p>
@@ -112,32 +115,6 @@
     </footer>
   </section>
 </div>
-{{end}}
-
-{{define "prio-ticket-panel"}}
-<header class="border-b border-border p-5">
-  <div class="flex items-center justify-between gap-2">
-    <p class="flex items-center gap-2"><span class="font-mono text-xs text-muted-foreground">{{.Row.Key}}</span>
-    {{template "type-badge" (dict "Type" .Row.Type "Testid" "")}}</p>
-    {{if .Row.Href}}<a class="btn" data-variant="outline" href="{{.Row.Href}}" target="_blank" rel="noopener">In Jira öffnen ↗</a>{{end}}
-  </div>
-  <h2 class="my-2 text-xl font-bold">{{.Row.Summary}}</h2>
-  <div class="flex flex-wrap items-center gap-2">
-    <span class="badge" data-variant="secondary">{{.Row.Status}}</span>
-    {{template "priority-cell" .Row}}
-    {{template "prio-markers" .Row.Markers}}
-  </div>
-</header>
-{{with .History}}
-<section class="p-5" aria-label="Änderungsverlauf">
-  <h3 class="font-semibold">Änderungsverlauf seit Stichtag</h3>
-  <ul class="mt-2 space-y-2 text-sm">
-    {{range .}}
-    <li><time class="mr-2 text-muted-foreground" datetime="{{.Instant}}">{{.TimeLabel}}</time> {{.Label}}{{if .Author}} · {{.Author}}{{end}}</li>
-    {{end}}
-  </ul>
-</section>
-{{end}}
 {{end}}
 
 {{define "prio-markers"}}
