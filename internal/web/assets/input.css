@@ -108,6 +108,19 @@ button:not(:disabled) {
   }
 }
 
+.prio-table-label {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (width >= 40rem) {
+  .prio-table-labels {
+    min-width: 7rem;
+  }
+}
+
 @media (width < 40rem) {
   .prio-table tbody,
   .prio-table tbody tr {
