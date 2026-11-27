@@ -134,7 +134,7 @@ func assertStatusSelect(t *testing.T, body, want string) {
 
 func TestPrioStatusSelectRendersEveryCategoryDefaultingToPlanned(t *testing.T) {
 	app := newTestApp(t, prioStatusFixture())
-	body := get(t, app.URL+"/prio")
+	body := get(t, app.URL+"/prio?legacy=1")
 
 	for _, want := range []string{
 		`data-testid="prio-filters"`,
@@ -171,7 +171,7 @@ func TestPrioStatusSelectRendersEveryCategoryDefaultingToPlanned(t *testing.T) {
 func TestPrioStatusSelectReplacesTheNotDoneAndNotStartedToggles(t *testing.T) {
 	app := newTestApp(t, prioStatusFixture())
 
-	for _, path := range []string{"/prio", "/prio/results?" + prioEveryFilterOff} {
+	for _, path := range []string{"/prio?legacy=1", "/prio/results?" + prioEveryFilterOff} {
 		body := get(t, app.URL+path)
 		for _, gone := range []string{
 			"Not done", "Not started",
@@ -190,8 +190,8 @@ func TestPrioStatusPlannedIsTheDefaultCategory(t *testing.T) {
 
 	// Bare, explicit, and unrecognised all resolve to Planned.
 	for _, path := range []string{
-		"/prio",
-		"/prio/results",
+		"/prio?legacy=1",
+		"/prio/results?legacy=1",
 		"/prio?status=planned",
 		"/prio?status=not-done",
 		"/prio?status=",
@@ -253,7 +253,7 @@ func TestPrioStatusCanceledOnlyAppearsUnderAll(t *testing.T) {
 // it as pre-sprint.
 func TestPrioStatusPlannedIncludesTriage(t *testing.T) {
 	app := newTestApp(t, prioStatusFixture())
-	assertPrioRows(t, get(t, app.URL+"/prio"), []string{"DCAI-1"}, nil)
+	assertPrioRows(t, get(t, app.URL+"/prio?legacy=1"), []string{"DCAI-1"}, nil)
 }
 
 func TestPrioStatusMatchesStatusCaseInsensitively(t *testing.T) {
@@ -263,7 +263,7 @@ func TestPrioStatusMatchesStatusCaseInsensitively(t *testing.T) {
 		{Key: "DCAI-3", Type: "Task", Summary: "Odd done casing", Status: "released / deployed", StatusCategory: "Done", Priority: "Medium"},
 	}})
 
-	assertPrioRows(t, get(t, app.URL+"/prio"), []string{"DCAI-1"}, []string{"DCAI-2", "DCAI-3"})
+	assertPrioRows(t, get(t, app.URL+"/prio?legacy=1"), []string{"DCAI-1"}, []string{"DCAI-2", "DCAI-3"})
 	assertPrioRows(t, get(t, app.URL+"/prio?status=doing"), []string{"DCAI-2"}, []string{"DCAI-1", "DCAI-3"})
 	assertPrioRows(t, get(t, app.URL+"/prio?status=done"), []string{"DCAI-3"}, []string{"DCAI-1", "DCAI-2"})
 }
@@ -273,7 +273,7 @@ func TestPrioStatusMatchesStatusCaseInsensitively(t *testing.T) {
 func TestPrioStatusRoundTripsWithThePills(t *testing.T) {
 	app := newTestApp(t, prioStatusFixture())
 
-	bare := get(t, app.URL+"/prio")
+	bare := get(t, app.URL+"/prio?legacy=1")
 	if strings.Contains(bare, `data-filterparam name="status"`) {
 		t.Errorf("the default Planned category should emit no param\n%s", bare)
 	}
@@ -310,7 +310,7 @@ func TestPrioNoMatchState(t *testing.T) {
 		{Key: "DCAI-8", Type: "Story", Summary: "Shipped", Status: "Released / Deployed", StatusCategory: "Done", Priority: "Lowest"},
 	}})
 
-	body := get(t, app.URL+"/prio")
+	body := get(t, app.URL+"/prio?legacy=1")
 	if !strings.Contains(body, `data-testid="prio-no-match"`) {
 		t.Errorf("prio missing the no-match state\n%s", body)
 	}
@@ -349,7 +349,7 @@ func prioLabelFixture() *jira.FakeClient {
 
 func TestPrioNonTechnicalToggleRendersDefaultOn(t *testing.T) {
 	app := newTestApp(t, prioLabelFixture())
-	body := get(t, app.URL+"/prio")
+	body := get(t, app.URL+"/prio?legacy=1")
 
 	for _, want := range []string{
 		`data-testid="prio-non-technical"`,
@@ -373,7 +373,7 @@ func TestPrioNonTechnicalToggleRendersDefaultOn(t *testing.T) {
 // status select first (#214).
 func TestPrioControlsRenderInRegistryOrder(t *testing.T) {
 	app := newTestApp(t, prioLabelFixture())
-	body := get(t, app.URL+"/prio")
+	body := get(t, app.URL+"/prio?legacy=1")
 
 	assertOrder(t, body,
 		`data-testid="prio-status"`,
@@ -394,7 +394,7 @@ func TestPrioNonTechnicalOnByDefaultHidesTechnicalTickets(t *testing.T) {
 	app := newTestApp(t, prioLabelFixture())
 
 	for _, path := range []string{
-		"/prio",
+		"/prio?legacy=1",
 		"/prio/results?status=all",
 		// An old #203-era bookmark still resolves to ON.
 		"/prio/results?status=all&non-technical=1",
@@ -429,7 +429,7 @@ func TestPrioNonTechnicalMatchesTheExactLabel(t *testing.T) {
 		{Key: "DCAI-3", Type: "Task", Summary: "Prefixed", Status: "Triage", StatusCategory: "To Do", Priority: "Medium", Labels: []string{"Technical-Debt"}},
 	}})
 
-	body := get(t, app.URL+"/prio")
+	body := get(t, app.URL+"/prio?legacy=1")
 	assertPrioRows(t, body, []string{"DCAI-2", "DCAI-3"}, []string{"DCAI-1"})
 }
 
@@ -450,7 +450,7 @@ func prioParentFixture() *jira.FakeClient {
 
 func TestPrioNoParentToggleRendersDefaultOn(t *testing.T) {
 	app := newTestApp(t, prioParentFixture())
-	body := get(t, app.URL+"/prio")
+	body := get(t, app.URL+"/prio?legacy=1")
 
 	for _, want := range []string{
 		`data-testid="prio-no-parent"`,
@@ -479,7 +479,7 @@ func TestPrioNoParentOnKeepsOnlyUnparentedTickets(t *testing.T) {
 	app := newTestApp(t, prioParentFixture())
 
 	// A bare path, and an old #210-era bookmark, both resolve to ON.
-	for _, path := range []string{"/prio", "/prio/results", "/prio/results?no-parent=1"} {
+	for _, path := range []string{"/prio?legacy=1", "/prio/results?legacy=1", "/prio/results?no-parent=1"} {
 		assertPrioRows(t, get(t, app.URL+path), []string{"DCAI-1", "DCAI-3"}, []string{"DCAI-2", "DCAI-4"})
 	}
 }
@@ -514,7 +514,7 @@ func TestPrioNoParentCombinesWithTheOtherFilters(t *testing.T) {
 		want   []string
 		absent []string
 	}{
-		{"at the defaults it hides done, technical and parented work alike", "", []string{"DCAI-1"}, []string{"DCAI-2", "DCAI-3", "DCAI-4"}},
+		{"at the defaults it hides done, technical and parented work alike", "?legacy=1", []string{"DCAI-1"}, []string{"DCAI-2", "DCAI-3", "DCAI-4"}},
 		{"with non-technical off the technical unparented task returns", "?non-technical=0", []string{"DCAI-1", "DCAI-3"}, []string{"DCAI-2", "DCAI-4"}},
 		{"with every other filter widened only the parent rule applies", "?" + prioStatusAndLabelFiltersOff, []string{"DCAI-1", "DCAI-2", "DCAI-3"}, []string{"DCAI-4"}},
 	} {
@@ -550,7 +550,7 @@ func TestPrioFiltersCombineIndependently(t *testing.T) {
 		want   []string
 		absent []string
 	}{
-		{"defaults: Planned, non-technical, top-of-tree", "", []string{"DCAI-2"}, []string{"DCAI-1", "DCAI-3", "DCAI-4"}},
+		{"defaults: Planned, non-technical, top-of-tree", "?legacy=1", []string{"DCAI-2"}, []string{"DCAI-1", "DCAI-3", "DCAI-4"}},
 		{"doing", "?status=doing", nil, []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-4"}},
 		{"doing + non-technical off", "?status=doing&non-technical=0", []string{"DCAI-1"}, []string{"DCAI-2", "DCAI-3", "DCAI-4"}},
 		{"done", "?status=done", []string{"DCAI-4"}, []string{"DCAI-1", "DCAI-2", "DCAI-3"}},

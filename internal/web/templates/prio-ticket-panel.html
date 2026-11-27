@@ -1,0 +1,177 @@
+{{define "prio-ticket-panel"}}
+<header class="border-b border-border p-5">
+  <div class="flex items-center justify-between gap-2">
+    <p class="flex items-center gap-2"><span class="font-mono text-xs text-muted-foreground">{{.Row.Key}}</span>
+    {{template "type-badge" (dict "Type" .Row.Type "Testid" "")}}</p>
+    {{if .Row.Href}}<a class="btn" data-variant="outline" href="{{.Row.Href}}" target="_blank" rel="noopener">In Jira öffnen ↗</a>{{end}}
+  </div>
+  <h2 class="my-2 text-xl font-bold">{{.Row.Summary}}</h2>
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="badge" data-variant="secondary">{{.Row.Status}}</span>
+    {{template "priority-cell" .Row}}
+    {{template "prio-markers" .Row.Markers}}
+  </div>
+  {{with .Result}}{{template "prio-ticket-result" .}}{{end}}
+  {{if .CanWrite}}<div id="prio-ticket-feedback" class="empty:hidden" aria-live="polite"></div>{{end}}
+</header>
+<div{{if .Focused}} class="app-scroll max-h-[65vh] overflow-y-auto" data-prio-scroll="ticket"{{end}}>
+  {{if .EpicSuggestion}}{{template "prio-epic-suggestion" .}}{{end}}
+  {{if .CanWrite}}<div class="border-b border-border p-5">{{template "prio-ticket-actions" .}}</div>{{end}}
+  <section class="space-y-2 border-b border-border p-5 text-sm" aria-label="Ticketdaten">
+    <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
+      <dt>Zuweisung</dt><dd>{{if .Detail.Assignee}}{{.Detail.Assignee}}{{else}}Nicht zugewiesen{{end}}</dd>
+      <dt>Schätzung</dt><dd>{{if .Detail.Size}}{{.Detail.Size}}{{else}}—{{end}}</dd>
+      <dt>Labels</dt><dd>{{range .Detail.Labels}}<span class="badge mr-1" data-variant="secondary">{{.}}</span>{{else}}—{{end}}</dd>
+      <dt>Parent / Epic</dt><dd>{{if .ParentHref}}<a class="underline" href="{{.ParentHref}}" target="_blank" rel="noopener">{{.Detail.ParentKey}}</a>{{else if .Detail.ParentKey}}{{.Detail.ParentKey}}{{else}}—{{end}}</dd>
+      <dt>Sprint</dt><dd>{{if .Detail.Sprint}}{{.Detail.Sprint}}{{else}}—{{end}}</dd>
+    </dl>
+    <div class="flex flex-wrap gap-x-4">
+      {{if .BacklogHref}}<a class="underline" href="{{.BacklogHref}}" target="_blank" rel="noopener">Rang im Jira-Backlog bearbeiten ↗</a>{{end}}
+      {{if .Row.Href}}<a class="underline" href="{{.Row.Href}}" target="_blank" rel="noopener">Sprint und Verknüpfungen in Jira bearbeiten ↗</a>{{end}}
+    </div>
+  </section>
+  <section class="space-y-2 border-b border-border p-5 text-sm" aria-label="Beschreibung">
+    <h3 class="font-semibold">Beschreibung</h3>
+    {{if .Description}}<p class="whitespace-pre-wrap break-words">{{.Description}}</p>{{else if .PlainDescription}}<p class="text-muted-foreground">Keine Beschreibung.</p>{{end}}
+    {{if and (not .PlainDescription) .Row.Href}}<a class="underline" href="{{.Row.Href}}" target="_blank" rel="noopener">Formatierte Beschreibung in Jira ansehen und bearbeiten ↗</a>{{end}}
+  </section>
+  {{with .Links}}
+  <section class="space-y-2 border-b border-border p-5 text-sm" aria-label="Verknüpfte Tickets">
+    <h3 class="font-semibold">Verknüpfte Tickets</h3>
+    <ul class="space-y-2">
+      {{range .}}<li>{{.Relation}} · {{if .Href}}<a class="underline" href="{{.Href}}" target="_blank" rel="noopener">{{.Key}}</a>{{else}}{{.Key}}{{end}} {{.Summary}}</li>{{end}}
+    </ul>
+  </section>
+  {{end}}
+  <section class="space-y-2 border-b border-border p-5 text-sm" aria-label="Kommentare">
+    <h3 class="font-semibold">Kommentare</h3>
+    {{if .Comments}}<ul class="space-y-3">{{range .Comments}}
+      <li><strong>{{.Author}}</strong>{{if .TimeLabel}} · <time datetime="{{.Instant}}" class="text-muted-foreground">{{.TimeLabel}}</time>{{end}}
+      <p class="whitespace-pre-wrap break-words">{{.Text}}</p>
+      {{if and .Complex $.Row.Href}}<a class="underline" href="{{$.Row.Href}}" target="_blank" rel="noopener">Formatierten Kommentar in Jira ansehen ↗</a>{{end}}</li>
+    {{end}}</ul>{{else}}<p class="text-muted-foreground">Keine allgemein sichtbaren Kommentare.</p>{{end}}
+    {{if .Row.Href}}<a class="underline" href="{{.Row.Href}}" target="_blank" rel="noopener">Kommentare mit eingeschränkter Sichtbarkeit in Jira ↗</a>{{end}}
+    {{if .CanWrite}}{{template "prio-ticket-comment-form" .}}{{end}}
+  </section>
+{{with .History}}
+<section class="p-5" aria-label="Änderungsverlauf">
+  <h3 class="font-semibold">Änderungsverlauf seit Stichtag</h3>
+  <ul class="mt-2 space-y-2 text-sm">
+    {{range .}}
+    <li><time class="mr-2 text-muted-foreground" datetime="{{.Instant}}">{{.TimeLabel}}</time> {{.Label}}{{if .Author}} · {{.Author}}{{end}}</li>
+    {{end}}
+  </ul>
+</section>
+{{end}}
+</div>
+{{end}}
+
+{{define "prio-ticket-params"}}
+  {{range .}}<input type="hidden" name="{{if eq .Name "parent"}}parent-filter{{else}}{{.Name}}{{end}}" value="{{.Value}}">{{end}}
+{{end}}
+
+{{define "prio-ticket-feedback"}}
+  {{if .Message}}<p class="text-sm text-destructive" role="alert">{{.Message}}</p>{{end}}
+{{end}}
+
+{{define "prio-ticket-result"}}
+  {{template "prio-ticket-feedback" .}}
+  {{if .CreatedHref}}<p class="mt-2 text-sm" role="status"><a class="underline" href="{{.CreatedHref}}">{{.Change}} ↗</a></p>{{else if and .Change (not .Message)}}<p class="mt-2 text-sm" role="status">{{.Change}}</p>{{end}}
+{{end}}
+
+{{define "prio-ticket-actions"}}
+{{if .MetadataError}}<p class="text-sm text-muted-foreground">{{.MetadataError}}</p>{{end}}
+{{if .Forms}}
+<details class="mt-2" data-prio-edit-fields>
+  <summary class="cursor-pointer font-semibold">Ticket bearbeiten</summary>
+  <div class="mt-3 space-y-3">
+    {{range .Forms}}
+    {{$current := .Current}}
+    <form action="/prio/ticket" method="post" class="grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto]" data-prio-ticket-action="{{.Name}}">
+      {{template "prio-ticket-params" $.Params}}
+      <input type="hidden" name="key" value="{{$.Row.Key}}">
+      <input type="hidden" name="action" value="{{.Name}}">
+      <div>
+        <label class="label" for="prio-edit-{{.Name}}">{{.Label}}</label>
+        {{if eq .Kind "select"}}
+        <select class="select w-full" id="prio-edit-{{.Name}}" name="{{.Name}}" {{if .Required}}required{{end}}>
+          <option value="" disabled{{if not .HasCurrent}} selected{{end}}>Wert wählen</option>
+          {{range .Options}}<option value="{{.Value}}" {{if eq .Value $current}}selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+        {{else if eq .Kind "textarea"}}
+        <input type="hidden" name="description-revision" value="{{.Revision}}">
+        <textarea class="textarea w-full" id="prio-edit-{{.Name}}" name="{{.Name}}" rows="4" {{if .Required}}required{{end}}>{{printf "\n%s" .Current}}</textarea>
+        {{else}}
+        <input class="input w-full" id="prio-edit-{{.Name}}" name="{{.Name}}" value="{{.Current}}" {{if .Required}}required{{end}} {{if eq .Name "summary"}}maxlength="255"{{end}}>
+        {{end}}
+      </div>
+      <button class="btn" data-variant="outline" type="submit" aria-label="{{.Label}} speichern" id="prio-save-{{.Name}}">Speichern</button>
+      <div id="prio-ticket-feedback-{{.Name}}" class="empty:hidden sm:col-span-2" aria-live="polite"></div>
+    </form>
+    {{end}}
+  </div>
+</details>
+{{end}}
+{{with .Transitions}}
+<section class="mt-4 space-y-2" aria-label="Statusübergänge">
+  <h3 class="font-semibold">Statusübergänge</h3>
+  <div class="flex flex-wrap gap-2">
+    {{range .}}{{template "prio-ticket-transition" (dict "Transition" . "Panel" $)}}{{end}}
+  </div>
+</section>
+{{end}}
+{{end}}
+
+{{define "prio-ticket-comment-form"}}
+<div id="prio-comment-feedback" aria-live="polite"></div>
+<form action="/prio/ticket" method="post" class="space-y-2" data-prio-ticket-action="comment">
+  {{template "prio-ticket-params" .Params}}
+  <input type="hidden" name="key" value="{{.Row.Key}}">
+  <input type="hidden" name="action" value="comment">
+  <label class="label" for="prio-comment">Kommentar hinzufügen</label>
+  <textarea class="textarea w-full" id="prio-comment" name="comment" required rows="3"></textarea>
+  <button class="btn" data-variant="outline" type="submit" id="prio-save-comment">Kommentieren</button>
+</form>
+{{end}}
+
+{{define "prio-epic-dialog"}}
+<dialog id="prio-epic-dialog" class="app-surface m-auto w-full max-w-lg p-5 backdrop:bg-black/40" aria-labelledby="prio-epic-title">
+  <h2 id="prio-epic-title" class="text-lg font-bold">Epic anlegen</h2>
+  <div id="prio-epic-feedback" class="mt-2" aria-live="polite"></div>
+  <form method="post" action="/prio/ticket" class="mt-3 space-y-3" data-prio-ticket-action="epic">
+    {{template "prio-ticket-params" .Params}}
+    <input type="hidden" name="action" value="epic">
+    <div>
+      <label class="label" for="prio-epic-summary">Titel</label>
+      <input class="input w-full" id="prio-epic-summary" name="epic-summary" required maxlength="255">
+    </div>
+    <div>
+      <label class="label" for="prio-epic-description">Beschreibung</label>
+      <textarea class="textarea w-full" id="prio-epic-description" name="epic-description" rows="5"></textarea>
+    </div>
+    <div class="flex justify-end gap-2">
+      <button class="btn" data-variant="outline" type="button" data-prio-epic-close>Abbrechen</button>
+      <button class="btn" type="submit">Epic anlegen</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
+{{define "prio-ticket-transition"}}
+{{with .Transition}}
+  {{if .Complex}}
+  <div class="rounded-md border border-border p-2">
+    {{if $.Panel.Row.Href}}<a class="underline" href="{{$.Panel.Row.Href}}" target="_blank" rel="noopener">{{.Target}} in Jira ↗</a>{{else}}{{.Target}}{{end}}
+    {{if .Required}}<p class="text-xs text-muted-foreground">Pflichtfelder · {{range $i, $field := .Required}}{{if $i}}, {{end}}{{$field}}{{end}}</p>{{end}}
+  </div>
+  {{else}}
+  <form action="/prio/ticket" method="post" data-prio-ticket-action="transition">
+    {{template "prio-ticket-params" $.Panel.Params}}
+    <input type="hidden" name="key" value="{{$.Panel.Row.Key}}">
+    <input type="hidden" name="action" value="transition">
+    <input type="hidden" name="transition" value="{{.ID}}">
+    <button class="btn" data-variant="outline" type="submit" id="prio-save-transition-{{.ID}}">{{.Target}}</button>
+  </form>
+  {{end}}
+{{end}}
+{{end}}

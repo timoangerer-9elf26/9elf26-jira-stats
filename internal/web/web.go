@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/auth"
+	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/version"
 )
@@ -29,7 +31,7 @@ const displayTimeZone = "Europe/Berlin"
 //go:embed templates/*.html
 var templatesFS embed.FS
 
-//go:embed assets/output.css assets/htmx.min.js assets/sortable.min.js assets/board-drag.js assets/card-control.js assets/favicon.svg assets/avatars/*.svg
+//go:embed assets/output.css assets/htmx.min.js assets/sortable.min.js assets/board-drag.js assets/card-control.js assets/prio-agenda.js assets/favicon.svg assets/avatars/*.svg
 var assetsFS embed.FS
 
 // Rollups is the read side the web layer depends on: rollup queries over the
@@ -79,6 +81,13 @@ type Rollups interface {
 	// projection (any sprint, any status), key-ordered. It is deliberately the one
 	// read not scoped to the active sprint.
 	PrioIssues() ([]store.PrioIssue, error)
+	IssueChangesSince(since time.Time) (map[string][]jira.ChangelogEntry, error)
+	LatestIssueStatusChanges() (map[string]time.Time, error)
+	IssueDetail(key string) (store.IssueDetail, bool, error)
+	LastPrioMeeting() (store.PrioMeeting, error)
+	CompletePrioMeeting(window int64, endedAt time.Time, accountID string) error
+	RecordPrioMeetingChange(store.PrioMeetingChange) error
+	PrioMeetingChanges(window int64) ([]store.PrioMeetingChange, error)
 	// ProjectMembers lists the people who may be assigned work on the project
 	// (CONTEXT.md → Project member), display-name ordered. It is the assign
 	// popover's candidate list — read from the projection like everything else, so
@@ -176,20 +185,24 @@ type Server struct {
 	estimator       Estimator
 	transitioner    Transitioner
 	prioritizer     Prioritizer
+	prioRefresher   prioIssueRefresher
 	assigner        Assigner
 	templates       *template.Template
 	mux             *http.ServeMux
 	now             func() time.Time
 	loc             *time.Location
+	prioLocation    *time.Location
 	velocitySprints int
 	jiraBaseURL     string
+	jiraBoardID     string
 	// version is the build identity reported by GET /version and the nav marker
 	// (docs/adr/0006). It defaults to the stamped internal/version.Version and is
 	// overridable via WithVersion so tests can assert an injected value.
-	version string
-	// auth gates every route behind the shared team login (#122). Nil means
-	// auth is disabled and the middleware is a pass-through.
-	auth *authConfig
+	version          string
+	auth             *auth.Service
+	fakeJira         jira.Client
+	prioFiltersCache prioCache[string, []jira.PlanningPreset]
+	prioKeysCache    prioSearchCache
 }
 
 // Option configures a Server at construction.
@@ -219,6 +232,11 @@ func WithLocation(loc *time.Location) Option {
 // without a link rather than a broken href.
 func WithJiraBaseURL(base string) Option {
 	return func(s *Server) { s.jiraBaseURL = strings.TrimRight(base, "/") }
+}
+
+// WithJiraBoardID identifies the Jira board backing the local projection.
+func WithJiraBoardID(id string) Option {
+	return func(s *Server) { s.jiraBoardID = id }
 }
 
 // WithResyncer wires the sync engine's full-resync capability into the server,
@@ -263,13 +281,14 @@ func WithAssigner(a Assigner) Option {
 	return func(s *Server) { s.assigner = a }
 }
 
-// WithAuth gates the server behind the shared team login (#122), enabling the
-// /login form and session middleware for the given shared credential. Left
-// unset, auth is disabled and every route is served unauthenticated (the
-// local-dev / AUTH_DISABLED case); the caller (run() in main) is responsible
-// for refusing to start a public deployment without it.
-func WithAuth(email, password string) Option {
-	return func(s *Server) { s.auth = newAuthConfig(email, password) }
+// WithOAuth gates protected routes behind Atlassian sign-in.
+func WithOAuth(oauth *auth.Service) Option {
+	return func(s *Server) { s.auth = oauth }
+}
+
+// WithFakeJira supplies the request-scoped Jira client in local fake mode.
+func WithFakeJira(client jira.Client) Option {
+	return func(s *Server) { s.fakeJira = client }
 }
 
 // WithVersion overrides the build identity reported by GET /version and shown
@@ -307,6 +326,7 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 		mux:             http.NewServeMux(),
 		now:             time.Now,
 		loc:             loc,
+		prioLocation:    loc,
 		velocitySprints: defaultVelocitySprints,
 		version:         version.Version,
 	}
@@ -315,7 +335,7 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 	}
 	// Templates are parsed after s is constructed because templateFuncs is now a
 	// method: its authEnabled helper closes over s and reads s.auth at render
-	// time (so the nav shows the logout control only when the shared login is
+	// time (so the nav shows the logout control only when OAuth is
 	// active). Parse order relative to the options does not matter.
 	tmpl, err := template.New("").Funcs(s.templateFuncs()).ParseFS(templatesFS, "templates/*.html")
 	if err != nil {
@@ -336,6 +356,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /prio", s.handlePrio)
 	s.mux.HandleFunc("GET /prio/results", s.handlePrioResults)
 	s.mux.HandleFunc("POST /prio/priority", s.handlePrioPriority)
+	s.mux.HandleFunc("POST /prio/ticket", s.handlePrioTicket)
+	s.mux.HandleFunc("GET /prio/meeting/summary", s.handlePrioMeetingSummary)
+	s.mux.HandleFunc("POST /prio/meeting/complete", s.handlePrioMeetingComplete)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
 	s.mux.HandleFunc("GET /sprint", s.handleSprint)
@@ -346,11 +369,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /resync", s.handleResync)
 	s.mux.HandleFunc("GET /resync/status", s.handleResyncStatus)
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(mustSub(assetsFS)))))
-	// Shared-team login (#122). Registered unconditionally; the handlers and the
-	// auth middleware are pass-throughs when auth is disabled (s.auth == nil).
 	s.mux.HandleFunc("GET /login", s.handleLogin)
-	s.mux.HandleFunc("POST /login", s.handleLogin)
-	s.mux.HandleFunc("GET /logout", s.handleLogout)
+	s.mux.HandleFunc("POST /auth/start", s.handleOAuthStart)
+	s.mux.HandleFunc("GET "+auth.CallbackPath, s.handleOAuthCallback)
 	s.mux.HandleFunc("POST /logout", s.handleLogout)
 }
 
@@ -417,7 +438,7 @@ func humanizeAgo(d time.Duration) string {
 
 // templateFuncs exposes helpers the partials need. dict builds a map so a
 // partial can receive several named values (Go templates take a single arg).
-// authEnabled reports whether the shared login is active, letting the nav show
+// authEnabled reports whether Atlassian sign-in is active, letting the nav show
 // the logout control only when there is a session to end.
 func (s *Server) templateFuncs() template.FuncMap {
 	return template.FuncMap{

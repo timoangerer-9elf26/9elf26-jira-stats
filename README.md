@@ -26,25 +26,32 @@ The root path `/` redirects to the **Sprint** view.
 
 ## Architecture in one line
 
-A background loop syncs Jira into SQLite; all views query SQLite only. The
-database is a **pure, rebuildable projection of Jira** — deleting it costs only
-a re-sync, not real data.
+A background loop syncs Jira into SQLite using a service account. Interactive
+Jira edits use the signed-in person’s Atlassian authorization. Full resync
+rebuilds the Jira projection and preserves independent application state,
+including encrypted OAuth grants and server-side sessions.
 
 ## Full resync
 
 Every view carries a **refresh-icon button** (top-right of the nav, tooltip
 "Resync full database") that rebuilds the SQLite projection from Jira on demand:
-it clears the projection and re-runs the full backfill (all issues, complete
-changelog history, sprints, and project members). Use it to heal data gaps or
+it clears the projection and re-runs the full backfill (all issues, ticket
+details, tracked changelog fields, sprints, and project members). Use it to heal data gaps or
 pick up past capture/schema fixes **without shell access** — it supersedes the
 old "stop the server, `rm jira-stats.db`, restart" step.
 
-The rebuild runs in the background: clicking the icon returns immediately, the
-icon spins and the label shows **Resyncing…** while it runs (a full backfill
-takes ~15–30s against live Jira), and the views refresh on their own once it
-completes (the label then shows how fresh the data is). A resync already in progress is a safe no-op, and
-it never overlaps the periodic incremental sync. No confirmation is required —
-the data is fully rebuildable.
+The rebuild runs in the background. The icon spins and the label shows
+**Resyncing…** until the rebuild completes. The views then refresh and the label
+shows the latest successful sync. Repeat clicks during a rebuild have no effect.
+Background incremental sync waits for the rebuild to finish.
+
+After migration 00013, the next automatic sync fills ticket details and
+historical changes for the entire project in place. If Jira is unavailable, the
+existing projection stays readable and sync retries the backfill on the next
+cycle. Incremental sync resumes after the backfill succeeds. The full-resync
+button can rebuild the same data on demand. The shared projection includes Jira
+comments visible without group or role restrictions. Open the ticket in Jira
+for comments with restricted visibility.
 
 ## Configuration
 
@@ -75,9 +82,41 @@ values — is tracked.
 | `LISTEN_ADDR`    | `:8080`              | Address the HTTP server listens on.                                |
 | `DB_PATH`        | `jira-stats.db`      | Path to the SQLite database file.                                  |
 
-If `JIRA_BASE_URL`, `JIRA_EMAIL`, and `JIRA_API_TOKEN` are not all set, the app
-falls back to a built-in **canned fake Jira** so you can run and explore the UI
-locally without live access.
+Live Jira requires all three service-account settings and a complete OAuth
+configuration. Use `AUTH_DISABLED=true` with the canned fake Jira for local
+development. Leave all three service-account settings blank or set
+`JIRA_FAKE=true` to select the fake. `JIRA_FAKE=true` with complete OAuth
+configuration and `AUTH_DISABLED=false` supports an isolated login preview.
+
+### Atlassian sign-in
+
+| Variable | Meaning |
+| --- | --- |
+| `JIRA_OAUTH_CLIENT_ID` | Client ID from the Atlassian developer console. |
+| `JIRA_OAUTH_CLIENT_SECRET` | Client secret from the Atlassian developer console. |
+| `JIRA_OAUTH_REDIRECT_URI` | Exact registered public HTTPS URL ending in `/auth/callback`. |
+| `JIRA_OAUTH_CLOUD_ID` | Cloud ID of the site configured in `JIRA_BASE_URL`. |
+| `JIRA_OAUTH_ALLOWED_ACCOUNT_IDS` | Comma-separated Atlassian account IDs allowed to access the dashboard. |
+| `JIRA_OAUTH_TOKEN_KEY` | Stable 32-byte encryption key in standard base64. Generate with `openssl rand -base64 32`. |
+
+Enable sharing and use resource-level grants in the Atlassian registration.
+Enable the classic Jira scopes `read:jira-work`, `write:jira-work` and
+`read:jira-user`. The app requests those scopes plus `offline_access`, verifies
+the three Jira scopes on the configured site, and requires a refresh token.
+Jira Myself supplies account ID and IANA time zone. The allowlist is checked on
+every authenticated request. See the [deployment runbook](docs/runbooks/deploy.md)
+for runtime prerequisites and the [Atlassian 3LO documentation](https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/).
+
+#### Request context for meeting handlers
+
+Use `web.JiraIdentityFromContext(r.Context())` for `AccountID` and `TimeZone`
+(a `*time.Location` from Jira Myself). Use
+`web.PersonalJiraFromContext(r.Context())` for the request-scoped `jira.Client`.
+Both accessors return an `ok` flag. In local fake mode without sign-in, the
+binary supplies the stable account ID `jira-stats-fake`, the configured display
+time zone, and the same fake Jira client used for sync. Keep the client scoped
+to the request.
+
 
 ## Building the CSS (Tailwind)
 
@@ -110,8 +149,8 @@ CGO_ENABLED=0 go build -o bin/jira-stats ./cmd/jira-stats
 ```
 
 No manual `export` needed: the binary reads `.env` from the working directory on
-startup. Open <http://localhost:8080/>. With no Jira credentials set (blank
-`JIRA_*`), it serves the built-in canned fake dataset instead of live data.
+startup. The example configuration serves the built-in canned fake dataset at
+<http://localhost:8080/>.
 
 ### Release build for arm64 (AWS Graviton / t4g)
 

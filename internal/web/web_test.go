@@ -130,7 +130,8 @@ func TestFaviconIsServedAndLinkedFromEveryView(t *testing.T) {
 		}
 	}
 
-	loginPage := get(t, newAuthApp(t).URL+"/login")
+	loginApp := newAuthApp(t)
+	loginPage := readResponse(t, response(t)(oauthClient(loginApp).Get(loginApp.URL+"/login")), http.StatusOK)
 	if !strings.Contains(loginPage, faviconLink) {
 		t.Fatalf("GET /login: favicon link %q missing from head", faviconLink)
 	}

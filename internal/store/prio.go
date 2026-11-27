@@ -1,8 +1,10 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // PrioIssue is one row of the Prio view's whole-project projection: the fields
@@ -29,7 +31,34 @@ type PrioIssue struct {
 	// resync of its own to join the projection: `parent_key` has been written on
 	// every issue save since migration 00008, so any row synced since then already
 	// carries it; it was simply not selected here (#210).
-	ParentKey string
+	ParentKey  string
+	CreatedAt  time.Time
+	ResolvedAt time.Time // Jira resolutiondate, zero when unresolved
+}
+
+const prioIssueColumns = `
+	key, type, summary, status, COALESCE(priority, ''), COALESCE(labels, ''),
+	COALESCE(parent_key, ''), created_at, resolved_at`
+
+func scanPrioIssue(row interface{ Scan(...any) error }, extra ...any) (PrioIssue, error) {
+	var issue PrioIssue
+	var labels string
+	var created, resolved sql.NullString
+	if err := row.Scan(append([]any{
+		&issue.Key, &issue.Type, &issue.Summary, &issue.Status,
+		&issue.Priority, &labels, &issue.ParentKey, &created, &resolved,
+	}, extra...)...); err != nil {
+		return PrioIssue{}, err
+	}
+	var err error
+	if issue.CreatedAt, err = parseNullableInstant(created); err != nil {
+		return PrioIssue{}, err
+	}
+	if issue.ResolvedAt, err = parseNullableInstant(resolved); err != nil {
+		return PrioIssue{}, err
+	}
+	issue.Labels = strings.Fields(labels)
+	return issue, nil
 }
 
 // PrioIssues returns EVERY issue in the projection as a Prio row, ordered by
@@ -38,10 +67,7 @@ type PrioIssue struct {
 // filters) lives in the web layer, mirroring how the Board filters over
 // ActiveSprintBoard rather than pushing filter logic into the store.
 func (s *Store) PrioIssues() ([]PrioIssue, error) {
-	const query = `
-		SELECT key, type, summary, status, COALESCE(priority, ''), COALESCE(labels, ''), COALESCE(parent_key, '')
-		FROM issue
-		ORDER BY key`
+	const query = `SELECT ` + prioIssueColumns + ` FROM issue ORDER BY key`
 
 	rows, err := s.db.Query(query)
 	if err != nil {
@@ -51,12 +77,10 @@ func (s *Store) PrioIssues() ([]PrioIssue, error) {
 
 	var issues []PrioIssue
 	for rows.Next() {
-		var issue PrioIssue
-		var labels string
-		if err := rows.Scan(&issue.Key, &issue.Type, &issue.Summary, &issue.Status, &issue.Priority, &labels, &issue.ParentKey); err != nil {
+		issue, err := scanPrioIssue(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan prio issue: %w", err)
 		}
-		issue.Labels = strings.Fields(labels)
 		issues = append(issues, issue)
 	}
 	if err := rows.Err(); err != nil {

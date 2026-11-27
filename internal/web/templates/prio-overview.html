@@ -1,0 +1,93 @@
+{{define "prio-overview"}}
+<section class="app-surface mt-3 flex flex-wrap items-center justify-between gap-3 p-3" data-testid="prio-filters" aria-label="Ticketfilter">
+  <div class="flex flex-wrap gap-1">
+    <a class="btn" data-variant="{{if eq .Preset "10519"}}secondary{{else}}outline{{end}}" href="{{.RecentHref}}" {{if eq .Preset "10519"}}aria-current="true"{{end}}>Seit letztem Prio-Meeting</a>
+    <a class="btn" data-variant="{{if eq .Preset "all"}}secondary{{else}}outline{{end}}" href="{{.AllHref}}" {{if eq .Preset "all"}}aria-current="true"{{end}}>Alle Tickets</a>
+    {{range .PresetOptions}}
+    <a class="btn" data-variant="{{if .Active}}secondary{{else}}outline{{end}}" href="{{.Href}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>
+    {{end}}
+  </div>
+  <div class="flex flex-wrap items-center gap-1">
+    {{range .TechnicalOptions}}
+    <a class="btn" data-variant="{{if .Active}}secondary{{else}}outline{{end}}" href="{{.Href}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>
+    {{end}}
+    <a class="btn" data-variant="{{if .ParentOnly}}secondary{{else}}outline{{end}}" href="{{.ParentHref}}"{{if .ParentOnly}} aria-current="true"{{end}}>Nur ohne Parent</a>
+  </div>
+</section>
+{{if .PresetError}}
+<div class="app-surface mt-3 flex flex-wrap items-center gap-3 p-3" role="status">
+  <p class="text-sm">{{.PresetError}}{{if eq .Preset "all"}} Die Ansicht zeigt den letzten lokalen Stand.{{end}}</p>
+  {{if ne .Preset "all"}}<a class="btn" data-variant="outline" href="{{.AllHref}}">Alle Tickets · lokaler Stand</a>{{end}}
+</div>
+{{end}}
+<div class="my-3 flex flex-wrap items-center justify-between gap-2">
+  <p class="text-sm text-muted-foreground">{{.OverviewCount}} von {{.IssueCount}} Tickets · DCAI{{if .Missing}} · {{len .Missing}} ausstehend{{end}}</p>
+  <div class="flex flex-wrap items-center gap-2">
+    <label class="label" for="prio-overview-sort">Sortieren nach</label>
+    <select id="prio-overview-sort" class="select pr-8" data-prio-sort>
+      {{range .SortOptions}}<option value="{{.Href}}" {{if .Active}}selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    {{if .JiraSearchHref}}<a class="btn" data-variant="outline" href="{{.JiraSearchHref}}" target="_blank" rel="noopener">Jira-Suche öffnen ↗</a>{{end}}
+    <a class="btn" data-variant="outline" href="{{.NextHref}}" data-prio-next>Zur Besprechung →</a>
+  </div>
+</div>
+{{if .OverviewCount}}
+<div data-testid="prio" class="app-surface app-scroll overflow-x-auto [contain:paint]" role="region" aria-label="Prioritätenübersicht" tabindex="0" data-prio-scroll="overview">
+  <table class="w-full min-w-[52rem] border-collapse text-left text-sm">
+    <thead>
+      <tr class="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+        <th scope="col" class="p-3">Typ</th>
+        <th scope="col" class="p-3">Ticket</th>
+        <th scope="col" class="p-3">Priorität</th>
+        <th scope="col" class="p-3">Status</th>
+        <th scope="col" class="p-3">Labels</th>
+        <th scope="col" class="p-3">Seit Stichtag</th>
+        <th scope="col" class="p-3"><span class="sr-only">Jira</span></th>
+      </tr>
+    </thead>
+    {{range .Groups}}{{if .Rows}}
+    <tbody data-prio-group="{{.ID}}">
+      <tr><th scope="rowgroup" colspan="7" class="border-b border-border bg-muted px-3 py-2">{{.Label}} <span class="badge" data-variant="secondary">{{len .Rows}}</span></th></tr>
+      {{range .Rows}}
+      <tr class="border-b border-border last:border-0{{if .Edited}} pri-row--edited{{end}}" data-testid="prio-row" data-key="{{.Key}}"{{if .Edited}} data-edited="true"{{end}}>
+        <td class="p-3">{{template "type-badge" (dict "Type" .Type "Testid" (printf "prio:%s:type" .Key))}}</td>
+        <td class="p-3">
+          <a href="{{.SelectHref}}" class="font-medium hover:underline" data-prio-ticket="{{.Key}}">
+            <span class="mr-1 font-mono text-xs text-muted-foreground">{{.Key}}</span> {{.Summary}}
+          </a>
+        </td>
+        <td class="p-3">{{template "priority-cell" .}}</td>
+        <td class="p-3">{{.Status}}</td>
+        <td class="p-3">{{template "labels-cell" .}}</td>
+        <td class="p-3">{{template "prio-markers" .Markers}}</td>
+        <td class="p-3">{{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener" aria-label="{{.Key}} in Jira öffnen" class="btn" data-variant="ghost">↗</a>{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+    {{end}}{{end}}
+  </table>
+</div>
+{{else if not (or .IssueCount .Missing .JiraOrder)}}
+<p data-testid="prio-empty" class="app-surface p-6 text-sm text-muted-foreground">Noch keine Tickets synchronisiert.</p>
+{{else if not (or .Missing .PresetError)}}
+<p data-testid="prio-no-match" class="app-surface p-6 text-sm text-muted-foreground">Keine Tickets für diese Auswahl.</p>
+{{end}}
+{{if .Missing}}
+<section class="app-surface mt-3 p-3" aria-label="Ausstehende Tickets">
+  <p class="text-sm text-muted-foreground">Diese Jira-Tickets sind noch nicht synchronisiert.</p>
+  <ul class="mt-2 flex flex-wrap gap-1">
+    {{range .Missing}}
+    <li>{{if .Href}}<a class="btn" data-variant="outline" href="{{.Href}}" target="_blank" rel="noopener">{{.Key}} ↗</a>{{else}}{{.Key}}{{end}}</li>
+    {{end}}
+  </ul>
+</section>
+{{end}}
+{{with .Selected}}
+<aside class="app-surface fixed inset-y-0 right-0 z-40 w-full overflow-y-auto shadow-lg sm:max-w-[40rem]" id="prio-drawer" aria-label="Ticketdetails" data-prio-scroll="drawer">
+  <div class="flex justify-end border-b border-border px-4 py-2">
+    <a class="btn" data-variant="ghost" href="{{$.CloseHref}}" data-prio-close>Panel schließen</a>
+  </div>
+  {{template "prio-ticket-panel" .}}
+</aside>
+{{end}}
+{{end}}

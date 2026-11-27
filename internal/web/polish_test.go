@@ -141,6 +141,27 @@ func (failingRollups) ActiveSprintAssignees() ([]store.SprintAssignee, error) {
 func (failingRollups) PrioIssues() ([]store.PrioIssue, error) {
 	return nil, errBoom
 }
+func (failingRollups) IssueChangesSince(_ time.Time) (map[string][]jira.ChangelogEntry, error) {
+	return nil, errBoom
+}
+func (failingRollups) LatestIssueStatusChanges() (map[string]time.Time, error) {
+	return nil, errBoom
+}
+func (failingRollups) IssueDetail(_ string) (store.IssueDetail, bool, error) {
+	return store.IssueDetail{}, false, errBoom
+}
+func (failingRollups) LastPrioMeeting() (store.PrioMeeting, error) {
+	return store.PrioMeeting{}, errBoom
+}
+func (failingRollups) CompletePrioMeeting(_ int64, _ time.Time, _ string) error {
+	return errBoom
+}
+func (failingRollups) RecordPrioMeetingChange(store.PrioMeetingChange) error {
+	return errBoom
+}
+func (failingRollups) PrioMeetingChanges(_ int64) ([]store.PrioMeetingChange, error) {
+	return nil, errBoom
+}
 func (failingRollups) ProjectMembers() ([]store.ProjectMember, error) {
 	return nil, errBoom
 }

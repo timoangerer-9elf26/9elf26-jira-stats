@@ -1,12 +1,14 @@
 package web
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
+	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/sync"
 )
 
 // handlePrioPriority is the Prio view's priority edit (#212): POST /prio/priority
@@ -29,11 +31,24 @@ func (s *Server) handlePrioPriority(w http.ResponseWriter, r *http.Request) {
 	edit := prioEdit{Key: key}
 	if s.prioritizer == nil {
 		edit.Error = writeError
-	} else if err := s.prioritizer.SetPriority(r.Context(), key, priority); err != nil {
-		log.Printf("web: prio priority write %s=%q failed: %v", key, priority, err)
-		edit.Error = writeError
+	} else {
+		err := s.prioritizer.SetPriority(r.Context(), key, priority)
+		if err != nil {
+			log.Printf("web: prio priority write %s=%q: %v", key, priority, err)
+			edit.Error = writeError
+		}
+		if err == nil || errors.Is(err, sync.ErrWriteLanded) {
+			s.notePrioWrite(r.Context(), key, prioMutationLabel("priority", jira.Issue{Priority: priority}))
+			if err != nil {
+				edit.Error = "Saved in Jira. The local projection is waiting for sync."
+			}
+		}
 	}
-	s.renderPrioWith(w, prioPriorityFilters(r.Form), "prio-panel", edit)
+	q := prioPriorityFilters(r.Form)
+	if len(q) == 0 {
+		q.Set("legacy", "1")
+	}
+	s.renderPrioWith(w, r.Context(), q, "prio-panel", edit)
 }
 
 // prioPriorityFilters is the filter query the panel re-renders with: the form

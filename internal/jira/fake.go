@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"sync"
 	"time"
 )
 
@@ -21,6 +23,7 @@ var cannedMembersJSON []byte
 // reusable test double for the whole pipeline: sync it into a store and drive
 // the real handlers against the result.
 type FakeClient struct {
+	mu sync.Mutex
 	// Issues is returned by FetchIssues (the backfill set).
 	Issues []Issue
 	// Updated is returned by FetchIssuesUpdatedSince (the incremental set); a
@@ -50,7 +53,8 @@ type FakeClient struct {
 	// the live DCAI workflow (DCAITransitions), so the fake carries the same
 	// ambiguity the real one does — including the transition labelled "Done"
 	// that lands in Ready for release, matching no Board column by name.
-	Transitions []Transition
+	Transitions      []Transition
+	TransitionFields map[string]map[string]EditField
 	// TransitionCalls records every performed transition, so a test can assert
 	// WHICH transition a status write chose (docs/adr/0010).
 	TransitionCalls []TransitionCall
@@ -84,20 +88,24 @@ func NewFakeClient() *FakeClient {
 
 // FetchIssues returns the canned issues (or the configured error).
 func (c *FakeClient) FetchIssues(ctx context.Context) ([]Issue, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.Err != nil {
 		return nil, c.Err
 	}
-	return c.Issues, nil
+	return slices.Clone(c.Issues), nil
 }
 
 // FetchIssuesUpdatedSince records the bound and returns the configured Updated
 // set (or the configured error).
 func (c *FakeClient) FetchIssuesUpdatedSince(ctx context.Context, since time.Time) ([]Issue, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.Err != nil {
 		return nil, c.Err
 	}
 	c.SinceCalls = append(c.SinceCalls, since)
-	return c.Updated, nil
+	return slices.Clone(c.Updated), nil
 }
 
 // FetchSprints returns the configured sprint entities (or the configured error).
@@ -124,6 +132,8 @@ func (c *FakeClient) FetchProjectMembers(ctx context.Context) ([]ProjectMember, 
 // edit's post-write reconciliation read returns the authoritative value in fake
 // mode, exactly as it would against live Jira.
 func (c *FakeClient) FetchIssue(ctx context.Context, key string) (Issue, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.Err != nil {
 		return Issue{}, c.Err
 	}
@@ -141,6 +151,8 @@ func (c *FakeClient) FetchIssue(ctx context.Context, key string) (Issue, error) 
 // the fake stores that label directly (unlike live Jira's single-select), so the
 // write is a straight field set on the matching issue.
 func (c *FakeClient) UpdateIssueSize(ctx context.Context, key, size string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.WriteErr != nil {
 		return c.WriteErr
 	}
@@ -163,6 +175,8 @@ func (c *FakeClient) UpdateIssueSize(ctx context.Context, key, size string) erro
 // and the smoke suite (#212). Like live Jira it accepts exactly the five level
 // names (jira.Priorities) and nothing else — there is no "clear priority".
 func (c *FakeClient) UpdateIssuePriority(ctx context.Context, key, priority string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.WriteErr != nil {
 		return c.WriteErr
 	}
@@ -190,10 +204,9 @@ func (c *FakeClient) UpdateIssuePriority(ctx context.Context, key, priority stri
 // alone (docs/adr/0012 — "if agents start owning tickets, drop the filter"), and
 // live Jira would assign one happily. A fake that refused would be stricter than
 // production, which is the one direction a fake must never be.
-//
-// An issue stores its assignee as a display name and an avatar URL, so the
-// resolved user's are what land on it.
 func (c *FakeClient) UpdateIssueAssignee(ctx context.Context, key, accountID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.WriteErr != nil {
 		return c.WriteErr
 	}
@@ -213,6 +226,7 @@ func (c *FakeClient) UpdateIssueAssignee(ctx context.Context, key, accountID str
 	for i := range c.Issues {
 		if c.Issues[i].Key == key {
 			c.Issues[i].Assignee = assignee.DisplayName
+			c.Issues[i].AssigneeAccountID = assignee.AccountID
 			c.Issues[i].AssigneeAvatarURL = assignee.AvatarURL
 			return nil
 		}
@@ -240,6 +254,12 @@ func (c *FakeClient) FetchTransitions(ctx context.Context, key string) ([]Transi
 // reconciliation read) returns the moved issue. An unknown transition id is an
 // error, as it is in Jira. WriteErr injects a failed write.
 func (c *FakeClient) TransitionIssue(ctx context.Context, key, transitionID string) error {
+	return c.transitionIssue(ctx, key, transitionID, nil)
+}
+
+func (c *FakeClient) transitionIssue(ctx context.Context, key, transitionID string, author *Person) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.WriteErr != nil {
 		return c.WriteErr
 	}
@@ -259,6 +279,9 @@ func (c *FakeClient) TransitionIssue(ctx context.Context, key, transitionID stri
 	}
 	for i := range c.Issues {
 		if c.Issues[i].Key == key {
+			if author != nil {
+				c.recordPanelChange(&c.Issues[i], "status", c.Issues[i].Status, target.ToStatusName, *author)
+			}
 			c.Issues[i].Status = target.ToStatusName
 			c.Issues[i].StatusCategory = target.ToStatusCategory
 			c.TransitionCalls = append(c.TransitionCalls, TransitionCall{Key: key, TransitionID: transitionID})

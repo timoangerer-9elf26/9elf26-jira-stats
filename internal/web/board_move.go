@@ -1,12 +1,14 @@
 package web
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
+	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/sync"
 )
 
 // boardMoveError is the generic inline message a failed drop shows. The
@@ -123,6 +125,13 @@ func (s *Server) handleBoardMove(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := s.transitioner.SetStatus(r.Context(), key, statusID); err != nil {
 		log.Printf("web: board move %s→%q failed: %v", key, status, err)
+		if errors.Is(err, sync.ErrWriteLanded) {
+			w.Header().Set(boardMoveAppliedHeader, boardMoveApplied)
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("Moved in Jira. The local board is waiting for sync."))
+			return
+		}
 		boardMoveFailed(w)
 		return
 	}

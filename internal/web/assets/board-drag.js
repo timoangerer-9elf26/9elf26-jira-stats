@@ -57,14 +57,14 @@
     if (old) old.remove();
   }
 
-  function showError(card, message) {
+  function showMessage(card, message, pending) {
     clearError(card);
     var key = card.getAttribute("data-key") || "";
     var span = document.createElement("span");
     span.className = "bd-error";
     span.setAttribute("data-move-error", "");
-    span.setAttribute("data-testid", "card:" + key + ":move-error");
-    span.setAttribute("role", "alert");
+    span.setAttribute("data-testid", "card:" + key + (pending ? ":move-status" : ":move-error"));
+    span.setAttribute("role", pending ? "status" : "alert");
     // The card is a link to Jira and a drag source; its error message is
     // neither. The same marker every card control uses buys both opt-outs, so
     // this element does not hand-roll its own click handler — card-control.js
@@ -72,6 +72,14 @@
     // filter below reads the same attribute.
     span.setAttribute("data-card-control", "");
     span.textContent = message;
+    if (card.href) {
+      var open = document.createElement("button");
+      open.type = "button";
+      open.setAttribute("data-open-card-in-jira", card.href);
+      open.style.textDecoration = "underline";
+      open.textContent = "Open in Jira";
+      span.append(" ", open);
+    }
     card.appendChild(span);
   }
 
@@ -100,7 +108,10 @@
     fetch("/board/move", {
       method: "POST",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "HX-Current-URL": window.location.href,
+      },
       body: body.toString(),
     })
       .then(function (res) {
@@ -116,10 +127,19 @@
           window.location.assign(res.url);
           throw new Error("session expired");
         }
+        if (applied && res.status === 202) {
+          return res.text().then(function (message) {
+            card.classList.remove("bd-pending");
+            card.removeAttribute("data-move-pending");
+            showMessage(card, message, true);
+            return null;
+          });
+        }
         if (!res.ok) throw new Error("move failed");
         return res.text();
       })
       .then(function (html) {
+        if (html === null) return;
         var target = document.getElementById(PANEL_ID);
         if (!target) return;
         target.innerHTML = html;
@@ -146,7 +166,7 @@
         fromList.insertBefore(card, sibling);
         // Always the generic message: the technical cause is logged server-side
         // (or is a browser-level fetch error), and neither is the user's problem.
-        showError(card, GENERIC_ERROR);
+        showMessage(card, GENERIC_ERROR, false);
       });
   }
 

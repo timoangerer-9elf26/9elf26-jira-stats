@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="de">
+{{template "page-head" "Prio — 9elf26 Jira Stats"}}
+<body class="min-h-screen">
+  <main class="app-main">
+    {{template "prio-priority-style"}}
+    <div id="prio-panel" hx-history-elt>{{template "prio-agenda" .}}</div>
+  </main>
+  <script src="/static/prio-agenda.js" defer></script>
+</body>
+</html>
+
+{{define "prio-agenda"}}
+  {{template "nav" "prio"}}
+  <div hx-boost="true" hx-target="#prio-panel" hx-swap="innerHTML show:none"
+       hx-sync="#prio-panel:drop" hx-history="false" data-prio-agenda
+       data-step="{{.Step}}" data-ticket="{{.SelectedKey}}" data-window="{{.Meeting.ID}}">
+  {{range .Params}}<input type="hidden" data-filterparam name="{{.Name}}" value="{{.Value}}">{{end}}
+  <header class="my-3 flex flex-wrap items-end justify-between gap-3">
+    <div>
+      <h1 class="text-xl font-bold">Prio-Meeting</h1>
+      <p class="text-sm text-muted-foreground">DCAI</p>
+    </div>
+    <div class="flex flex-wrap items-end gap-2">
+      <form action="/prio" method="get" class="flex flex-wrap items-end gap-2">
+        {{range .CutoffParams}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+        <div>
+          <label for="prio-cutoff" class="label">Stichtag · Europe/Berlin</label>
+          <input id="prio-cutoff" class="input" type="datetime-local" name="cutoff" value="{{.CutoffInput}}" required>
+        </div>
+        <button class="btn" data-variant="outline" type="submit">Übernehmen</button>
+      </form>
+      <div class="text-sm text-muted-foreground">
+        <p>{{.CutoffSource}} · <time datetime="{{.Cutoff.Format "2006-01-02T15:04:05Z07:00"}}">{{.CutoffLabel}}</time></p>
+        {{if .InvalidCutoff}}<p role="alert">Der gewählte Stichtag ist ungültig.</p>{{end}}
+        <a class="text-xs underline" href="{{.ShareCutoffHref}}">Stichtag im Link speichern</a>
+      </div>
+      {{if .MeetingEnd}}
+      <time class="text-sm text-muted-foreground" datetime="{{.MeetingEnd}}" title="Abgeschlossen von {{.Meeting.AccountID}}">{{.MeetingLabel}}</time>
+      {{end}}
+      {{if .CanCreateEpic}}<button class="btn" data-variant="outline" type="button" data-prio-epic-open>Epic anlegen</button>{{end}}
+      <button class="btn" type="button" data-prio-summary>Meeting abschließen</button>
+    </div>
+  </header>
+  {{if .CanCreateEpic}}{{template "prio-epic-dialog" .}}{{end}}
+  {{if not .Selected}}{{template "prio-ticket-result" .TicketResult}}{{end}}
+  <dialog id="prio-summary" class="app-surface m-auto w-full max-w-lg p-5 backdrop:bg-black/40" aria-labelledby="prio-summary-title">
+    <h2 id="prio-summary-title" class="text-lg font-bold">Meeting abschließen</h2>
+    <p class="mt-2 font-medium">Zusammenfassung</p>
+    <p class="mt-2 text-sm" data-prio-summary-count></p>
+    <div id="prio-summary-changes">{{template "prio-summary-changes" .MeetingChanges}}</div>
+    <p class="my-3 text-sm text-muted-foreground">Der Abschlusszeitpunkt wird zum neuen Stichtag.</p>
+    <div class="flex flex-wrap justify-end gap-2">
+      <form method="dialog" hx-boost="false"><button class="btn" data-variant="outline">Abbrechen</button></form>
+      {{if .CanComplete}}
+      <form method="post" action="/prio/meeting/complete" hx-boost="false">
+        <input type="hidden" name="meeting-window" value="{{.Meeting.ID}}">
+        <button class="btn">Abschließen und Stichtag setzen</button>
+      </form>
+      {{else}}<p class="text-sm">Jira-Anmeldung erforderlich.</p>{{end}}
+    </div>
+  </dialog>
+  <nav aria-label="Meeting-Agenda" class="app-surface app-scroll flex gap-2 overflow-x-auto p-2" data-prio-scroll="agenda">
+    {{range $number, $step := .Steps}}
+    {{if or .Active .Total (ne .ID "epic-check")}}
+    <a class="grid min-w-max flex-1 gap-1 rounded-md px-3 py-2 text-sm font-semibold hover:bg-muted{{if .Active}} bg-accent text-accent-foreground{{end}}" href="{{.Href}}" data-prio-step="{{.ID}}" data-prio-keys="{{if eq .ID "overview"}}overview{{else}}{{range .Rows}}{{.Key}} {{end}}{{end}}"{{if .Active}} aria-current="step"{{end}}><span class="flex items-center justify-between gap-3"><span>{{$number}} · {{.Label}}</span><small class="tabular-nums"><span data-prio-progress>0</span>/{{.Total}}</small></span>
+      <progress class="h-0.5 w-full appearance-none overflow-hidden rounded bg-border align-top [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary" value="0" max="{{if .Total}}{{.Total}}{{else}}1{{end}}" aria-hidden="true"></progress></a>
+    {{end}}
+    {{end}}
+  </nav>
+  {{if .Overview}}
+  {{template "prio-overview" .}}
+  {{else}}
+  {{template "prio-agenda-focus" .}}
+  {{end}}
+  </div>
+{{end}}
+
+{{define "prio-agenda-focus"}}
+<div class="mt-3 grid items-start gap-4 lg:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
+  <section class="app-surface overflow-hidden" aria-labelledby="prio-queue-title">
+    <header class="border-b border-border p-4">
+      <h2 id="prio-queue-title" class="font-bold">{{.Current.Heading}}</h2>
+      <p class="text-sm text-muted-foreground"><span data-prio-queue-progress>0</span> von {{.Current.Total}} besprochen</p>
+      {{if eq .Step "backlog"}}
+      <a class="btn mt-2" data-variant="outline" href="{{.BacklogSortHref}}">{{if .OldestFirst}}Nach Priorität sortieren{{else}}Älteste zuerst{{end}}</a>
+      {{end}}
+    </header>
+    {{if .Current.Rows}}
+    <ul class="app-scroll max-h-[65vh] overflow-y-auto p-2" data-prio-scroll="queue">
+      {{range .Current.Rows}}
+      <li class="rounded-md border p-2 text-sm{{if eq .Key $.SelectedKey}} border-primary bg-accent{{else}} border-transparent{{end}}">
+        <a class="block rounded-sm hover:underline" href="{{.SelectHref}}" data-prio-queue-key="{{.Key}}" {{if eq .Key $.SelectedKey}}aria-current="true"{{end}}>
+          <span class="font-mono text-xs text-muted-foreground">{{.Key}}</span>
+          {{template "type-badge" (dict "Type" .Type "Testid" "")}}
+          <strong class="mt-1 block">{{.Summary}}</strong>
+        </a>
+        <p class="my-1 text-xs text-muted-foreground">{{.Status}} · {{if .Priority}}{{.Priority}}{{else}}—{{end}}{{if and (eq $.Step "backlog") .CreatedLabel}} · Erstellt {{.CreatedLabel}}{{end}}</p>
+        {{template "prio-markers" .Markers}}
+        {{if .Href}}<a class="text-xs underline" href="{{.Href}}" target="_blank" rel="noopener" aria-label="{{.Key}} in Jira öffnen">Jira ↗</a>{{end}}
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="p-4 text-sm text-muted-foreground">{{if eq .Step "epic-check"}}Keine Epics zur Prüfung.{{else}}Keine Tickets in diesem Schritt.{{end}}</p>
+    {{end}}
+  </section>
+  <section class="app-surface overflow-hidden" aria-label="Ticketdetails">
+    {{with .Selected}}{{template "prio-ticket-panel" .}}{{else}}
+    <p class="p-4 text-sm text-muted-foreground">Über die Agenda kannst du zu einem anderen Schritt wechseln.</p>
+    {{end}}
+    <footer class="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted p-3">
+      <span class="mr-auto text-xs text-muted-foreground"><kbd>k</kbd> zurück · <kbd>j</kbd> weiter</span>
+      {{if .PrevHref}}<a class="btn" data-variant="outline" href="{{.PrevHref}}" data-prio-prev>← Zurück</a>{{end}}
+      {{if .NextHref}}<a class="btn" href="{{.NextHref}}" data-prio-next>Weiter →</a>
+      {{else}}<button class="btn" type="button" data-prio-next data-prio-summary>Zum Abschluss</button>{{end}}
+    </footer>
+  </section>
+</div>
+{{end}}
+
+{{define "prio-markers"}}
+{{if .}}
+<span class="inline-flex flex-wrap gap-1">
+  {{range .}}
+  <span class="badge {{if eq .Kind "new"}}bg-sky-100 text-sky-800{{else if eq .Kind "status"}}bg-amber-100 text-amber-900{{else if or (eq .Kind "done") (eq .Kind "resolved")}}bg-emerald-100 text-emerald-900{{else if eq .Kind "raised"}}bg-rose-100 text-rose-800{{else}}bg-muted text-foreground{{end}}" data-prio-marker="{{.Kind}}">{{if eq .Kind "raised"}}↑ {{else if eq .Kind "lowered"}}↓ {{end}}{{.Label}}</span>
+  {{end}}
+</span>
+{{end}}
+{{end}}
+
+{{define "prio-summary-changes"}}
+<p class="mt-2 text-sm">{{len .}} {{if eq (len .) 1}}Änderung{{else}}Änderungen{{end}}</p>
+{{if .}}
+<ul class="mt-2 max-h-[40vh] list-inside list-disc space-y-1 overflow-y-auto text-sm">
+  {{range .}}<li>{{.Label}} <span class="text-muted-foreground">· {{.AccountID}} · <time datetime="{{.Instant}}">{{.TimeLabel}}</time></span></li>{{end}}
+</ul>
+{{end}}
+{{end}}

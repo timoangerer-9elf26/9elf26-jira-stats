@@ -25,7 +25,7 @@ const (
 // issueFields is the `fields` query the issue reads ask Jira for — the single
 // source of truth for both the JQL search and the single-issue re-read, so the
 // two can never drift (a field missing here decodes as empty everywhere).
-const issueFields = "summary,issuetype,status,assignee,created,creator,parent,priority,labels," +
+const issueFields = "summary,issuetype,status,assignee,created,creator,parent,priority,labels,description,comment,issuelinks,resolutiondate," +
 	sizeFieldID + "," + sprintFieldID + "," + epicColorFieldID
 
 // searchPageSize is the JQL search page size; changelogPageSize the per-issue
@@ -52,8 +52,9 @@ type Config struct {
 // changelog expansion, and falls back to the paginated per-issue changelog
 // endpoint whenever a search-embedded changelog is truncated.
 type LiveClient struct {
-	cfg  Config
-	http *http.Client
+	cfg    Config
+	http   *http.Client
+	bearer string
 }
 
 // NewLiveClient builds a live client from config.
@@ -61,10 +62,23 @@ func NewLiveClient(cfg Config) *LiveClient {
 	return &LiveClient{cfg: cfg, http: &http.Client{Timeout: 30 * time.Second}}
 }
 
+// NewBearerClient uses a personal access token with the Jira Cloud resource URL.
+func NewBearerClient(cfg Config, bearer string, httpClient *http.Client) *LiveClient {
+	return &LiveClient{cfg: cfg, bearer: bearer, http: httpClient}
+}
+
+func (c *LiveClient) authenticate(req *http.Request) {
+	if c.bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+c.bearer)
+		return
+	}
+	req.SetBasicAuth(c.cfg.Email, c.cfg.APIToken)
+}
+
 // FetchIssues walks the entire project via JQL search (expand=changelog),
-// mapping each issue to the DCAI snapshot shape and collecting its status- and
-// Estimated-Time-change transitions. Issues whose embedded changelog is
-// truncated have their full history fetched from the per-issue endpoint.
+// mapping each issue to the DCAI snapshot and collecting changes to tracked
+// fields. Jira's paginated endpoints supply comments or history beyond the
+// embedded pages.
 func (c *LiveClient) FetchIssues(ctx context.Context) ([]Issue, error) {
 	return c.search(ctx, fmt.Sprintf("project = %q ORDER BY created ASC", c.cfg.ProjectKey))
 }
@@ -288,7 +302,7 @@ func (c *LiveClient) search(ctx context.Context, jql string) ([]Issue, error) {
 // when the embedded one is truncated.
 func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 	histories := dto.Changelog.Histories
-	if dto.Changelog.Total > len(histories) {
+	if dto.Changelog.StartAt != 0 || dto.Changelog.Total > len(histories) {
 		full, err := c.fetchFullChangelog(ctx, dto.Key)
 		if err != nil {
 			return Issue{}, fmt.Errorf("changelog fallback for %s: %w", dto.Key, err)
@@ -311,6 +325,15 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		return Issue{}, fmt.Errorf("created for %s: %w", dto.Key, err)
 	}
 
+	resolvedAt, err := optionalJiraTime(dto.Fields.ResolutionDate)
+	if err != nil {
+		return Issue{}, fmt.Errorf("resolutiondate for %s: %w", dto.Key, err)
+	}
+	comments, err := c.issueComments(ctx, dto.Key, dto.Fields.Comment)
+	if err != nil {
+		return Issue{}, fmt.Errorf("comments for %s: %w", dto.Key, err)
+	}
+
 	iss := Issue{
 		Key:               dto.Key,
 		Type:              dto.Fields.IssueType.Name,
@@ -320,12 +343,17 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		Size:              mapSize(dto.Fields.Size),
 		Sprint:            currentSprint(dto.Fields.Sprint),
 		Assignee:          assigneeName(dto.Fields.Assignee),
+		AssigneeAccountID: person(dto.Fields.Assignee).AccountID,
 		AssigneeAvatarURL: assigneeAvatarURL(dto.Fields.Assignee),
 		ParentKey:         parentKey(dto.Fields.Parent),
 		EpicColor:         dto.Fields.EpicColor,
 		Priority:          priorityName(dto.Fields.Priority),
 		Labels:            dto.Fields.Labels,
 		CreatedAt:         createdAt,
+		ResolvedAt:        resolvedAt,
+		Description:       nonNullJSON(dto.Fields.Description),
+		Comments:          comments,
+		Links:             toIssueLinks(dto.Fields.Links),
 		Creator:           assigneeName(dto.Fields.Creator),
 		Changelog:         entries,
 		SprintChanges:     sprintChanges,
@@ -357,11 +385,17 @@ func (c *LiveClient) fetchFullChangelog(ctx context.Context, key string) ([]hist
 		if err := c.get(ctx, "/rest/api/3/issue/"+url.PathEscape(key)+"/changelog", q, &page); err != nil {
 			return nil, err
 		}
+		if page.StartAt != nil && *page.StartAt != startAt {
+			return nil, fmt.Errorf("expected changelog offset %d, got %d", startAt, *page.StartAt)
+		}
 		histories = append(histories, page.Values...)
 
 		startAt += len(page.Values)
-		if len(page.Values) == 0 || startAt >= page.Total {
+		if startAt >= page.Total {
 			break
+		}
+		if len(page.Values) == 0 {
+			return nil, fmt.Errorf("incomplete changelog at offset %d of %d", startAt, page.Total)
 		}
 	}
 	return histories, nil
@@ -377,7 +411,7 @@ func (c *LiveClient) get(ctx context.Context, path string, q url.Values, out any
 	if err != nil {
 		return err
 	}
-	req.SetBasicAuth(c.cfg.Email, c.cfg.APIToken)
+	c.authenticate(req)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)
@@ -410,9 +444,12 @@ func (c *LiveClient) post(ctx context.Context, path string, body any) error {
 
 // write issues an authenticated request with a JSON body and expects a
 // no-content success (Jira answers 204 both to a successful issue edit and to a
-// performed transition). It is the write counterpart to get; the same basic-auth
-// token is reused.
+// performed transition). It is the write counterpart to get and uses the same credentials.
 func (c *LiveClient) write(ctx context.Context, method, path string, body any) error {
+	return c.writeJSON(ctx, method, path, body, nil)
+}
+
+func (c *LiveClient) writeJSON(ctx context.Context, method, path string, body, result any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -421,7 +458,7 @@ func (c *LiveClient) write(ctx context.Context, method, path string, body any) e
 	if err != nil {
 		return err
 	}
-	req.SetBasicAuth(c.cfg.Email, c.cfg.APIToken)
+	c.authenticate(req)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 
@@ -435,6 +472,9 @@ func (c *LiveClient) write(ctx context.Context, method, path string, body any) e
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("%s %s: status %d: %s", method, path, resp.StatusCode, b)
+	}
+	if result != nil {
+		return json.NewDecoder(resp.Body).Decode(result)
 	}
 	return nil
 }
@@ -453,18 +493,22 @@ type issueDTO struct {
 }
 
 type fieldsDTO struct {
-	Summary   string       `json:"summary"`
-	IssueType issueTypeDTO `json:"issuetype"`
-	Status    statusDTO    `json:"status"`
-	Assignee  *userDTO     `json:"assignee"`
-	Created   string       `json:"created"`           // Jira's immutable creation timestamp
-	Creator   *userDTO     `json:"creator"`           // immutable author (NOT the mutable reporter)
-	Parent    *parentDTO   `json:"parent"`            // parent issue (the Epic for a Task/Bug/Story)
-	Priority  *priorityDTO `json:"priority"`          // standard Jira priority (Highest…Lowest); null only if unset
-	Labels    []string     `json:"labels"`            // standard Jira labels — a bare string array, not objects; [] or absent when unlabelled
-	Size      *selectDTO   `json:"customfield_10040"` // "Estimated Time"
-	Sprint    []sprintDTO  `json:"customfield_10020"` // Sprint
-	EpicColor string       `json:"customfield_10017"` // Epic "Issue color" — a plain string, e.g. "purple" (only on epics; empty/null otherwise)
+	Description    json.RawMessage `json:"description"`
+	Comment        commentPageDTO  `json:"comment"`
+	Links          []issueLinkDTO  `json:"issuelinks"`
+	ResolutionDate string          `json:"resolutiondate"`
+	Summary        string          `json:"summary"`
+	IssueType      issueTypeDTO    `json:"issuetype"`
+	Status         statusDTO       `json:"status"`
+	Assignee       *userDTO        `json:"assignee"`
+	Created        string          `json:"created"`           // Jira's immutable creation timestamp
+	Creator        *userDTO        `json:"creator"`           // immutable author (NOT the mutable reporter)
+	Parent         *parentDTO      `json:"parent"`            // parent issue (the Epic for a Task/Bug/Story)
+	Priority       *priorityDTO    `json:"priority"`          // standard Jira priority (Highest…Lowest); null only if unset
+	Labels         []string        `json:"labels"`            // standard Jira labels — a bare string array, not objects; [] or absent when unlabelled
+	Size           *selectDTO      `json:"customfield_10040"` // "Estimated Time"
+	Sprint         []sprintDTO     `json:"customfield_10020"` // Sprint
+	EpicColor      string          `json:"customfield_10017"` // Epic "Issue color" — a plain string, e.g. "purple" (only on epics; empty/null otherwise)
 }
 
 type issueTypeDTO struct {
@@ -508,9 +552,11 @@ type transitionsResponse struct {
 }
 
 type transitionDTO struct {
-	ID   string      `json:"id"`
-	Name string      `json:"name"`
-	To   toStatusDTO `json:"to"`
+	ID        string               `json:"id"`
+	Name      string               `json:"name"`
+	To        toStatusDTO          `json:"to"`
+	Fields    map[string]EditField `json:"fields"`
+	HasScreen bool                 `json:"hasScreen"`
 }
 
 type toStatusDTO struct {
@@ -538,14 +584,13 @@ func toTransitions(dtos []transitionDTO) []Transition {
 }
 
 type userDTO struct {
+	AccountID   string        `json:"accountId"`
 	DisplayName string        `json:"displayName"`
 	AvatarUrls  avatarUrlsDTO `json:"avatarUrls"`
 }
 
 // assignableUserDTO is one entry from the assignable-user search. accountType
-// is what separates a person from the automation on the project, and accountId
-// is the id an assignee write targets — neither is carried on the issue's
-// assignee (userDTO), which is only ever displayed.
+// is what separates a person from the automation on the project.
 type assignableUserDTO struct {
 	AccountID   string        `json:"accountId"`
 	AccountType string        `json:"accountType"`
@@ -620,16 +665,19 @@ func toSprint(dto agileSprintDTO) (Sprint, error) {
 // changelogDTO is the search-embedded changelog; changelogResponse is the
 // paginated per-issue endpoint. Both carry the same history shape.
 type changelogDTO struct {
+	StartAt   int          `json:"startAt"`
 	Total     int          `json:"total"`
 	Histories []historyDTO `json:"histories"`
 }
 
 type changelogResponse struct {
-	Total  int          `json:"total"`
-	Values []historyDTO `json:"values"`
+	StartAt *int         `json:"startAt"`
+	Total   int          `json:"total"`
+	Values  []historyDTO `json:"values"`
 }
 
 type historyDTO struct {
+	Author  *userDTO  `json:"author"`
 	ID      string    `json:"id"`
 	Created string    `json:"created"`
 	Items   []itemDTO `json:"items"`
@@ -752,10 +800,8 @@ func parentKey(p *parentDTO) string {
 	return p.Key
 }
 
-// toChangelog flattens history entries into the status- and Estimated-Time
-// transitions the store records. A single history may carry both a status and
-// an Estimated-Time item, so each transition's dedup id combines the stable
-// history id with the field key to stay unique yet stable across re-syncs.
+// toChangelog flattens the tracked field changes. A history that changed
+// several fields yields one entry per field, keyed by history id and field.
 func toChangelog(histories []historyDTO) ([]ChangelogEntry, error) {
 	var entries []ChangelogEntry
 	for _, h := range histories {
@@ -778,6 +824,9 @@ func toChangelog(histories []historyDTO) ([]ChangelogEntry, error) {
 				Field:     field,
 				From:      it.From,
 				To:        it.To,
+				FromID:    it.FromID,
+				ToID:      it.ToID,
+				Author:    person(h.Author),
 				Timestamp: ts,
 			})
 		}
@@ -786,11 +835,15 @@ func toChangelog(histories []historyDTO) ([]ChangelogEntry, error) {
 }
 
 // trackedField returns the canonical stored field name for a changelog item we
-// record (status and Estimated Time), and false for everything else.
+// record, and false for everything else.
 func trackedField(it itemDTO) (string, bool) {
 	switch {
-	case it.Field == "status":
+	case it.FieldID == "status" || strings.EqualFold(it.Field, "status"):
 		return "status", true
+	case it.FieldID == "priority" || strings.EqualFold(it.Field, "priority"):
+		return "priority", true
+	case it.FieldID == "resolution" || strings.EqualFold(it.Field, "resolution"):
+		return "resolution", true
 	case it.FieldID == sizeFieldID || it.Field == "Estimated Time":
 		return "Estimated Time", true
 	default:
@@ -799,10 +852,10 @@ func trackedField(it itemDTO) (string, bool) {
 }
 
 func fieldKey(field string) string {
-	if field == "status" {
-		return "status"
+	if field == "Estimated Time" {
+		return "estimated_time"
 	}
-	return "estimated_time"
+	return field
 }
 
 // toSprintChanges flattens the "Sprint" changelog items into per-sprint
@@ -896,15 +949,14 @@ func sortedIDs(m map[int]string) []int {
 	return ids
 }
 
-// parseJiraTime parses Jira's changelog timestamp (e.g.
-// "2026-07-13T09:00:00.000+0200"), falling back to RFC3339.
+// parseJiraTime accepts Jira's compact UTC offset and RFC3339 timestamps.
 func parseJiraTime(s string) (time.Time, error) {
-	if t, err := time.Parse("2006-01-02T15:04:05.000-0700", s); err == nil {
+	if t, err := time.Parse("2006-01-02T15:04:05-0700", s); err == nil {
 		return t, nil
 	}
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("parse changelog timestamp %q: %w", s, err)
+		return time.Time{}, fmt.Errorf("parse Jira timestamp %q: %w", s, err)
 	}
 	return t, nil
 }

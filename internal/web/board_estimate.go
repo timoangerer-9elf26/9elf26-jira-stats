@@ -19,8 +19,7 @@ const writeError = "Couldn't save — try again."
 // and swaps the pill to the authoritative re-read value; on any failure it reverts
 // the pill to the client-sent prior value and renders an inline error on the card,
 // leaving Jira and the projection unchanged (last-write-wins, no locking guard).
-//
-// There is no CSRF token — consistent with POST /resync (single-user, self-hosted).
+
 func (s *Server) handleBoardEstimate(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(r.FormValue("key"))
 	size := r.FormValue("size")
@@ -71,6 +70,7 @@ func (s *Server) renderEstimateControl(w http.ResponseWriter, key, size, errMsg 
 		"Size":    size,
 		"Display": sizeDisplay(size),
 		"Error":   errMsg,
+		"Href":    s.jiraIssueURL(key),
 	}
 	if err := s.templates.ExecuteTemplate(w, "board-estimate", data); err != nil {
 		http.Error(w, "failed to render", http.StatusInternalServerError)
