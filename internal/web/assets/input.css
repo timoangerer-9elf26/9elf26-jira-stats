@@ -1,4 +1,109 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+@import "basecoat-css";
 
-/* Scan the Go templates for utility classes. */
 @source "../templates";
+
+:root {
+  --radius: 0.625rem;
+  --background: #f4f7f7;
+  --foreground: #172936;
+  --card-foreground: var(--foreground);
+  --primary: #12575b;
+  --secondary: #e8eff0;
+  --secondary-foreground: #28434b;
+  --muted: #eaf0f1;
+  --muted-foreground: #4b626d;
+  --accent: #e1eeee;
+  --accent-foreground: #18464a;
+  --border: #d7e2e5;
+  --input: #aebfc6;
+  --ring: #187578;
+  --chart-1: #177c80;
+}
+
+/* Keep keyboard focus visible even on controls with component-specific styles. */
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+@layer components {
+  .app-main {
+    @apply min-w-0 px-3 pb-8 sm:px-6 lg:px-8;
+  }
+
+  .app-nav {
+    @apply grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 border-b border-border bg-background py-2
+           sm:flex sm:flex-wrap sm:gap-4;
+  }
+
+  .app-brand {
+    @apply flex items-center gap-2 whitespace-nowrap text-sm font-semibold tracking-tight;
+  }
+
+  .app-brand img {
+    @apply size-7 shrink-0 rounded-md;
+  }
+
+  .app-nav-links {
+    @apply col-span-2 row-start-2 flex flex-wrap items-center gap-1;
+  }
+
+  .app-nav-links .btn[aria-current="page"] {
+    @apply bg-accent font-semibold text-accent-foreground;
+  }
+
+  .app-nav-actions {
+    @apply col-start-2 row-start-1 flex items-center gap-2 sm:ml-auto;
+  }
+
+  .app-heading {
+    @apply mt-1 space-y-1 pb-2;
+  }
+
+  .app-heading h1 {
+    @apply text-3xl font-semibold tracking-tight sm:text-4xl;
+  }
+
+  .app-heading p {
+    @apply max-w-3xl text-sm text-muted-foreground;
+  }
+
+  .app-scroll {
+    @apply min-w-0;
+    overscroll-behavior-inline: contain;
+  }
+
+  /* Shared surfaces with overlays that must remain visible beyond the card. */
+  .app-surface {
+    @apply rounded-xl border border-border bg-card text-card-foreground shadow-xs;
+  }
+
+  .ticket-card {
+    @apply block rounded-lg border border-border bg-card p-3 text-card-foreground shadow-xs;
+  }
+
+  a.ticket-card {
+    @apply transition-colors hover:border-ring/50 hover:bg-background;
+  }
+
+  .swimlane {
+    @apply w-72 shrink-0 border-border bg-muted;
+  }
+
+  .velocity-track {
+    @apply flex h-44 w-full items-end justify-center overflow-hidden rounded-lg bg-muted;
+    background-image: repeating-linear-gradient(to top, transparent 0 calc(25% - 1px), var(--border) calc(25% - 1px) 25%);
+  }
+}
+
+@media (max-width: 39.999rem), (max-height: 35rem) {
+  /* A wrapped toolbar should scroll with its results on short viewports. */
+  .app-chrome {
+    position: static;
+  }
+}

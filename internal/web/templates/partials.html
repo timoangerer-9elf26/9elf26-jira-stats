@@ -16,12 +16,6 @@
   <title>{{.}}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/output.css">
-  <style>
-    /* Tailwind v4's Preflight gives buttons the default cursor; restore the
-       pointer for every enabled button so all current and future buttons get
-       it without each one opting in. Disabled buttons keep the default. */
-    button:not(:disabled) { cursor: pointer; }
-  </style>
   <script src="/static/htmx.min.js"></script>
   <script src="/static/card-control.js"></script>
 </head>
@@ -34,15 +28,19 @@
      happens. The right side carries the shared full-resync control (present on
      every view). */}}
 {{define "nav"}}
-<nav data-testid="nav" aria-label="Primary" class="flex items-center gap-1 border-b border-slate-200">
-  {{template "nav-link" (dict "Href" "/board" "Label" "Board" "Key" "board" "Active" .)}}
-  {{template "nav-link" (dict "Href" "/prio" "Label" "Prio" "Key" "prio" "Active" .)}}
-  {{template "nav-link" (dict "Href" "/sprint" "Label" "Sprint" "Key" "sprint" "Active" .)}}
-  {{template "nav-link" (dict "Href" "/velocity" "Label" "Velocity" "Key" "velocity" "Active" .)}}
-  {{template "nav-link" (dict "Href" "/daily" "Label" "Daily" "Key" "daily" "Active" .)}}
-  <span class="grow"></span>
-  {{template "resync-control" .}}
-  {{if authEnabled}}{{template "logout-control" .}}{{end}}
+<nav data-testid="nav" aria-label="Primary" class="app-nav">
+  {{template "app-brand"}}
+  <div class="app-nav-links">
+    {{template "nav-link" (dict "Href" "/board" "Label" "Board" "Key" "board" "Active" .)}}
+    {{template "nav-link" (dict "Href" "/prio" "Label" "Prio" "Key" "prio" "Active" .)}}
+    {{template "nav-link" (dict "Href" "/sprint" "Label" "Sprint" "Key" "sprint" "Active" .)}}
+    {{template "nav-link" (dict "Href" "/velocity" "Label" "Velocity" "Key" "velocity" "Active" .)}}
+    {{template "nav-link" (dict "Href" "/daily" "Label" "Daily" "Key" "daily" "Active" .)}}
+  </div>
+  <div class="app-nav-actions">
+    {{template "resync-control" .}}
+    {{if authEnabled}}{{template "logout-control" .}}{{end}}
+  </div>
 </nav>
 {{template "version-marker"}}
 {{end}}
@@ -53,8 +51,7 @@
      link prefetching can't trigger a logout. Takes no data. */}}
 {{define "logout-control"}}
 <form method="post" action="/logout" class="flex items-center">
-  <button type="submit" data-testid="logout-button" style="line-height:1rem"
-          class="inline-flex items-center rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50">
+  <button type="submit" data-testid="logout-button" class="btn" data-size="sm" data-variant="outline">
     Log out
   </button>
 </form>
@@ -139,7 +136,7 @@
         hx-get="/resync/status" hx-trigger="load" hx-swap="innerHTML"></span>
   <form hx-post="/resync" hx-target="#resync-status" hx-swap="innerHTML" hx-disabled-elt="find button">
     <button type="submit" data-testid="resync-button" aria-label="Run a full resync"
-            class="inline-flex items-center rounded-md border border-slate-200 px-3 py-1.5 text-slate-600 transition-colors hover:bg-slate-50">
+            class="btn" data-size="icon-sm" data-variant="outline">
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
@@ -171,21 +168,22 @@
 </span>
 {{end}}
 
-{{/* nav-link is one tab of the shared nav. Takes a dict of Href, Label, Key and
-     the currently-Active key; the active tab gets aria-current and an
-     underlined, emphasized style. */}}
 {{define "nav-link"}}
 <a href="{{.Href}}" data-nav="{{.Key}}"{{if eq .Key .Active}} aria-current="page"{{end}}
-   class="-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors
-          {{if eq .Key .Active}}border-slate-900 text-slate-900{{else}}border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-900{{end}}">{{.Label}}</a>
+   class="btn" data-variant="ghost" data-size="sm">{{.Label}}</a>
 {{end}}
 
-{{/* page-header is the shared title block below the nav. The string argument is
-     the per-view subtitle shown under the constant product title. */}}
+{{define "app-brand"}}
+<span class="app-brand">
+  <img src="/static/favicon.svg" alt="" width="28" height="28">
+  9elf26 Jira Stats
+</span>
+{{end}}
+
 {{define "page-header"}}
-<header class="mt-3">
-  <h1 class="text-xl font-semibold tracking-tight">9elf26 Jira Stats</h1>
-  <p class="mt-1 text-sm text-slate-500">{{.}}</p>
+<header class="app-heading">
+  <h1>{{.Title}}</h1>
+  <p>{{.Description}}</p>
 </header>
 {{end}}
 
@@ -197,7 +195,7 @@
      build reads "dev". The full "tag (sha)" string still lives at GET /version.
      Rendered from inside "nav", so all five views get it. Takes no data. */}}
 {{define "version-marker"}}
-<div class="mt-1 text-right text-xs text-slate-400">
+<div class="mt-1 text-right text-xs text-muted-foreground">
   <span data-testid="version-marker">{{displayVersion}}</span>
 </div>
 {{end}}
@@ -208,10 +206,10 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "page-head" "Something went wrong — 9elf26 Jira Stats"}}
-<body class="min-h-screen bg-slate-50 text-slate-900">
-  <div class="px-6 py-12">
+<body class="min-h-screen">
+  <div class="app-main pt-4">
     {{template "nav" ""}}
-    <div data-testid="app-error" class="mt-8 rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+    <div data-testid="app-error" class="alert mt-8 border-amber-200 bg-amber-50 text-amber-800" role="alert">
       <h1 class="text-base font-semibold">Couldn't load this view</h1>
       <p class="mt-1">A rollup query failed. The dashboard may still be syncing — please try again in a moment.</p>
     </div>
@@ -223,8 +221,8 @@
 {{/* size-chip is a small labelled count badge (one estimate bucket). Takes a
      dict of Label, Count and Testid. */}}
 {{define "size-chip"}}
-<span class="inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">
-  <span class="text-slate-400">{{.Label}}</span>
+<span class="badge" data-variant="secondary">
+  <span class="text-muted-foreground">{{.Label}}</span>
   <span class="tabular-nums text-slate-800" data-testid="{{.Testid}}">{{.Count}}</span>
 </span>
 {{end}}
@@ -234,7 +232,7 @@
      Type and Testid; Bug is rose, Story emerald, Task sky, Epic violet (added
      for the Prio view, #199, where epics appear as rows), any other type slate. */}}
 {{define "type-badge"}}
-<span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold
+<span data-variant="secondary" class="badge
              {{if eq .Type "Bug"}}bg-rose-100 text-rose-700{{else if eq .Type "Story"}}bg-emerald-100 text-emerald-700{{else if eq .Type "Task"}}bg-sky-100 text-sky-700{{else if eq .Type "Epic"}}bg-violet-100 text-violet-700{{else}}bg-slate-100 text-slate-600{{end}}"
       data-testid="{{.Testid}}">{{.Type}}</span>
 {{end}}
@@ -259,9 +257,9 @@
      that contract and its rules. */}}
 {{define "board-card"}}
 {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener"
-   class="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
+   class="ticket-card"
    data-testid="board-card" data-key="{{.Key}}" draggable="false">{{else}}<div
-   class="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+   class="ticket-card"
    data-testid="board-card" data-key="{{.Key}}" draggable="false">{{end}}
   <div class="flex items-center justify-between gap-2">
     <span class="font-mono text-xs font-semibold text-slate-500" data-testid="card:{{.Key}}:key">{{.Key}}</span>
@@ -273,7 +271,7 @@
   <div class="mt-2 flex items-center justify-between gap-2">
     {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "" "Href" .Href)}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
     <span class="flex min-w-0 items-center gap-2">
-      {{if .Activity}}<span class="shrink-0 text-xs tabular-nums text-slate-400" data-testid="card:{{.Key}}:activity">{{.Activity}}</span>{{end}}
+      {{if .Activity}}<span class="shrink-0 text-xs tabular-nums text-muted-foreground" data-testid="card:{{.Key}}:activity">{{.Activity}}</span>{{end}}
       {{if .AssignEditable}}{{template "board-assignee" .}}{{else}}{{template "card-avatar" .}}{{end}}
     </span>
   </div>
@@ -371,10 +369,10 @@
      the board-estimate-style block (no Tailwind rebuild). */}}
 {{define "board-estimate"}}
 <span data-card-control data-testid="card:{{.Key}}:estimate" class="be" style="position:relative;display:inline-flex;flex-direction:column;align-items:flex-start">
-  <span class="be-trigger inline-flex items-center gap-1.5 rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600"
+  <span class="be-trigger badge" data-variant="secondary"
         data-testid="card:{{.Key}}:estimate-trigger" role="button" tabindex="0"
         aria-haspopup="menu" aria-label="Edit estimate for {{.Key}}">
-    <span class="text-slate-400">est</span>
+    <span class="text-muted-foreground">est</span>
     <span class="tabular-nums text-slate-800" data-testid="card:{{.Key}}:size">{{.Display}}</span>
   </span>
   <span class="be-menu" role="menu" aria-label="Estimate for {{.Key}}">
@@ -653,11 +651,11 @@
      with the status name and its card count, then the cards. Takes a
      boardColumn. */}}
 {{define "board-column"}}
-<div class="flex w-72 shrink-0 flex-col rounded-xl border border-slate-200 bg-slate-100/60 p-3"
+<div class="swimlane flex flex-col rounded-xl border p-3"
      data-testid="board-column" data-status="{{.Status}}">
   <div class="flex items-baseline justify-between px-1">
     <h3 class="truncate text-sm font-semibold text-slate-700" title="{{.Status}}">{{.Status}}</h3>
-    <span class="text-xs font-medium text-slate-400 tabular-nums" data-testid="col:{{.Status}}:count">{{len .Cards}}</span>
+    <span class="badge tabular-nums" data-variant="outline" data-testid="col:{{.Status}}:count">{{len .Cards}}</span>
   </div>
   <div class="mt-3 flex flex-col gap-2">
     {{range .Cards}}
@@ -673,10 +671,10 @@
      container too. Matching fixed widths/gaps plus scrollLeft mirroring in the
      page keep the two halves aligned horizontally. */}}
 {{define "board-column-header"}}
-<div class="w-72 shrink-0 rounded-t-xl border border-b-0 border-slate-200 bg-slate-100/60 p-3 pb-0">
+<div class="swimlane rounded-t-xl border border-b-0 p-3 pb-0">
   <div class="flex items-baseline justify-between px-1">
     <h3 class="truncate text-sm font-semibold text-slate-700" title="{{.Status}}">{{.Status}}</h3>
-    <span class="text-xs font-medium text-slate-400 tabular-nums" data-testid="col:{{.Status}}:count">{{len .Cards}}</span>
+    <span class="badge tabular-nums" data-variant="outline" data-testid="col:{{.Status}}:count">{{len .Cards}}</span>
   </div>
 </div>
 {{end}}
@@ -689,7 +687,7 @@
      column names. The two excluded columns carry neither marker, so they are not
      drop targets, and their cards render draggable="false" (see board-card). */}}
 {{define "board-column-cards"}}
-<div class="flex w-72 shrink-0 flex-col rounded-b-xl border border-t-0 border-slate-200 bg-slate-100/60 p-3"
+<div class="swimlane flex flex-col rounded-b-xl border border-t-0 p-3"
      data-testid="board-column" data-status="{{.Status}}"{{if .Draggable}} data-drag-target="true"{{end}}>
   {{/* grow: the card list fills the column's height so a drop anywhere inside a
        column counts — dropping into the empty space below the last card is the
@@ -709,12 +707,12 @@
      controls, the column-header counts and the cards together, keeping the sticky
      region in sync with the data. Mirrors daily-panel. Takes a boardView. */}}
 {{define "board-panel"}}
-  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50 pt-4">
+  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-background app-chrome">
     {{template "nav" "board"}}
-    {{template "page-header" "Board — the active sprint mirrored from Jira, for data-quality validation."}}
+    {{template "page-header" (dict "Title" "Board" "Description" "The active sprint mirrored from Jira, for data-quality validation.")}}
     {{if .HasSprint}}
     <div data-testid="board-chrome" class="mt-4">
-      <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500" data-testid="board-heading">Sprint board — {{.SprintName}}</h2>
+      <h2 class="text-sm font-semibold text-foreground" data-testid="board-heading">Sprint board — {{.SprintName}}</h2>
       {{template "board-filters" .}}
       {{/* The status row deliberately sits OUTSIDE the horizontal card scroller.
            The card strip mirrors its scrollLeft into this hidden horizontal
@@ -737,12 +735,12 @@
          hides cards, never columns), but an over-narrow filter set would otherwise
          look identical to an empty sprint, so say so. */}}
     {{if .NoMatch}}
-    <p data-testid="board-no-match" class="mb-3 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
+    <p data-testid="board-no-match" class="mb-3 app-surface p-4 text-sm text-muted-foreground">
       No cards match the current filters.
     </p>
     {{end}}
     <div data-testid="board-card-strip"
-         class="flex gap-4 overflow-x-auto pb-4"
+         class="app-scroll flex gap-4 overflow-x-auto pb-4" role="region" aria-label="Sprint board columns" tabindex="0"
          style="overflow-y:hidden"
          onscroll="document.getElementById('board-column-headers').scrollLeft=this.scrollLeft">
       {{range .Columns}}
@@ -753,7 +751,7 @@
     </div>
   </div>
   {{else}}
-  <div data-testid="board-no-sprint" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+  <div data-testid="board-no-sprint" class="mt-4 app-surface p-6 text-sm text-muted-foreground">
     <p>No active sprint to show. Once a sprint is active in Jira and synced, its board appears here.</p>
   </div>
   {{end}}
@@ -774,7 +772,7 @@
 {{define "board-filters"}}
 <form data-testid="board-filters"
       hx-target="#board-panel" hx-swap="innerHTML"
-      class="mt-3 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      class="mt-3 flex flex-wrap items-end gap-4 app-surface p-3">
   {{/* Always-present filter-param anchor. A control that replaces its own param
        hx-includes the OTHER filters via [data-filterparam]:not([name='<own>']);
        with no filter active that selector would match nothing and HTMX logs a
@@ -799,16 +797,16 @@
      sprint name and its points. Below the label, the start–end date line
      ("14 Jul – 18 Jul", or "14 Jul – now (ongoing)" for the active sprint). */}}
 {{define "velocity-bar"}}
-<div class="flex flex-1 flex-col items-center gap-2" data-testid="velocity-sprint" data-sprint="{{.Label}}">
-  <div class="flex h-40 w-full items-end justify-center rounded-t bg-slate-100">
-    <div class="w-6 rounded-t {{if .Points}}bg-slate-900{{else}}bg-slate-300{{end}}"
+<div class="flex min-w-18 flex-1 flex-col items-center gap-2 text-center" role="listitem" data-testid="velocity-sprint" data-sprint="{{.Label}}">
+  <div class="velocity-track">
+    <div class="w-1/2 max-w-10 rounded-t-md {{if .Points}}bg-chart-1{{else}}bg-muted{{end}}"
          style="height: {{.Percent}}%"
          role="img"
          aria-label="{{.Label}}: {{.Points}} points"></div>
   </div>
   <span class="text-sm font-semibold tabular-nums text-slate-700" data-testid="sprint-points:{{.Label}}">{{.Points}}</span>
   <span class="text-xs font-medium uppercase tracking-wide text-slate-500" data-testid="sprint-label:{{.Label}}">{{.Label}}</span>
-  <span class="text-[11px] tabular-nums text-slate-400" data-testid="sprint-dates:{{.Label}}">{{.Dates}}</span>
+  <span class="text-xs tabular-nums text-muted-foreground" data-testid="sprint-dates:{{.Label}}">{{.Dates}}</span>
 </div>
 {{end}}
 
@@ -819,11 +817,11 @@
      always centers on the current active sprint. Takes a sprintView. */}}
 {{define "sprint-panel"}}
   {{if .HasSprint}}
-  <div id="sprint-results" class="mt-8">
+  <div id="sprint-results" class="mt-4">
     {{template "sprint-results" .}}
   </div>
   {{else}}
-  <div data-testid="sprint-no-sprint" class="mt-8 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+  <div data-testid="sprint-no-sprint" class="mt-8 app-surface p-6 text-sm text-muted-foreground">
     <p>No active sprint to show. Once a sprint is active in Jira and synced, this sprint's numbers appear here.</p>
   </div>
   {{end}}
@@ -896,17 +894,17 @@
   }
 </style>
 <div data-testid="sprint-results">
-  <div class="flex items-baseline justify-between">
-    <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500" data-testid="sprint-name">{{.SprintName}}</h2>
-    <span class="text-xs text-slate-400" data-testid="sprint-window-label">{{.WindowLabel}}</span>
+  <div class="flex flex-wrap items-baseline justify-between gap-2">
+    <h2 class="text-sm font-semibold text-foreground" data-testid="sprint-name">{{.SprintName}}</h2>
+    <span class="text-xs text-muted-foreground" data-testid="sprint-window-label">{{.WindowLabel}}</span>
   </div>
   {{if .Empty}}
   <p data-testid="sprint-empty" class="mt-4 text-sm text-slate-500">No work started or added in this sprint yet.</p>
   {{else}}
-  <div class="mt-4 rounded-xl border border-slate-200 bg-white shadow-sm">
-    <table class="w-full text-left text-sm" data-testid="sprint-table">
+  <div class="app-surface mt-4 max-sm:overflow-x-auto" role="region" aria-label="Sprint breakdown" tabindex="0">
+    <table class="w-full min-w-[33rem] text-left text-sm" data-testid="sprint-table">
       <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-400">
+        <tr class="border-b border-border bg-muted text-xs uppercase tracking-wide text-muted-foreground">
           <th class="px-4 py-3 font-medium">Category</th>
           {{range .Columns}}
           <th class="px-4 py-3 font-medium">{{.Label}}
@@ -947,7 +945,7 @@
          style="text-decoration:underline;text-decoration-color:#cbd5e1;text-underline-offset:2px"><span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:tickets">{{.Tickets}}</span> tickets</a>{{else}}<span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:tickets">{{.Tickets}}</span> tickets{{end}} ·
       <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:points">{{.Points}}</span> pts
     </div>
-    <div class="mt-0.5 text-xs font-normal text-slate-400 tabular-nums">
+    <div class="mt-0.5 text-xs font-normal text-muted-foreground tabular-nums">
       S <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:s">{{.S}}</span> ·
       M <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:m">{{.M}}</span> ·
       L <span data-testid="sprint-cell:{{.RowKey}}:{{.ColKey}}:l">{{.L}}</span> ·
@@ -983,9 +981,9 @@
      the data. Takes a dailyView. */}}
 {{define "daily-panel"}}
   {{template "daily-board-style"}}
-  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50 pt-4">
+  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-background app-chrome">
     {{template "nav" "daily"}}
-    {{template "page-header" "Daily — a board of active-sprint tickets created or moved in the window, placed by workflow stage and showing where each came from."}}
+    {{template "page-header" (dict "Title" "Daily" "Description" "Active-sprint tickets created or moved in the window, grouped by workflow stage.")}}
     {{if .HasSprint}}
     <div data-testid="daily-chrome">
       {{template "daily-controls" .}}
@@ -994,11 +992,11 @@
     {{end}}
   </div>
   {{if not .HasSprint}}
-  <div data-testid="daily-no-sprint" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+  <div data-testid="daily-no-sprint" class="mt-4 app-surface p-6 text-sm text-muted-foreground">
     <p>No active sprint to show. Once a sprint is active in Jira and synced, its daily status changes appear here.</p>
   </div>
   {{else if .RangeError}}
-  <p data-testid="daily-range-error" class="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700 shadow-sm">{{.RangeError}}</p>
+  <p data-testid="daily-range-error" class="alert mt-4 border-rose-200 bg-rose-50" role="alert" data-variant="destructive">{{.RangeError}}</p>
   {{else}}
   <div id="daily-results">
     {{template "daily-board" .}}
@@ -1055,39 +1053,38 @@
 <form data-testid="daily-controls"
       hx-target="#daily-panel"
       hx-swap="innerHTML"
-      class="mt-4 flex flex-wrap items-end gap-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      class="mt-4 flex flex-wrap items-end gap-4 app-surface p-3">
   <input type="hidden" name="preset" value="{{range .Presets}}{{if .Selected}}{{.Key}}{{end}}{{end}}">
   {{/* The current assignee selection as hidden inputs, so a preset button or a
        From/Until edit (which hx-include [name='assignee']) round-trips the whole
-       selection unchanged — only the avatar chips themselves mutate it. */}}
+       selection unchanged. With no selection, a disabled input matches the
+       preset's include selector without sending an assignee value. */}}
+  {{if not .AnySelected}}<input type="hidden" name="assignee" disabled>{{end}}
   {{range .Selected}}<input type="hidden" name="assignee" value="{{.}}">{{end}}
   <fieldset data-testid="daily-presets" class="flex flex-wrap gap-2">
     {{range .Presets}}
     <button type="button" data-testid="daily-preset:{{.Key}}" title="{{.Title}}"
             {{if .Disabled}}disabled aria-disabled="true"{{else}}hx-get="/daily/results?preset={{.Key}}" hx-include="[name='assignee']"{{end}}
             {{if .Selected}}aria-pressed="true"{{end}}
-            class="inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
-                   {{if .Disabled}}cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300
-                   {{else if .Selected}}cursor-pointer border-slate-900 bg-slate-900 text-white
-                   {{else}}cursor-pointer border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
+            class="btn" data-variant="{{if .Selected}}primary{{else}}outline{{end}}">
       {{.Label}}
     </button>
     {{end}}
   </fieldset>
-  <div class="flex flex-wrap items-end" style="margin-left:auto;gap:1.5rem">
+  <div class="flex min-w-0 flex-wrap items-end gap-3" style="margin-left:auto">
     <label class="text-xs font-medium text-slate-500">
       From
       <input type="datetime-local" name="from" data-testid="daily-from" value="{{.CustomFrom}}"
              hx-get="/daily/results" hx-trigger="change"
              hx-include="[name='assignee'],[name='from'],[name='to']"
-             class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
+             class="input mt-1 block max-w-full">
     </label>
     <label class="text-xs font-medium text-slate-500">
       Until
       <input type="datetime-local" name="to" data-testid="daily-to" value="{{.CustomTo}}"
              hx-get="/daily/results" hx-trigger="change"
              hx-include="[name='assignee'],[name='from'],[name='to']"
-             class="mt-1 block rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-800">
+             class="input mt-1 block max-w-full">
     </label>
     {{template "daily-assignee-bar" .}}
   </div>
@@ -1197,14 +1194,14 @@
      URL into the address bar (no control here pushes it). Takes a searchBoxView
      (Prefix, Param, Value, ResultsHref, IncludeAttr). */}}
 {{define "search-box"}}
-<div data-testid="{{.Prefix}}" class="flex items-center">
+<div data-testid="{{.Prefix}}" class="flex min-w-0 items-center">
   <input type="search" id="{{.Prefix}}-input" data-testid="{{.Prefix}}-input" data-filterparam
          name="{{.Param}}" value="{{.Value}}"
          placeholder="Search key, title or epic" aria-label="Search cards by key, title or epic"
          autocomplete="off"
          hx-get="{{.ResultsHref}}" {{.IncludeAttr}}
          hx-trigger="input changed delay:500ms, search"
-         class="w-64 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none">
+         class="input w-64 max-w-full">
 </div>
 {{end}}
 
@@ -1224,9 +1221,7 @@
   <button type="button" data-testid="{{.Prefix}}-toggle"
           {{if .On}}aria-pressed="true"{{end}}
           hx-get="{{.ToggleHref}}" {{.IncludeAttr}}
-          class="inline-flex cursor-pointer items-center rounded-md border px-3 py-1.5 text-sm font-medium transition-colors
-                 {{if .On}}border-slate-900 bg-slate-900 text-white hover:bg-slate-800
-                 {{else}}border-slate-200 bg-white text-slate-600 hover:bg-slate-50{{end}}">
+          class="btn" data-variant="{{if .On}}primary{{else}}outline{{end}}">
     {{.Label}}
   </button>
 </div>
@@ -1247,33 +1242,16 @@
      NON-default value as a hidden param instead, which is why IncludeAttr is the
      pill's "all but self" selector rather than include-all.
 
-     The chevron is ours, not the platform's. Chrome and Firefox let padding
-     push the native arrow inward, but Safari insets it by its own rule and
-     ignores us, which is what left it crowding the right border. So the select
-     is appearance-none, reserves room on its right, and the wrapper positions a
-     pointer-events-none chevron in that space, making the gap either side of
-     the arrow the same value in every engine. Under forced colours the UA
-     re-asserts its own arrow regardless, so there we hand the control back
-     rather than paint a second chevron beside the system one.
-
      Takes a filterSelectView (Prefix, Label, Param, Options, ResultsHref,
      IncludeAttr). */}}
 {{define "filter-select"}}
 <div data-testid="{{.Prefix}}" class="flex items-center gap-2">
   <label for="{{.Prefix}}-select" class="text-sm font-medium text-slate-600">{{.Label}}</label>
-  <div class="relative shrink-0">
-    <select id="{{.Prefix}}-select" data-testid="{{.Prefix}}-select" name="{{.Param}}"
-            hx-get="{{.ResultsHref}}" {{.IncludeAttr}}
-            class="cursor-pointer appearance-none rounded-md border border-slate-200 bg-white py-1.5 pl-3 pr-8 text-sm font-medium text-slate-700 focus:border-slate-400 focus:outline-none forced-colors:appearance-auto forced-colors:pr-3">
-      {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
-    </select>
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
-         fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-         aria-hidden="true"
-         class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 forced-colors:hidden">
-      <path d="m6 9 6 6 6-6"/>
-    </svg>
-  </div>
+  <select id="{{.Prefix}}-select" data-testid="{{.Prefix}}-select" name="{{.Param}}"
+          hx-get="{{.ResultsHref}}" {{.IncludeAttr}}
+          class="select cursor-pointer appearance-none forced-colors:appearance-auto forced-colors:bg-none">
+    {{range .Options}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select>
 </div>
 {{end}}
 
@@ -1284,14 +1262,14 @@
      fixed-width columns aligned. */}}
 {{define "daily-board-header"}}
 <div class="mt-3">
-  <h2 class="text-sm font-medium uppercase tracking-wide text-slate-500">Board{{if .SprintName}} — {{.SprintName}}{{end}}</h2>
+  <h2 class="text-sm font-semibold text-foreground">Board{{if .SprintName}} — {{.SprintName}}{{end}}</h2>
   <div id="daily-column-headers" data-testid="daily-column-headers"
        class="mt-3 flex gap-4 overflow-x-hidden">
     {{range .Columns}}
-    <div class="w-72 shrink-0 rounded-t-xl border border-b-0 border-slate-200 bg-slate-100/60 p-3 pb-0">
+    <div class="swimlane rounded-t-xl border border-b-0 p-3 pb-0">
       <div class="flex items-baseline justify-between px-1">
         <h3 class="truncate text-sm font-semibold {{if .Canceled}}text-rose-600{{else}}text-slate-700{{end}}" title="{{.Name}}">{{.Name}}</h3>
-        <span class="text-xs font-medium tabular-nums text-slate-400" data-testid="daily-col:{{.Name}}:count">{{len .Cards}}</span>
+        <span class="badge tabular-nums" data-variant="outline" data-testid="daily-col:{{.Name}}:count">{{len .Cards}}</span>
       </div>
     </div>
     {{end}}
@@ -1303,12 +1281,12 @@
      no sticky descendants, so overflow-x cannot capture vertical stickiness.
      The browser window remains the only vertical scroller. */}}
 {{define "daily-board"}}
-<div class="flex gap-4 overflow-x-auto pb-4"
+<div class="app-scroll flex gap-4 overflow-x-auto pb-4" role="region" aria-label="Daily board columns" tabindex="0"
      style="overflow-y:hidden"
      data-testid="daily-board"
      onscroll="document.getElementById('daily-column-headers').scrollLeft=this.scrollLeft">
     {{range .Columns}}
-    <div class="flex w-72 shrink-0 flex-col rounded-b-xl border border-t-0 border-slate-200 bg-slate-100/60 p-3"
+    <div class="swimlane flex flex-col rounded-b-xl border border-t-0 p-3"
          data-testid="daily-column" data-status="{{.Name}}">
       <div class="flex flex-col gap-2">
         {{range .Cards}}{{template "daily-card" .}}{{end}}
@@ -1331,16 +1309,16 @@
      set the whole card links to Jira in a new tab. Takes a dailyCardView. */}}
 {{define "daily-card"}}
 {{if .Href}}<a href="{{.Href}}" target="_blank" rel="noopener"
-   class="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50"
+   class="ticket-card"
    data-testid="daily-card" data-key="{{.Key}}">{{else}}<div
-   class="block rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+   class="ticket-card"
    data-testid="daily-card" data-key="{{.Key}}">{{end}}
   <div class="flex items-center justify-between gap-2">
     <span class="font-mono text-xs font-semibold text-slate-500" data-testid="card:{{.Key}}:key">{{.Key}}</span>
     {{template "type-badge" (dict "Type" .Type "Testid" (printf "card:%s:type" .Key))}}
   </div>
   <p class="mt-1.5 truncate text-sm text-slate-800" title="{{.Summary}}" data-testid="card:{{.Key}}:title">{{.Summary}}</p>
-  <div class="mt-2 flex items-center justify-between gap-2 text-xs text-slate-400">
+  <div class="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
     {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "" "Href" .Href)}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
     <span class="flex min-w-0 items-center gap-2">
       <span class="shrink-0 tabular-nums" data-testid="card:{{.Key}}:at">{{.LatestAt}}</span>
@@ -1361,9 +1339,9 @@
      is why GET /prio/results renders this partial rather than the bare table.
      Takes a prioView. */}}
 {{define "prio-panel"}}
-  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-slate-50 pt-4">
+  <div data-testid="page-chrome" class="sticky top-0 z-30 bg-background app-chrome">
     {{template "nav" "prio"}}
-    {{template "page-header" "Prio — every ticket in the project, for deciding what to work on next."}}
+    {{template "page-header" (dict "Title" "Prio" "Description" "Every ticket in the project, for deciding what to work on next.")}}
     {{template "prio-filters" .}}
   </div>
 
@@ -1394,7 +1372,7 @@
 {{define "prio-filters"}}
 <form data-testid="prio-filters"
       hx-target="#prio-panel" hx-swap="innerHTML"
-      class="mt-4 flex flex-wrap items-end justify-end gap-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      class="app-surface mt-3 flex flex-wrap items-center gap-3 p-3 sm:justify-end">
   {{/* Always-present filter-param anchor: a control hx-includes the OTHER
        filters via [data-filterparam]:not([name='<own>']), and with every filter
        at its default that selector would otherwise match nothing and make HTMX
@@ -1417,19 +1395,19 @@
 {{define "prio-table"}}
 {{if .Empty}}
 {{if .NoMatch}}
-<p data-testid="prio-no-match" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+<p data-testid="prio-no-match" class="mt-4 app-surface p-6 text-sm text-muted-foreground">
   No tickets match the current filters.
 </p>
 {{else}}
-<p data-testid="prio-empty" class="mt-4 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+<p data-testid="prio-empty" class="mt-4 app-surface p-6 text-sm text-muted-foreground">
   No tickets yet.
 </p>
 {{end}}
 {{else}}
-<div data-testid="prio" class="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-  <table class="w-full border-collapse text-left text-sm">
+<div data-testid="prio" class="app-surface app-scroll mt-4 overflow-x-auto" role="region" aria-label="Priority table" tabindex="0">
+  <table class="w-full min-w-xl border-collapse text-left text-sm">
     <thead>
-      <tr class="border-b border-slate-200 text-xs font-medium uppercase tracking-wide text-slate-500">
+      <tr class="border-b border-border bg-muted text-xs font-medium uppercase tracking-wide text-muted-foreground">
         <th scope="col" class="px-4 py-2" data-testid="prio-col-type">Type</th>
         <th scope="col" class="px-4 py-2" data-testid="prio-col-name">Name</th>
         <th scope="col" class="px-4 py-2" data-testid="prio-col-priority">Priority</th>
@@ -1461,7 +1439,7 @@
      column stays quiet on the many unlabelled rows. Takes a prioRow. */}}
 {{define "labels-cell"}}
 {{- range .Labels -}}
-<span class="mr-1 inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600" data-testid="prio:{{$.Key}}:label:{{.}}">{{.}}</span>
+<span class="badge mr-1 bg-slate-100" data-variant="secondary" data-testid="prio:{{$.Key}}:label:{{.}}">{{.}}</span>
 {{- end -}}
 {{end}}
 
