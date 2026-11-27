@@ -153,7 +153,9 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 		if events.New {
 			steps[3].Rows = append(steps[3].Rows, row)
 		}
-		if prioStatusGroup(issue.Status) == statusPlanned {
+		// The scoped Backlog corresponds to the two Planning (To Do) filters,
+		// which require parent IS EMPTY even for an Epic.
+		if prioStatusGroup(issue.Status) == statusPlanned && (filters.Level.Value == "all" || issue.ParentKey == "") {
 			steps[4].Rows = append(steps[4].Rows, row)
 		}
 	}

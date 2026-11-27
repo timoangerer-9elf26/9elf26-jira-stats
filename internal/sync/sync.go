@@ -21,6 +21,8 @@ type Store interface {
 	SaveSprint(sp jira.Sprint) error
 	ReplaceProjectMembers(members []jira.ProjectMember) error
 	IssueCount() (int, error)
+	IssueKeys(context.Context) ([]string, error)
+	RemoveIssues(context.Context, []string) error
 	LastSync() (t time.Time, ok bool, err error)
 	SetLastSync(t time.Time) error
 	// SetLastFullResync records the completion instant of a successful full
@@ -135,10 +137,11 @@ func incremental(ctx context.Context, client jira.Client, store Store, since tim
 // cycles. It reads incremental changes since the last successful sync with an
 // overlap to account for clock skew.
 type Syncer struct {
-	client         jira.Client
-	store          Store
-	overlap        time.Duration
-	personalWrites bool
+	client              jira.Client
+	store               Store
+	overlap             time.Duration
+	personalWrites      bool
+	nextMembershipCheck time.Time // Protected by projectionLock.
 
 	// A buffered channel serializes projection updates with cancellable acquisition.
 	projectionLock chan struct{}
@@ -431,6 +434,9 @@ func (s *Syncer) Cycle(ctx context.Context) error {
 
 	if err := s.store.SetLastSync(startedAt); err != nil {
 		return fmt.Errorf("record last_sync: %w", err)
+	}
+	if err := s.reconcileProjectIssues(ctx, startedAt); err != nil {
+		log.Printf("sync: project membership check failed, keeping the projection: %v", err)
 	}
 	return nil
 }

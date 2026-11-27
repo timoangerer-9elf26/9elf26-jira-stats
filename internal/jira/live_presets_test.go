@@ -76,3 +76,46 @@ func TestPlanningSearchReadsOnlyKeysInPageOrder(t *testing.T) {
 		t.Fatalf("keys = %v, tokens = %v, err = %v", keys, tokens, err)
 	}
 }
+
+func TestProjectMembershipReadsCanonicalIssueKeyAndProject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/3/search/jql":
+			query := r.URL.Query()
+			if query.Get("jql") != `project = "DCAI" ORDER BY key ASC` || query.Get("fields") != "key" {
+				t.Errorf("unexpected project search: %s", r.URL)
+			}
+			fmt.Fprint(w, `{"isLast":true,"issues":[{"key":"DCAI-1"}]}`)
+		case "/rest/api/3/issue/DCAI-1":
+			if r.URL.Query().Get("fields") != "project" {
+				t.Errorf("unexpected issue lookup: %s", r.URL)
+			}
+			fmt.Fprint(w, `{"key":"DCAI-1","fields":{"project":{"key":"DCAI"}}}`)
+		case "/rest/api/3/issue/DCAI-2":
+			http.NotFound(w, r)
+		case "/rest/api/3/issue/DCAI-3":
+			fmt.Fprint(w, `{"key":"OTHER-3","fields":{"project":{"key":"OTHER"}}}`)
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	}))
+	defer server.Close()
+
+	client := jira.NewBearerClient(jira.Config{BaseURL: server.URL, ProjectKey: "DCAI"}, "service", server.Client())
+	keys, err := client.FetchProjectIssueKeys(t.Context())
+	if err != nil || !slices.Equal(keys, []string{"DCAI-1"}) {
+		t.Fatalf("project keys = %v, err = %v", keys, err)
+	}
+	for _, tc := range []struct {
+		key     string
+		kept    bool
+		wantErr bool
+	}{{"DCAI-1", true, false}, {"DCAI-2", false, false}, {"DCAI-3", false, false}, {"DCAI-4", false, true}} {
+		t.Run(tc.key, func(t *testing.T) {
+			kept, err := client.IssueInProject(t.Context(), tc.key)
+			if kept != tc.kept || (err != nil) != tc.wantErr {
+				t.Errorf("membership = %v, err = %v, want kept %v and error %v", kept, err, tc.kept, tc.wantErr)
+			}
+		})
+	}
+}

@@ -13,7 +13,8 @@ which must not be conflated (avoid the phrase "incremental resync"):
   before the first one it has *never* happened. The cold-start backfill on an
   empty store is **not** a full resync.
 - **Incremental sync** — the automatic periodic sync cycle that pulls only the
-  issues changed since the last successful cycle. Its **heartbeat** — the last
+  issues changed since the last successful cycle. It periodically reconciles
+  project membership so deleted and moved issues leave the projection. Its **heartbeat** — the last
   successful cycle — is the trusted "sync is alive" signal: a frozen heartbeat
   means syncing has broken, independent of whether any ticket happened to change.
 
@@ -146,6 +147,10 @@ automatically and the old results stay visible while a Jira search runs.
 Fertig and Neu always use the shared Stichtag. Jira-Filter and Nur seit
 Stichtag stay in Übersicht and are restored when returning to it in the same
 meeting. Technical labels on tickets still render.
+
+Backlog with **Nur Epics** or **Ohne Parent** matches the two Planning (To Do)
+filters at that level. It includes planned issues whose parent is empty.
+**Alle** also includes planned issues that have a parent.
 
 The separate historical Prio table remains available for its existing status
 and toggle bookmarks. Those controls apply only to that table.
