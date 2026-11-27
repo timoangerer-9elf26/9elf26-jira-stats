@@ -1,0 +1,11 @@
+{{define "prio-drawer"}}
+{{with .Selected}}
+<aside class="app-surface fixed inset-y-0 right-0 z-40 w-full overflow-y-auto shadow-lg sm:max-w-[40rem]" id="prio-drawer" aria-label="Ticketdetails" data-prio-scroll="drawer" data-prio-drawer-ticket="{{.Row.Key}}">
+  <div class="sticky top-0 z-10 flex justify-end border-b border-border bg-card px-4 py-2">
+    <a class="btn" data-variant="ghost" href="{{$.CloseHref}}" data-prio-close
+       {{if not $.PresetLoadingResults}}hx-get="{{$.DrawerCloseHref}}" hx-target="#prio-drawer-slot" hx-swap="innerHTML show:none"{{end}}>Panel schließen</a>
+  </div>
+  {{template "prio-ticket-panel" .}}
+</aside>
+{{end}}
+{{end}}

@@ -780,7 +780,11 @@ func TestPrioAllTicketsRemainsAvailableWhenJiraTimezoneRefreshFails(t *testing.T
 	}
 	getPrio := func(preset string) string {
 		t.Helper()
-		req, err := http.NewRequest(http.MethodGet, app.URL+"/prio?level=all&preset="+preset, nil)
+		path := "/prio"
+		if preset != "all" {
+			path = "/prio/preset-results"
+		}
+		req, err := http.NewRequest(http.MethodGet, app.URL+path+"?level=all&preset="+preset, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

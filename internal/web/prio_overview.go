@@ -10,6 +10,7 @@ import (
 type prioGroup struct {
 	ID, Label string
 	Rows      []prioRow
+	Total     int
 }
 
 type prioAgendaOption struct {
@@ -53,6 +54,9 @@ func (s *Server) populatePrioOverview(view *prioAgendaView, q url.Values, rows [
 	}
 	view.Groups = groups
 	view.IssueCount, view.OverviewCount = len(issues), len(rows)
+	if !view.PresetLoadingResults() {
+		view.Page = paginatePrioOverview(q, groups, len(rows))
+	}
 	view.SortOptions = []prioAgendaOption{
 		{Label: "Höchste Priorität", Href: prioHref(q, "sort", "priority"), Active: sort == "priority" || (sort != "recent" && !view.JiraOrder)},
 		{Label: "Jüngste Statusänderung", Href: prioHref(q, "sort", "recent"), Active: sort == "recent"},

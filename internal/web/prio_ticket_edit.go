@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
@@ -32,25 +34,68 @@ type prioTicketTransition struct {
 	Complex              bool
 }
 
-func (s *Server) populatePrioTicketActions(ctx context.Context, panel *prioTicketPanel) {
+func (s *Server) handlePrioTicketControls(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	_, actions, enabled := s.prioTicketClient(ctx)
-	panel.CanWrite = enabled && dcaiIssueKey.MatchString(panel.Row.Key)
-	if !panel.CanWrite {
+	if !enabled {
+		http.Error(w, "Persönliche Jira-Anmeldung erforderlich.", http.StatusForbidden)
 		return
 	}
+	q := prioAgendaParams(r.URL.Query())
+	key := q.Get("ticket")
+	if !dcaiIssueKey.MatchString(key) {
+		http.NotFound(w, r)
+		return
+	}
+	detail, found, err := s.rollups.IssueDetail(key)
+	if err != nil {
+		s.renderError(w)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	panel := prioTicketPanel{Row: s.makePrioRow(detail.PrioIssue, prioEdit{}), Detail: detail, CanWrite: true, Params: prioParamsList(q)}
+	s.populatePrioTicketActions(ctx, actions, &panel)
+	if q.Get("step") == prioEpicCheck {
+		issues, err := s.rollups.PrioIssues()
+		if err != nil {
+			s.renderError(w)
+			return
+		}
+		if suggestion := s.prioEpicSuggestions(issues)[key]; suggestion != nil {
+			panel.showEpicSuggestion(suggestion)
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.templates.ExecuteTemplate(w, "prio-ticket-controls", &panel); err != nil {
+		log.Printf("web: Prio ticket controls: %v", err)
+	}
+}
+
+func (s *Server) populatePrioTicketActions(ctx context.Context, actions jira.IssueActions, panel *prioTicketPanel) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	fields, err := actions.FetchEditFields(ctx, panel.Row.Key)
-	if err != nil {
+	var fields map[string]jira.EditField
+	var fieldsErr error
+	var requests sync.WaitGroup
+	requests.Go(func() {
+		fields, fieldsErr = actions.FetchEditFields(ctx, panel.Row.Key)
+	})
+	transitions, transitionsErr := actions.FetchIssueTransitions(ctx, panel.Row.Key)
+	requests.Wait()
+	if fieldsErr != nil {
 		panel.MetadataError = "Jira-Bearbeitungsfelder konnten nicht geladen werden."
-		log.Printf("web: Prio edit metadata %s: %v", panel.Row.Key, err)
+		log.Printf("web: Prio edit metadata %s: %v", panel.Row.Key, fieldsErr)
 	} else {
 		panel.Forms = s.prioTicketForms(panel.Detail, fields)
 	}
-	transitions, err := actions.FetchIssueTransitions(ctx, panel.Row.Key)
-	if err != nil {
+	if transitionsErr != nil {
+		panel.TransitionsUnavailable = true
 		panel.MetadataError += " Jira-Statusübergänge konnten nicht geladen werden."
-		log.Printf("web: Prio transition metadata %s: %v", panel.Row.Key, err)
+		log.Printf("web: Prio transition metadata %s: %v", panel.Row.Key, transitionsErr)
 		return
 	}
 	for _, transition := range transitions {

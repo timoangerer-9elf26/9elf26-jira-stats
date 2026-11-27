@@ -26,6 +26,7 @@ func WithPrioIssueRefresher(refresher prioIssueRefresher) Option {
 
 type prioTicketResult struct {
 	Message, Change, CreatedHref string
+	Preserve                     bool
 }
 
 type prioTicketResultKey struct{}

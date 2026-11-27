@@ -79,21 +79,12 @@
       }
     }
     if (state.windowID !== windowID) state = loadState(windowID);
-    if (editFieldsOpen) {
-      const fields = view.querySelector('[data-prio-edit-fields]');
-      if (fields) fields.open = true;
-      editFieldsOpen = false;
-    }
     const filterForm = view.querySelector('[data-prio-filters]');
     if (filterForm && (filtersOpen || location.hash === '#prio-filter-controls')) {
       filterForm.closest('details').open = true;
     }
     filtersOpen = false;
-    if (nextFocus) {
-      const focus = view.querySelector(nextFocus) || view.querySelector('[aria-current="step"]');
-      focus?.focus({preventScroll: true});
-    }
-    nextFocus = '';
+    restoreFocus(view);
     const saved = state.scroll[step];
     if (saved) {
       for (const area of view.querySelectorAll('[data-prio-scroll]')) {
@@ -116,6 +107,57 @@
 
     rememberView();
     renderProgress();
+  }
+
+  function restoreFocus(view) {
+    const controlsPending = view.querySelector('[data-prio-controls][hx-get]');
+    if (editFieldsOpen && !controlsPending) {
+      const fields = view.querySelector('[data-prio-edit-fields]');
+      if (fields) fields.open = true;
+      editFieldsOpen = false;
+    }
+    if (nextFocus) {
+      const focus = view.querySelector(nextFocus);
+      if (!focus && controlsPending) return;
+      (focus || view.querySelector('[aria-current="step"]'))?.focus({preventScroll: true});
+      nextFocus = '';
+    }
+  }
+
+  function syncDrawerSelection(view) {
+    const ticket = view.querySelector('[data-prio-drawer-ticket]')?.dataset.prioDrawerTicket || '';
+    view.dataset.ticket = ticket;
+    const cutoffForm = view.querySelector('[data-prio-cutoff-form]');
+    const filterForm = view.querySelector('[data-prio-filters]');
+    const epicForm = view.querySelector('[data-prio-ticket-action="epic"]');
+    for (const container of [view, cutoffForm, filterForm, epicForm]) {
+      if (!container) continue;
+      container.querySelector(':scope > input[name="ticket"]')?.remove();
+      if (!ticket) continue;
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'ticket';
+      input.value = ticket;
+      if (container === view) input.dataset.filterparam = '';
+      container.prepend(input);
+    }
+    for (const link of view.querySelectorAll('[data-prio-page], [data-prio-share-cutoff], [data-prio-filter-reset], [data-prio-clear-preset]')) {
+      link.href = withTicket(link.href, ticket);
+    }
+    for (const option of view.querySelectorAll('[data-prio-sort] option')) {
+      option.value = withTicket(option.value, ticket);
+    }
+    for (const rowLink of view.querySelectorAll('[data-prio-ticket]')) {
+      if (rowLink.dataset.prioTicket === ticket) rowLink.setAttribute('aria-current', 'true');
+      else rowLink.removeAttribute('aria-current');
+    }
+  }
+
+  function withTicket(href, ticket) {
+    const url = new URL(href, location.href);
+    if (ticket) url.searchParams.set('ticket', ticket);
+    else url.searchParams.delete('ticket');
+    return url.pathname + url.search + url.hash;
   }
 
   function markDiscussed(view) {
@@ -142,6 +184,8 @@
       nextFocus = '#prio-period';
     } else if (target.closest('[data-prio-step]')) {
       nextFocus = '[aria-current="step"]';
+    } else if (target.closest('[data-prio-page]')) {
+      nextFocus = '[data-prio-page-number]';
     } else if (target.closest('[data-prio-queue-key]')) {
       nextFocus = '[data-prio-queue-key][aria-current="true"]';
     } else if (target.closest('[data-prio-ticket]')) {
@@ -195,6 +239,10 @@
 
   document.addEventListener('htmx:beforeRequest', event => {
     const {elt, xhr} = event.detail;
+    if (elt.matches('[data-prio-step], [data-prio-ticket], [data-prio-page]')) {
+      elt.setAttribute('aria-busy', 'true');
+      xhr.addEventListener('loadend', () => elt.removeAttribute('aria-busy'), {once: true});
+    }
     if (!elt.matches('[data-prio-filters]')) return;
     filterRequest = xhr;
     const status = elt.querySelector('[data-prio-filter-status]');
@@ -227,7 +275,13 @@
     if (step && state.cells[step]) event.detail.parameters.ticket = state.cells[step];
   });
   document.addEventListener('htmx:beforeSwap', event => {
-    if (event.detail.target !== panel || !event.detail.shouldSwap) return;
+    const {target, shouldSwap} = event.detail;
+    if (!shouldSwap) return;
+    if (target.matches('[data-prio-agenda]')) {
+      filtersOpen = !!target.querySelector('[data-testid="prio-filters"][open]');
+    } else if (target !== panel && target.id !== 'prio-drawer-slot') {
+      return;
+    }
     rememberView();
     const form = event.detail.requestConfig.elt;
     const action = form?.dataset.prioTicketAction;
@@ -240,7 +294,17 @@
     }
   });
   document.addEventListener('htmx:afterSettle', event => {
-    if (event.detail.target === panel) restoreView();
+    const view = agenda();
+    const {target} = event.detail;
+    if (!view || !target) return;
+    if (target.id === 'prio-drawer-slot' && view.contains(target)) {
+      syncDrawerSelection(view);
+      restoreView();
+    } else if (target === panel || target.matches('[data-prio-agenda]')) {
+      restoreView();
+    } else if (target.matches('[data-prio-controls]') && view.dataset.ticket === target.dataset.prioControls) {
+      restoreFocus(view);
+    }
   });
   document.addEventListener('htmx:historyRestore', restoreView);
   window.addEventListener('pagehide', rememberView);

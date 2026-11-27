@@ -63,7 +63,7 @@ func TestPrioEpicCheckConfirmsAnOfferedDoneTransitionAndUpdatesFertig(t *testing
 	}
 	app := newWritablePrioApp(t, fixture)
 	cutoff := "2026-01-01T00:00:00Z"
-	checkURL := app.URL + "/prio?step=epic-check&preset=all&cutoff=" + cutoff
+	checkURL := app.URL + "/prio/ticket/controls?step=epic-check&preset=all&ticket=DCAI-41&cutoff=" + cutoff
 	doneURL := app.URL + "/prio?step=done&preset=all&cutoff=" + cutoff
 
 	page := get(t, checkURL)

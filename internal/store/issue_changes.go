@@ -11,13 +11,30 @@ import (
 // after since, grouped by Jira issue key. Each issue's changes run oldest
 // first and include earlier Done transitions even if the issue has reopened.
 func (s *Store) IssueChangesSince(since time.Time) (map[string][]jira.ChangelogEntry, error) {
-	rows, err := s.db.Query(`
+	return s.issueChangesSince(since, "")
+}
+
+// IssueHistorySince reads the same meeting history for a single projected ticket.
+func (s *Store) IssueHistorySince(key string, since time.Time) ([]jira.ChangelogEntry, error) {
+	if key == "" {
+		return nil, nil
+	}
+	changes, err := s.issueChangesSince(since, key)
+	return changes[key], err
+}
+
+func (s *Store) issueChangesSince(since time.Time, key string) (map[string][]jira.ChangelogEntry, error) {
+	query := `
 		SELECT issue_key, changelog_entry_id, field, COALESCE(from_status, ''), COALESCE(to_status, ''),
 		       from_id, to_id, author_account_id, author_display_name, transitioned_at, subsecond_ns
 		FROM status_transition
-		WHERE field IN ('status', 'priority', 'resolution') AND (transitioned_at, subsecond_ns) >= (?, ?)
-		ORDER BY transitioned_at, subsecond_ns, changelog_entry_id`,
-		since.UTC().Format(time.RFC3339), since.Nanosecond())
+		WHERE field IN ('status', 'priority', 'resolution') AND (transitioned_at, subsecond_ns) >= (?, ?)`
+	args := []any{since.UTC().Format(time.RFC3339), since.Nanosecond()}
+	if key != "" {
+		query += " AND issue_key = ?"
+		args = append(args, key)
+	}
+	rows, err := s.db.Query(query+" ORDER BY transitioned_at, subsecond_ns, changelog_entry_id", args...)
 	if err != nil {
 		return nil, fmt.Errorf("read issue changes: %w", err)
 	}

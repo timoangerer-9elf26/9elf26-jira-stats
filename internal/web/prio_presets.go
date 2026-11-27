@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"log"
+	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
@@ -31,6 +33,41 @@ type prioPresetView struct {
 	PresetError, JiraSearchHref string
 	Missing                     []prioMissingTicket
 	JiraOrder                   bool
+	PresetPending               bool
+}
+
+type prioPresetLoadKey struct{}
+type prioPresetLoad struct{ keepTicket bool }
+
+func (s *Server) handlePrioPresetPicker(w http.ResponseWriter, r *http.Request) {
+	view := prioAgendaView{Preset: prioLocalPreset}
+	ctx := context.WithValue(r.Context(), prioPresetLoadKey{}, prioPresetLoad{})
+	s.prioPresetKeys(ctx, &view, prioAgendaParams(r.URL.Query()))
+	view.Filters.Jira = view.prioJiraFilterOption()
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.templates.ExecuteTemplate(w, "prio-preset-picker", view); err != nil {
+		log.Printf("web: Prio preset picker: %v", err)
+	}
+}
+
+func (s *Server) handlePrioPresetResults(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	q := prioAgendaParams(r.URL.Query())
+	ctx := context.WithValue(r.Context(), prioPresetLoadKey{}, prioPresetLoad{keepTicket: r.URL.Query().Get("keep-ticket") == "1"})
+	s.renderPrioWith(w, ctx, q, "prio-agenda-content", prioEdit{})
+}
+
+func (view prioAgendaView) PresetResultsHref() string {
+	href := "/prio/preset-results?" + strings.TrimPrefix(view.CanonicalHref, "/prio?")
+	if view.TicketResult.Change != "" || view.TicketResult.Message != "" {
+		href += "&keep-ticket=1"
+	}
+	return href
+}
+
+func (view prioAgendaView) PresetLoadingResults() bool {
+	return view.PresetPending && view.Preset != prioLocalPreset
 }
 
 type prioMissingTicket struct{ Key, Href string }
@@ -147,11 +184,16 @@ func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, _ url
 		return nil
 	}
 
+	_, load := ctx.Value(prioPresetLoadKey{}).(prioPresetLoad)
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	account := sha256.Sum256([]byte(identity.AccountID))
 	filters, cached := s.prioFiltersCache.get(account, s.now())
 	if !cached {
+		if !load {
+			view.PresetPending = true
+			return nil
+		}
 		fetched, err := client.PlanningPresets(ctx)
 		if err != nil {
 			view.PresetError = "Jira-Filter konnten nicht geladen werden."
@@ -180,6 +222,10 @@ func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, _ url
 	filter := filters[i]
 	var loc *time.Location
 	if prioCutoffMarker.MatchString(filter.Description) {
+		if !load && identity.TimeZone == nil {
+			view.PresetPending = true
+			return nil
+		}
 		var err error
 		loc, err = identity.JiraTimeZone(ctx)
 		if err != nil {
@@ -196,6 +242,10 @@ func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, _ url
 	key := prioQueryKey{account, sha256.Sum256([]byte(jql))}
 	keys, cached, generation := s.prioKeysCache.lookup(key, s.now())
 	if !cached {
+		if !load {
+			view.PresetPending = true
+			return nil
+		}
 		keys, err = client.SearchIssueKeys(ctx, jql)
 		if err != nil {
 			view.PresetError = "Jira-Abfrage fehlgeschlagen."

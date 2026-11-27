@@ -26,18 +26,7 @@
         <option value="technical"{{if eq .Filters.Technical.Value "technical"}} selected{{end}}>nur Technical</option>
       </select>
     </div>
-    <div class="grid min-w-0 gap-1">
-      <label for="prio-preset" class="label">Jira-Filter</label>
-      <select id="prio-preset" name="preset" class="select w-full min-w-0" data-prio-filter aria-describedby="prio-preset-description">
-        <option value="all" data-description="Tickets aus dem lokalen Jira-Abbild."{{if eq .Preset "all"}} selected{{end}}>Keiner</option>
-        {{range .PresetOptions}}<option value="{{.Value}}" data-description="{{.Description}}"{{if .Active}} selected{{end}}>{{.Label}}</option>{{end}}
-        {{if and (ne .Preset "all") (not .JiraOrder) .PresetError}}
-        {{/* Preserve an unavailable shared selection when the catalogue does not contain it. */}}
-        {{if not .Filters.Jira.Active}}<option value="{{.Preset}}" selected>{{.Filters.Jira.Label}}</option>{{end}}
-        {{end}}
-      </select>
-      <p id="prio-preset-description" class="break-words text-xs text-muted-foreground" data-prio-preset-description>{{.Filters.Jira.Description}}</p>
-    </div>
+    {{template "prio-preset-picker" .}}
     <div class="flex flex-wrap items-center gap-2 sm:col-span-2">
       <button type="submit" class="btn" data-variant="outline">Filter anwenden</button>
       <a class="btn" data-variant="ghost" href="{{.ResetHref}}" data-prio-filter-reset>Filter zurücksetzen</a>
@@ -57,7 +46,9 @@
     <a class="btn" data-variant="outline" href="{{.NextHref}}" data-prio-next>Zur Besprechung →</a>
   </div>
 </div>
-{{if .OverviewCount}}
+{{if .PresetLoadingResults}}
+<p class="app-surface p-6 text-sm text-muted-foreground" role="status">Jira-Filter wird geladen …</p>
+{{else if .OverviewCount}}
 <div data-testid="prio" class="app-surface app-scroll overflow-x-auto [contain:paint]" role="region" aria-label="Prioritätenübersicht" tabindex="0" data-prio-scroll="overview">
   <table class="prio-table w-full border-collapse text-left text-sm" role="table">
     <thead class="sr-only sm:not-sr-only" role="rowgroup">
@@ -73,12 +64,13 @@
     </thead>
     {{range .Groups}}{{if .Rows}}
     <tbody role="rowgroup" data-prio-group="{{.ID}}">
-      <tr role="row"><th role="rowheader" scope="rowgroup" colspan="7" class="border-b border-border bg-muted px-3 py-2">{{.Label}} <span class="badge" data-variant="secondary">{{len .Rows}}</span></th></tr>
+      <tr role="row"><th role="rowheader" scope="rowgroup" colspan="7" class="border-b border-border bg-muted px-3 py-2">{{.Label}} <span class="badge" data-variant="secondary">{{.Total}}</span></th></tr>
       {{range .Rows}}
       <tr role="row" class="border-b border-border last:border-0{{if .Edited}} pri-row--edited{{end}}" data-testid="prio-row" data-key="{{.Key}}"{{if .Edited}} data-edited="true"{{end}}>
         <td role="cell" class="p-2">{{template "type-badge" (dict "Type" .Type "Testid" (printf "prio:%s:type" .Key))}}</td>
         <td role="cell" class="prio-table-ticket p-2 wrap-anywhere">
-          <a href="{{.SelectHref}}" class="font-medium hover:underline" data-prio-ticket="{{.Key}}">
+          <a href="{{.SelectHref}}" class="font-medium hover:underline" data-prio-ticket="{{.Key}}"{{if eq $.SelectedKey .Key}} aria-current="true"{{end}}
+             hx-get="{{.DrawerHref}}" hx-target="#prio-drawer-slot" hx-swap="innerHTML show:none">
             <span class="mr-1 font-mono text-xs text-muted-foreground">{{.Key}}</span> {{.Summary}}
           </a>
         </td>
@@ -93,6 +85,13 @@
     {{end}}{{end}}
   </table>
 </div>
+{{if gt .Page.Count 1}}
+<nav class="my-3 flex flex-wrap items-center gap-2" aria-label="Übersichtsseiten">
+  {{if .Page.PrevHref}}<a class="btn" data-variant="outline" href="{{.Page.PrevHref}}" data-prio-page>← Vorherige Seite</a>{{end}}
+  <span class="text-sm text-muted-foreground" data-prio-page-number tabindex="-1">Seite {{.Page.Number}} von {{.Page.Count}}</span>
+  {{if .Page.NextHref}}<a class="btn" data-variant="outline" href="{{.Page.NextHref}}" data-prio-page>Nächste Seite →</a>{{end}}
+</nav>
+{{end}}
 {{else if not (or .IssueCount .Missing .JiraOrder)}}
 <p data-testid="prio-empty" class="app-surface p-6 text-sm text-muted-foreground">Noch keine Tickets synchronisiert.</p>
 {{else if not (or .Missing .PresetError)}}
@@ -108,14 +107,24 @@
   </ul>
 </section>
 {{end}}
-{{with .Selected}}
-<aside class="app-surface fixed inset-y-0 right-0 z-40 w-full overflow-y-auto shadow-lg sm:max-w-[40rem]" id="prio-drawer" aria-label="Ticketdetails" data-prio-scroll="drawer">
-  <div class="sticky top-0 z-10 flex justify-end border-b border-border bg-card px-4 py-2">
-    <a class="btn" data-variant="ghost" href="{{$.CloseHref}}" data-prio-close>Panel schließen</a>
-  </div>
-  {{template "prio-ticket-panel" .}}
-</aside>
+<div id="prio-drawer-slot">{{template "prio-drawer" .}}</div>
 {{end}}
+
+{{define "prio-preset-picker"}}
+<div class="grid min-w-0 gap-1"{{if and (eq .Preset "all") .PresetPending}} hx-get="/prio/preset-picker" hx-trigger="load"
+     hx-target="this" hx-swap="outerHTML show:none" hx-sync="this:replace" hx-push-url="false"{{end}}>
+      <label for="prio-preset" class="label">Jira-Filter</label>
+      <select id="prio-preset" name="preset" class="select w-full min-w-0" data-prio-filter aria-describedby="prio-preset-description">
+        <option value="all" data-description="Tickets aus dem lokalen Jira-Abbild."{{if eq .Preset "all"}} selected{{end}}>Keiner</option>
+        {{range .PresetOptions}}<option value="{{.Value}}" data-description="{{.Description}}"{{if .Active}} selected{{end}}>{{.Label}}</option>{{end}}
+        {{if and (ne .Preset "all") (not .JiraOrder) (or .PresetError .PresetPending)}}
+        {{/* Preserve an unavailable shared selection when the catalogue does not contain it. */}}
+        {{if not .Filters.Jira.Active}}<option value="{{.Preset}}" selected>{{.Filters.Jira.Label}}</option>{{end}}
+        {{end}}
+      </select>
+      <p id="prio-preset-description" class="break-words text-xs text-muted-foreground" data-prio-preset-description>{{.Filters.Jira.Description}}</p>
+      {{if and (eq .Preset "all") .PresetError}}<p class="text-xs text-muted-foreground" role="status">{{.PresetError}}</p>{{end}}
+    </div>
 {{end}}
 
 {{define "prio-level-option"}}
@@ -126,10 +135,10 @@
 {{end}}
 
 {{define "prio-preset-error"}}
-{{if .PresetError}}
+{{if and .PresetError (ne .Preset "all")}}
 <div class="app-surface mt-3 flex flex-wrap items-center gap-3 p-3" role="status">
-  <p class="text-sm">{{.PresetError}}{{if eq .Preset "all"}} Die Ansicht zeigt den letzten lokalen Stand.{{end}}</p>
-  {{if ne .Preset "all"}}<a class="btn" data-variant="outline" href="{{.AllHref}}">Jira-Filter entfernen</a>{{end}}
+  <p class="text-sm">{{.PresetError}}</p>
+  <a class="btn" data-variant="outline" href="{{.AllHref}}" data-prio-clear-preset>Jira-Filter entfernen</a>
 </div>
 {{end}}
 {{end}}

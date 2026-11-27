@@ -267,6 +267,7 @@ func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
 	}}
 	app := newTestAppWith(t, fixture, cutoff.AddDate(0, 0, 7), web.WithFakeJira(agendaFilterJira{fixture}))
 	base := app.URL + "/prio?cutoff=" + url.QueryEscape(cutoff.Format(time.RFC3339))
+	get(t, app.URL+"/prio/preset-results?preset=10519")
 	for _, tc := range []struct {
 		name, query string
 		want        []string

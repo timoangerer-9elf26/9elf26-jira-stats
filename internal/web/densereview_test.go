@@ -138,7 +138,27 @@ func TestDenseDatasetStressesAllViews(t *testing.T) {
 	})
 
 	t.Run("prio overview exercises all current status groups", func(t *testing.T) {
-		body := get(t, app.URL+"/prio?preset=all&level=all")
+		const path = "/prio?preset=all&level=all"
+		body := get(t, app.URL+path)
+		if count := strings.Count(body, `data-testid="prio-row"`); count != 25 {
+			t.Fatalf("first overview page has %d tickets, want 25", count)
+		}
+		for number := 2; strings.Contains(body, "page="+strconv.Itoa(number)+"&amp;"); number++ {
+			page := get(t, app.URL+path+"&page="+strconv.Itoa(number))
+			body += page
+		}
+		issues, err := app.Store.PrioIssues()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if count := strings.Count(body, `data-testid="prio-row"`); count != len(issues) {
+			t.Fatalf("overview pages have %d rows, want %d", count, len(issues))
+		}
+		for _, issue := range issues {
+			if count := strings.Count(body, `data-key="`+issue.Key+`"`); count != 1 {
+				t.Errorf("overview pages contain %d rows for %s, want one", count, issue.Key)
+			}
+		}
 		assertOrder(t, body,
 			`data-prio-group="planned"`, `data-key="DCAI-T1"`,
 			`data-prio-group="doing"`,

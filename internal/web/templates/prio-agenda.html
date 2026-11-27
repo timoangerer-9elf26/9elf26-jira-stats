@@ -12,17 +12,25 @@
 
 {{define "prio-agenda"}}
   {{template "nav" "prio"}}
+  {{template "prio-agenda-content" .}}
+{{end}}
+
+{{define "prio-agenda-content"}}
   <div hx-boost="true" hx-target="#prio-panel" hx-swap="innerHTML show:none"
        hx-sync="#prio-panel:drop" hx-history="false" data-prio-agenda
        data-step="{{.Step}}" data-ticket="{{.SelectedKey}}" data-window="{{.Meeting.ID}}">
   {{range .Params}}<input type="hidden" data-filterparam name="{{.Name}}" value="{{.Value}}">{{end}}
+  {{if .PresetLoadingResults}}
+  <div data-prio-preset-loading hx-get="{{.PresetResultsHref}}" hx-trigger="load"
+       hx-target="closest [data-prio-agenda]" hx-swap="outerHTML show:none" hx-sync="#prio-panel:abort" hx-push-url="false"></div>
+  {{end}}
   <header class="my-3 flex flex-wrap items-end justify-between gap-3">
     <div>
       <h1 class="text-xl font-bold">Prio-Meeting</h1>
       <p class="text-sm text-muted-foreground">DCAI</p>
     </div>
     <div class="flex flex-wrap items-end gap-2">
-      <form action="/prio" method="get" class="flex flex-wrap items-end gap-2">
+      <form action="/prio" method="get" class="flex flex-wrap items-end gap-2" data-prio-cutoff-form>
         {{range .CutoffParams}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
         <div>
           <label for="prio-cutoff" class="label">Stichtag · Europe/Berlin</label>
@@ -33,7 +41,7 @@
       <div class="text-sm text-muted-foreground">
         <p>{{.CutoffSource}} · <time datetime="{{.Cutoff.Format "2006-01-02T15:04:05Z07:00"}}">{{.CutoffLabel}}</time></p>
         {{if .InvalidCutoff}}<p role="alert">Der gewählte Stichtag ist ungültig.</p>{{end}}
-        <a class="text-xs underline" href="{{.ShareCutoffHref}}">Stichtag im Link speichern</a>
+        <a class="text-xs underline" href="{{.ShareCutoffHref}}" data-prio-share-cutoff>Stichtag im Link speichern</a>
       </div>
       {{if .MeetingEnd}}
       <time class="text-sm text-muted-foreground" datetime="{{.MeetingEnd}}" title="Abgeschlossen von {{.Meeting.AccountID}}">{{.MeetingLabel}}</time>
@@ -92,7 +100,9 @@
       <a class="btn mt-2" data-variant="outline" href="{{.BacklogSortHref}}">{{if .OldestFirst}}Nach Priorität sortieren{{else}}Älteste zuerst{{end}}</a>
       {{end}}
     </header>
-    {{if .Current.Rows}}
+    {{if and .PresetLoadingResults (ne .Step "epic-check")}}
+    <p class="p-4 text-sm text-muted-foreground" role="status">Jira-Filter wird geladen …</p>
+    {{else if .Current.Rows}}
     <ul class="app-scroll max-h-36 overflow-y-auto p-2 lg:max-h-[65vh]" data-prio-scroll="queue">
       {{range .Current.Rows}}
       <li class="rounded-md border p-2 text-sm{{if eq .Key $.SelectedKey}} border-primary bg-accent{{else}} border-transparent{{end}}">

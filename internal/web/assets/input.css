@@ -186,3 +186,9 @@ button:not(:disabled) {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+/* The selected view remains visible while an agenda navigation is in flight. */
+[data-prio-agenda] [aria-busy="true"].htmx-request {
+  cursor: progress;
+  opacity: 0.65;
+}
