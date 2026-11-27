@@ -111,7 +111,7 @@
 {{end}}
 
 {{define "prio-preset-picker"}}
-<div class="grid min-w-0 gap-1"{{if and (eq .Preset "all") .PresetPending}} hx-get="/prio/preset-picker" hx-trigger="load"
+<div class="grid min-w-0 gap-1" data-prio-preset-picker{{if and (eq .Preset "all") .PresetPending}} hx-get="/prio/preset-picker" hx-trigger="load"
      hx-target="this" hx-swap="outerHTML show:none" hx-sync="this:replace" hx-push-url="false"{{end}}>
       <label for="prio-preset" class="label">Jira-Filter</label>
       <select id="prio-preset" name="preset" class="select w-full min-w-0" data-prio-filter aria-describedby="prio-preset-description">

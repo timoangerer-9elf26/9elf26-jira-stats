@@ -80,13 +80,20 @@ func TestPrioPaintsProjectedDetailsWhilePersonalJiraReadsWait(t *testing.T) {
 	}
 	results := make(chan reply, 1)
 	controls := make(chan reply, 1)
+	prefetch := make(chan reply, 1)
 	read := func(path string, result chan<- reply) {
 		res, err := app.Client().Get(app.URL + path + query)
 		result <- reply{res, err}
 	}
+	go read("/prio/preset-prefetch", prefetch)
+	select {
+	case <-client.searchStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("prefetch did not start the personal Jira search")
+	}
 	go read("/prio/preset-results", results)
 	go read("/prio/ticket/controls", controls)
-	for _, started := range []chan struct{}{client.searchStarted, client.fieldsStarted, client.transitionsStarted} {
+	for _, started := range []chan struct{}{client.fieldsStarted, client.transitionsStarted} {
 		select {
 		case <-started:
 		case <-time.After(2 * time.Second):
@@ -99,10 +106,22 @@ func TestPrioPaintsProjectedDetailsWhilePersonalJiraReadsWait(t *testing.T) {
 	}
 	close(client.release)
 	released = true
+	if result := <-prefetch; result.err != nil {
+		t.Fatal(result.err)
+	} else {
+		result.response.Body.Close()
+		if result.response.StatusCode != http.StatusNoContent {
+			t.Fatalf("prefetch returned %d, want 204", result.response.StatusCode)
+		}
+	}
 	if result := <-results; !strings.Contains(ticketResponse(t, result.response, result.err), `data-key="DCAI-41"`) {
 		t.Fatal("deferred preset did not return its matching row")
 	}
 	if result := <-controls; !strings.Contains(ticketResponse(t, result.response, result.err), `id="prio-edit-summary"`) {
 		t.Fatal("deferred controls did not return the edit form")
+	}
+	body = get(t, app.URL+"/prio"+query)
+	if !strings.Contains(body, `data-key="DCAI-41"`) || strings.Contains(body, "data-prio-preset-loading") {
+		t.Fatal("prefetch did not warm the selected Jira result")
 	}
 }

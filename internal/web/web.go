@@ -359,6 +359,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /prio/drawer", s.handlePrioDrawer)
 	s.mux.HandleFunc("GET /prio/preset-picker", s.handlePrioPresetPicker)
 	s.mux.HandleFunc("GET /prio/preset-results", s.handlePrioPresetResults)
+	s.mux.HandleFunc("GET /prio/preset-prefetch", s.handlePrioPresetPrefetch)
 	s.mux.HandleFunc("POST /prio/priority", s.handlePrioPriority)
 	s.mux.HandleFunc("POST /prio/ticket", s.handlePrioTicket)
 	s.mux.HandleFunc("GET /prio/ticket/controls", s.handlePrioTicketControls)

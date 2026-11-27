@@ -58,6 +58,22 @@ func (s *Server) handlePrioPresetResults(w http.ResponseWriter, r *http.Request)
 	s.renderPrioWith(w, ctx, q, "prio-agenda-content", prioEdit{})
 }
 
+func (s *Server) handlePrioPresetPrefetch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	q := prioAgendaParams(r.URL.Query())
+	if preset := q.Get("preset"); jiraIssueID.MatchString(preset) {
+		cutoff, err := s.prioCutoff(q)
+		if err != nil {
+			s.renderError(w)
+			return
+		}
+		view := prioAgendaView{Preset: preset, Cutoff: cutoff.at}
+		ctx := context.WithValue(r.Context(), prioPresetLoadKey{}, prioPresetLoad{})
+		s.prioPresetKeys(ctx, &view, q)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (view prioAgendaView) PresetResultsHref() string {
 	href := "/prio/preset-results?" + strings.TrimPrefix(view.CanonicalHref, "/prio?")
 	if view.TicketResult.Change != "" || view.TicketResult.Message != "" {
@@ -141,20 +157,56 @@ func (c *prioCache[K, V]) deleteLocked(key K) {
 type prioSearchCache struct {
 	prioCache[prioQueryKey, []string]
 	generation uint64
+	searches   map[prioSearchFlightKey]*prioSearchFlight
 }
 
-func (c *prioSearchCache) lookup(key prioQueryKey, now time.Time) ([]string, bool, uint64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	value, found := c.getLocked(key, now)
-	return value, found, c.generation
+type prioSearchFlightKey struct {
+	prioQueryKey
+	generation uint64
 }
 
-func (c *prioSearchCache) store(key prioQueryKey, value []string, now time.Time, generation uint64) {
+type prioSearchFlight struct {
+	done chan struct{}
+	keys []string
+	err  error
+}
+
+func (c *prioSearchCache) search(ctx context.Context, key prioQueryKey, now func() time.Time, fetch func(context.Context) ([]string, error)) ([]string, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.generation == generation {
-		c.putLocked(key, value, now)
+	if keys, found := c.getLocked(key, now()); found {
+		c.mu.Unlock()
+		return keys, nil
+	}
+	flightKey := prioSearchFlightKey{key, c.generation}
+	flight := c.searches[flightKey]
+	if flight == nil {
+		flight = &prioSearchFlight{done: make(chan struct{})}
+		if c.searches == nil {
+			c.searches = make(map[prioSearchFlightKey]*prioSearchFlight)
+		}
+		c.searches[flightKey] = flight
+		// A navigation can finish a prefetch already in progress. Let each
+		// browser request cancel its own wait while bounding the shared Jira read.
+		deadline, _ := ctx.Deadline()
+		go func() {
+			searchCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+			defer cancel()
+			flight.keys, flight.err = fetch(searchCtx)
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if flight.err == nil && c.generation == flightKey.generation {
+				c.putLocked(key, flight.keys, now())
+			}
+			delete(c.searches, flightKey)
+			close(flight.done)
+		}()
+	}
+	c.mu.Unlock()
+	select {
+	case <-flight.done:
+		return flight.keys, flight.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 }
 
@@ -240,18 +292,19 @@ func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, _ url
 	}
 	view.JiraSearchHref = s.jiraSearchURL(jql)
 	key := prioQueryKey{account, sha256.Sum256([]byte(jql))}
-	keys, cached, generation := s.prioKeysCache.lookup(key, s.now())
+	keys, cached := s.prioKeysCache.get(key, s.now())
 	if !cached {
 		if !load {
 			view.PresetPending = true
 			return nil
 		}
-		keys, err = client.SearchIssueKeys(ctx, jql)
+		keys, err = s.prioKeysCache.search(ctx, key, s.now, func(ctx context.Context) ([]string, error) {
+			return client.SearchIssueKeys(ctx, jql)
+		})
 		if err != nil {
 			view.PresetError = "Jira-Abfrage fehlgeschlagen."
 			return nil
 		}
-		s.prioKeysCache.store(key, keys, s.now(), generation)
 	}
 	view.JiraOrder = true
 	return keys

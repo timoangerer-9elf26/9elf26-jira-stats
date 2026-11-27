@@ -19,6 +19,9 @@
   let closeTicket = '';
   let editFieldsOpen = false;
   let filtersOpen = false;
+  let lastJiraPreset = '';
+  let presetPrefetchPending = false;
+  let lastPresetPrefetch = -Infinity;
   let filterRequest;
   let renderedStep = agenda().dataset.step;
 
@@ -217,9 +220,34 @@
     form.querySelector('[data-prio-preset-description]').textContent = selectedPreset.dataset.description || '';
   }
 
+  function prefetchJiraPreset(picker) {
+    if (!picker || presetPrefetchPending || performance.now() - lastPresetPrefetch < 15000) return;
+    const known = [picker.value, lastJiraPreset, '10519'];
+    const preset = known.find(id => /^\d+$/.test(id) && [...picker.options].some(option => option.value === id));
+    if (!preset) return;
+    const params = new URLSearchParams({preset});
+    const cutoff = agenda()?.querySelector(':scope > input[name="cutoff"]')?.value;
+    if (cutoff) params.set('cutoff', cutoff);
+    lastPresetPrefetch = performance.now();
+    presetPrefetchPending = true;
+    fetch('/prio/preset-prefetch?' + params, {priority: 'low', redirect: 'manual'})
+      .catch(() => { /* Selecting the filter still performs its normal request. */ })
+      .finally(() => { presetPrefetchPending = false; });
+  }
+
+  panel.addEventListener('focusin', event => {
+    if (event.target.matches('#prio-preset')) prefetchJiraPreset(event.target);
+  });
+  panel.addEventListener('toggle', event => {
+    if (event.target.matches('[data-testid="prio-filters"][open]')) {
+      prefetchJiraPreset(event.target.querySelector('#prio-preset'));
+    }
+  }, true);
+
   panel.addEventListener('change', event => {
     const control = event.target;
     if (control.matches('[data-prio-filter]')) {
+      if (control.id === 'prio-preset' && control.value !== 'all') lastJiraPreset = control.value;
       const form = control.form;
       updateFilterSummary(form);
       form.requestSubmit();
@@ -304,6 +332,8 @@
       restoreView();
     } else if (target.matches('[data-prio-controls]') && view.dataset.ticket === target.dataset.prioControls) {
       restoreFocus(view);
+    } else if (target.matches('[data-prio-preset-picker]')) {
+      prefetchJiraPreset(view.querySelector('[data-testid="prio-filters"][open] #prio-preset'));
     }
   });
   document.addEventListener('htmx:historyRestore', restoreView);
