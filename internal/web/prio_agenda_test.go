@@ -256,7 +256,7 @@ func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
 	technical := []string{"Technical"}
 	fixture := &jira.FakeClient{Issues: []jira.Issue{
 		{Key: "DCAI-1", Type: "Epic", Status: "Triage", Labels: technical, CreatedAt: after},
-		{Key: "DCAI-2", Type: "Epic", Status: "Triage", Labels: technical, CreatedAt: before},
+		{Key: "DCAI-2", Type: "Epic", Status: "Triage", Labels: technical, CreatedAt: before, ParentKey: "DCAI-99"},
 		{Key: "DCAI-3", Type: "Task", Status: "Triage", Labels: technical, CreatedAt: after},
 		{Key: "DCAI-4", Type: "Epic", Status: "Ready for Release", Labels: technical, CreatedAt: before, Changelog: done("4")},
 		{Key: "DCAI-5", Type: "Task", Status: "Ready for Release", Labels: technical, CreatedAt: before, Changelog: done("5")},
