@@ -225,7 +225,7 @@ func TestPrioStatusMarkerUsesCurrentStatusWithIncompleteHistory(t *testing.T) {
 				{Key: "DCAI-1", Type: "Task", Status: tc.current, Changelog: tc.changes},
 			}})
 			page := get(t, app.URL+"/prio?"+url.Values{
-				"cutoff": {cutoff.Format(time.RFC3339)}, "preset": {"all"},
+				"cutoff": {cutoff.Format(time.RFC3339)}, "preset": {"all"}, "level": {"all"},
 			}.Encode())
 			if marker := `data-prio-marker="status">` + tc.want + "</span>"; !strings.Contains(page, marker) {
 				t.Errorf("overview missing %q", marker)
