@@ -548,7 +548,7 @@ func TestSprintCannedDatasetPopulatesTable(t *testing.T) {
 	}
 	wants := []string{
 		`data-testid="sprint-table"`,
-		`data-testid="sprint-window-label">13 Jul – 14 Jul 2026<`,
+		`data-testid="sprint-window-label">13 Jul – 15 Jul 2026<`,
 		// Started-with cohort = DCAI-1(L)+DCAI-2(M)+DCAI-8(S)+DCAI-9(M): Total 4 /
 		// 8pts. DCAI-1 finished; DCAI-2/8/9 still open. DCAI-3 (S) is excluded as a
 		// pre-finished carry-over (#87): its current status is done but its Done
