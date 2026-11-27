@@ -6,9 +6,12 @@
   function loadState(windowID) {
     try {
       const saved = JSON.parse(sessionStorage.getItem('prio-agenda'));
-      if (saved?.windowID === windowID) return saved;
+      if (saved?.windowID === windowID) {
+        const {discussed, cells, scroll} = saved;
+        return {windowID, discussed, cells, scroll};
+      }
     } catch { /* Session storage can be unavailable. */ }
-    return {windowID, discussed: {}, changes: [], cells: {}, scroll: {}};
+    return {windowID, discussed: {}, cells: {}, scroll: {}};
   }
 
   let state = loadState(agenda().dataset.window);
@@ -54,13 +57,7 @@
       }
     }
     view.querySelector('[data-prio-summary-count]').textContent =
-      `${discussed.size} ${discussed.size === 1 ? 'besprochenes Ticket' : 'besprochene Tickets'} · ${state.changes.length} ${state.changes.length === 1 ? 'Änderung' : 'Änderungen'}`;
-    const changes = view.querySelector('[data-prio-summary-changes]');
-    changes.replaceChildren(...state.changes.map(change => {
-      const row = document.createElement('li');
-      row.textContent = change;
-      return row;
-    }));
+      `${discussed.size} ${discussed.size === 1 ? 'besprochenes Ticket' : 'besprochene Tickets'}`;
   }
 
   function restoreView() {
@@ -117,13 +114,6 @@
     renderProgress();
   }
 
-  function recordChange(label) {
-    if (typeof label !== 'string' || !label) return;
-    state.changes.push(label);
-    saveState();
-    renderProgress();
-  }
-
   function markDiscussed(view) {
     const {step, ticket} = view.dataset;
     const key = step === 'overview' ? 'overview' : ticket;
@@ -159,6 +149,9 @@
     if (target.closest('[data-prio-summary]')) {
       renderProgress();
       view.querySelector('#prio-summary').showModal();
+      window.htmx?.ajax('GET', '/prio/meeting/summary?window=' + encodeURIComponent(view.dataset.window), {
+        target: view.querySelector('#prio-summary-changes'), swap: 'innerHTML'
+      });
     }
   }, true);
 
@@ -199,18 +192,10 @@
         focused?.id ? `#${CSS.escape(focused.id)}` : '';
     }
   });
-  document.addEventListener('htmx:afterSwap', event => {
-    if (event.detail.target !== panel) return;
-    const view = agenda();
-    if (!view?.dataset.prioChange) return;
-    if (state.windowID !== view.dataset.window) state = loadState(view.dataset.window);
-    recordChange(view.dataset.prioChange);
-  });
   document.addEventListener('htmx:afterSettle', event => {
     if (event.detail.target === panel) restoreView();
   });
   document.addEventListener('htmx:historyRestore', restoreView);
-  document.addEventListener('prio:change', event => recordChange(event.detail));
   window.addEventListener('pagehide', rememberView);
   // Browser history owns the page offset. Reapply queue/table offsets as well.
   requestAnimationFrame(restoreView);

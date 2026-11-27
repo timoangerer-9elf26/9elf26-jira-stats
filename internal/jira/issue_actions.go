@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -23,8 +24,8 @@ type EditField struct {
 }
 
 type EditOption struct {
-	ID, Name, Value, AccountID, DisplayName string
-	Disabled                                bool
+	ID, Key, Name, Value, Summary, AccountID, DisplayName string
+	Disabled                                              bool
 }
 
 // UnmarshalJSON also accepts Jira metadata whose allowed values are scalars.
@@ -68,6 +69,24 @@ func (c *LiveClient) FetchEditFields(ctx context.Context, key string) (map[strin
 // ReadPrioIssueDescription checks the issue still belongs to DCAI. Jira also
 // accepts old keys for moved issues, so a prefix check alone cannot guard writes.
 func (c *LiveClient) ReadPrioIssueDescription(ctx context.Context, key string) (json.RawMessage, error) {
+	return c.readScopedIssue(ctx, key, PrioProject, "project,description")
+}
+
+// CheckIssueProject validates both the requested key and Jira's canonical issue.
+func (c *LiveClient) CheckIssueProject(ctx context.Context, key string) error {
+	project := c.cfg.ProjectKey
+	if project == "" {
+		project = PrioProject
+	}
+	_, err := c.readScopedIssue(ctx, key, project, "project")
+	return err
+}
+
+func (c *LiveClient) readScopedIssue(ctx context.Context, key, project, fields string) (json.RawMessage, error) {
+	scopeError := errors.New("Der Jira-Key gehört nicht mehr zu diesem Projektticket.")
+	if !strings.HasPrefix(key, project+"-") {
+		return nil, scopeError
+	}
 	var issue struct {
 		Key    string
 		Fields struct {
@@ -75,12 +94,12 @@ func (c *LiveClient) ReadPrioIssueDescription(ctx context.Context, key string) (
 			Description json.RawMessage
 		}
 	}
-	err := c.get(ctx, "/rest/api/3/issue/"+url.PathEscape(key), url.Values{"fields": {"project,description"}}, &issue)
+	err := c.get(ctx, "/rest/api/3/issue/"+url.PathEscape(key), url.Values{"fields": {fields}}, &issue)
 	if err != nil {
 		return nil, err
 	}
-	if issue.Key != key || issue.Fields.Project.Key != PrioProject {
-		return nil, errors.New("Der Jira-Key gehört nicht mehr zu diesem DCAI-Ticket.")
+	if issue.Key != key || issue.Fields.Project.Key != project {
+		return nil, scopeError
 	}
 	return issue.Fields.Description, nil
 }

@@ -1,10 +1,14 @@
 package web_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -81,6 +85,12 @@ func TestPrioOverviewRunsTheSelectedPresetAndRendersLocalRows(t *testing.T) {
 			t.Errorf("overview missing %q", want)
 		}
 	}
+	_, searchURL, ok := strings.Cut(page, jiraServer.URL+"/issues/?jql=")
+	jql, _, _ := strings.Cut(searchURL, `"`)
+	decoded, err := url.QueryUnescape(html.UnescapeString(jql))
+	if !ok || err != nil || !strings.Contains(decoded, `AFTER "2026-03-08 01:59"`) {
+		t.Fatalf("Jira link does not use the effective preset JQL: %q (%v)", decoded, err)
+	}
 	if strings.Contains(page, `data-key="DCAI-3"`) || strings.Contains(page, "OTHER-12") {
 		t.Fatal("overview included a ticket outside the DCAI preset results")
 	}
@@ -142,6 +152,8 @@ func TestPrioPresetCachesAreIsolatedByJiraAccount(t *testing.T) {
 			fmt.Fprintf(w, `{"access_token":"person-%d","refresh_token":"refresh-%d","expires_in":3600}`, n, n)
 		case "/oauth/token/accessible-resources":
 			fmt.Fprint(w, validResources)
+		case myPermissionsPath:
+			writeProjectPermission(t, w, r, validProjectPermission)
 		case "/ex/jira/cloud-1/rest/api/3/myself":
 			fmt.Fprintf(w, `{"accountId":%q,"timeZone":"Europe/Berlin","active":true}`, person)
 		case "/ex/jira/cloud-1/rest/api/3/filter/search":
@@ -179,5 +191,60 @@ func TestPrioPresetCachesAreIsolatedByJiraAccount(t *testing.T) {
 	}
 	if discoveries.Load() != 2 || searches.Load() != 2 {
 		t.Errorf("discovery/search calls = %d/%d, want one of each per account", discoveries.Load(), searches.Load())
+	}
+}
+
+type delayedPresetJira struct {
+	casePlanningJira
+	started, release chan struct{}
+	searches         atomic.Int32
+}
+
+func (c *delayedPresetJira) SearchIssueKeys(ctx context.Context, jql string) ([]string, error) {
+	keys, err := c.casePlanningJira.SearchIssueKeys(ctx, jql)
+	if c.searches.Add(1) == 1 {
+		close(c.started)
+		select {
+		case <-c.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return keys, err
+}
+
+func TestPrioInlinePrioritySupersedesInflightPresetSearch(t *testing.T) {
+	client := &delayedPresetJira{
+		casePlanningJira: casePlanningJira{&jira.FakeClient{Issues: []jira.Issue{{
+			Key: "DCAI-41", Type: "Task", Status: "Triage", Priority: "High",
+		}}}},
+		started: make(chan struct{}), release: make(chan struct{}),
+	}
+	app := newWritablePrioApp(t, client)
+	preset := app.URL + "/prio?step=overview&preset=42"
+	firstDone := make(chan error, 1)
+	go func() {
+		resp, err := http.Get(preset)
+		if err == nil {
+			_, err = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		firstDone <- err
+	}()
+	select {
+	case <-client.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("initial preset search did not start")
+	}
+	code, _ := postForm(t, app.URL+"/prio/priority", url.Values{"key": {"DCAI-41"}, "priority": {"Medium"}})
+	close(client.release)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if code != http.StatusOK {
+		t.Fatalf("inline priority route returned %d", code)
+	}
+	if page := get(t, preset); strings.Contains(page, `data-key="DCAI-41"`) {
+		t.Fatal("pre-write search results replaced the post-write preset membership")
 	}
 }

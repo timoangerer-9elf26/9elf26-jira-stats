@@ -156,6 +156,12 @@ func (failingRollups) LastPrioMeeting() (store.PrioMeeting, error) {
 func (failingRollups) CompletePrioMeeting(_ int64, _ time.Time, _ string) error {
 	return errBoom
 }
+func (failingRollups) RecordPrioMeetingChange(store.PrioMeetingChange) error {
+	return errBoom
+}
+func (failingRollups) PrioMeetingChanges(_ int64) ([]store.PrioMeetingChange, error) {
+	return nil, errBoom
+}
 func (failingRollups) ProjectMembers() ([]store.ProjectMember, error) {
 	return nil, errBoom
 }

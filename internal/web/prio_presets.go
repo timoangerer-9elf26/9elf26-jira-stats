@@ -23,10 +23,10 @@ type planningPresetClient interface {
 }
 
 type prioPresetView struct {
-	PresetOptions []prioAgendaOption
-	PresetError   string
-	Missing       []prioMissingTicket
-	JiraOrder     bool
+	PresetOptions               []prioAgendaOption
+	PresetError, JiraSearchHref string
+	Missing                     []prioMissingTicket
+	JiraOrder                   bool
 }
 
 type prioMissingTicket struct{ Key, Href string }
@@ -53,6 +53,10 @@ func (c *prioCache[K, V]) get(key K, now time.Time) (V, bool) {
 func (c *prioCache[K, V]) put(key K, value V, now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.putLocked(key, value, now)
+}
+
+func (c *prioCache[K, V]) putLocked(key K, value V, now time.Time) {
 	if c.entries == nil {
 		c.entries = make(map[K]prioCacheEntry[V])
 	}
@@ -64,7 +68,44 @@ func (c *prioCache[K, V]) put(key K, value V, now time.Time) {
 	c.entries[key] = prioCacheEntry[V]{value, now.Add(prioPresetCacheTTL)}
 }
 
+type prioSearchCache struct {
+	prioCache[prioQueryKey, []string]
+	generation map[string]uint64
+}
+
+func (c *prioSearchCache) lookup(key prioQueryKey, now time.Time) ([]string, bool, uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry := c.entries[key]
+	return entry.value, now.Before(entry.expires), c.generation[key.account]
+}
+
+func (c *prioSearchCache) store(key prioQueryKey, value []string, now time.Time, generation uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.generation[key.account] == generation {
+		c.putLocked(key, value, now)
+	}
+}
+
+func (c *prioSearchCache) invalidate(accountID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.generation == nil {
+		c.generation = make(map[string]uint64)
+	}
+	c.generation[accountID]++
+	for query := range c.entries {
+		if query.account == accountID {
+			delete(c.entries, query)
+		}
+	}
+}
+
 func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, q url.Values) []string {
+	if view.Preset == prioLocalPreset {
+		view.JiraSearchHref = s.jiraSearchURL("project = " + jira.PrioProject)
+	}
 	identity, _ := JiraIdentityFromContext(ctx)
 	personal, _ := PersonalJiraFromContext(ctx)
 	client, ok := personal.(planningPresetClient)
@@ -107,15 +148,16 @@ func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, q url
 		view.PresetError = "Konfigurationsfehler im Jira-Filter. " + err.Error()
 		return nil
 	}
+	view.JiraSearchHref = s.jiraSearchURL(jql)
 	key := prioQueryKey{identity.AccountID, jql}
-	keys, cached := s.prioKeysCache.get(key, s.now())
+	keys, cached, generation := s.prioKeysCache.lookup(key, s.now())
 	if !cached {
 		keys, err = client.SearchIssueKeys(ctx, jql)
 		if err != nil {
 			view.PresetError = "Jira-Abfrage fehlgeschlagen."
 			return nil
 		}
-		s.prioKeysCache.put(key, keys, s.now())
+		s.prioKeysCache.store(key, keys, s.now(), generation)
 	}
 	view.JiraOrder = true
 	return keys
@@ -191,4 +233,11 @@ func prioPresetJQL(filter jira.PlanningPreset, cutoff time.Time, loc *time.Locat
 	}
 	rewritten.WriteString(filter.JQL[end:])
 	return rewritten.String(), nil
+}
+
+func (s *Server) jiraSearchURL(jql string) string {
+	if s.jiraBaseURL == "" {
+		return ""
+	}
+	return s.jiraBaseURL + "/issues/?" + url.Values{"jql": {jql}}.Encode()
 }

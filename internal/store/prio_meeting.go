@@ -45,3 +45,43 @@ func (s *Store) CompletePrioMeeting(window int64, endedAt time.Time, accountID s
 	}
 	return nil
 }
+
+// PrioMeetingChange records an app mutation Jira confirmed.
+type PrioMeetingChange struct {
+	IssueKey, Label, AccountID string
+	OccurredAt                 time.Time
+}
+
+// RecordPrioMeetingChange assigns the successful write to the current window
+// atomically with respect to meeting completion.
+func (s *Store) RecordPrioMeetingChange(change PrioMeetingChange) error {
+	_, err := s.db.Exec(`
+		INSERT INTO prio_meeting_change (meeting_window, issue_key, label, account_id, occurred_at)
+		VALUES (COALESCE((SELECT MAX(id) FROM prio_meeting), 0), ?, ?, ?, ?)`,
+		change.IssueKey, change.Label, change.AccountID, change.OccurredAt.UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func (s *Store) PrioMeetingChanges(window int64) ([]PrioMeetingChange, error) {
+	rows, err := s.db.Query(`
+		SELECT issue_key, label, account_id, occurred_at
+		FROM prio_meeting_change WHERE meeting_window = ? ORDER BY id`, window)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var changes []PrioMeetingChange
+	for rows.Next() {
+		var change PrioMeetingChange
+		var occurredAt string
+		if err := rows.Scan(&change.IssueKey, &change.Label, &change.AccountID, &occurredAt); err != nil {
+			return nil, err
+		}
+		change.OccurredAt, err = time.Parse(time.RFC3339Nano, occurredAt)
+		if err != nil {
+			return nil, err
+		}
+		changes = append(changes, change)
+	}
+	return changes, rows.Err()
+}

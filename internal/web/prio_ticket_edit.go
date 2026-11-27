@@ -18,7 +18,7 @@ import (
 
 type prioTicketForm struct {
 	Name, Label, Kind, Current, Revision string
-	Required                             bool
+	Required, HasCurrent                 bool
 	Options                              []prioTicketOption
 }
 
@@ -83,7 +83,7 @@ func (s *Server) prioTicketForms(detail store.IssueDetail, fields map[string]jir
 		{Name: "assignee", Label: "Zuweisung", Kind: "select", Current: detail.AssigneeAccountID},
 		{Name: "size", Label: "T-Shirt-Schätzung", Kind: "select", Current: detail.Size},
 		{Name: "labels", Label: "Labels", Current: strings.Join(detail.Labels, " ")},
-		{Name: "parent", Label: "Parent / Epic", Current: detail.ParentKey},
+		{Name: "parent", Label: "Parent / Epic", Kind: "select", Current: detail.ParentKey},
 	}
 	var available []prioTicketForm
 	for _, form := range forms {
@@ -93,7 +93,12 @@ func (s *Server) prioTicketForms(detail store.IssueDetail, fields map[string]jir
 		}
 		form.Required = form.Required || field.Required
 		if form.Kind == "select" {
-			form.Options = s.prioTicketOptions(form.Name, field)
+			if form.Name == "parent" {
+				form.Options = s.prioParentOptions(detail, field)
+			} else {
+				form.Options = s.prioTicketOptions(form.Name, field)
+			}
+			form.HasCurrent = slices.ContainsFunc(form.Options, func(option prioTicketOption) bool { return option.Value == form.Current })
 			if len(form.Options) == 0 {
 				continue
 			}
@@ -142,6 +147,60 @@ func (s *Server) prioTicketOptions(name string, field jira.EditField) []prioTick
 	return options
 }
 
+func (s *Server) prioParentOptions(detail store.IssueDetail, field jira.EditField) []prioTicketOption {
+	var options []prioTicketOption
+	if !field.Required {
+		options = append(options, prioTicketOption{Label: "Kein Parent"})
+	}
+	if len(field.AllowedValues) != 0 {
+		for _, option := range field.AllowedValues {
+			if option.Disabled {
+				continue
+			}
+			value := option.Key
+			if value == "" {
+				value = option.Value
+			}
+			if !jiraIssueKey.MatchString(value) {
+				value = option.ID
+				if !jiraIssueID.MatchString(value) {
+					continue
+				}
+			}
+			if value == detail.Key {
+				continue
+			}
+			label := value
+			if option.Summary != "" {
+				label += " · " + option.Summary
+			}
+			options = append(options, prioTicketOption{value, label})
+		}
+		return options
+	}
+	// Jira omitted choices. Offer projected DCAI Epics for work items and
+	// preserve the current parent even if the parent itself is not projected.
+	issues, err := s.rollups.PrioIssues()
+	if err == nil {
+		for _, candidate := range issues {
+			if candidate.Key == detail.Key || !dcaiIssueKey.MatchString(candidate.Key) {
+				continue
+			}
+			if candidate.Key == detail.ParentKey || (detail.Type != "Epic" && strings.EqualFold(candidate.Type, "Epic")) {
+				label := candidate.Key
+				if candidate.Summary != "" {
+					label += " · " + candidate.Summary
+				}
+				options = append(options, prioTicketOption{candidate.Key, label})
+			}
+		}
+	}
+	if jiraIssueKey.MatchString(detail.ParentKey) && !slices.ContainsFunc(options, func(option prioTicketOption) bool { return option.Value == detail.ParentKey }) {
+		options = append(options, prioTicketOption{detail.ParentKey, detail.ParentKey})
+	}
+	return options
+}
+
 func prioJiraField(name string) string {
 	if name == "size" {
 		return jira.EstimateField
@@ -154,7 +213,7 @@ func descriptionRevision(detail store.IssueDetail) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func prioFieldValue(field prioTicketForm, metadata jira.EditField, value, key string) (any, error) {
+func prioFieldValue(field prioTicketForm, metadata jira.EditField, value string) (any, error) {
 	if field.Kind == "select" && !slices.ContainsFunc(field.Options, func(option prioTicketOption) bool { return option.Value == value }) {
 		return nil, errors.New("Jira bietet diesen Wert für das Feld nicht an.")
 	}
@@ -169,17 +228,16 @@ func prioFieldValue(field prioTicketForm, metadata jira.EditField, value, key st
 			return jira.PlainADF(value), nil
 		}
 	case "priority":
+		// Prefer the Jira option ID from edit metadata. The legacy inline
+		// endpoint sends names from a fixed list and cannot represent these IDs.
 		for _, option := range metadata.AllowedValues {
 			if option.Name == value && option.ID != "" && !option.Disabled {
 				return map[string]string{"id": option.ID}, nil
 			}
 		}
 		return map[string]string{"name": value}, nil
-	case "assignee":
-		if value != "" {
-			return map[string]string{"accountId": value}, nil
-		}
 	case "size":
+		// Use the field's actual option ID or value from Jira edit metadata.
 		for _, option := range metadata.AllowedValues {
 			if jira.EstimateSize(option) == value && value != "" && !option.Disabled {
 				if option.ID != "" {
@@ -197,11 +255,10 @@ func prioFieldValue(field prioTicketForm, metadata jira.EditField, value, key st
 		}
 		return labels, nil
 	case "parent":
-		value = strings.ToUpper(strings.TrimSpace(value))
+		if jiraIssueID.MatchString(value) {
+			return map[string]string{"id": value}, nil
+		}
 		if value != "" {
-			if !jiraIssueKey.MatchString(value) || value == key {
-				return nil, errors.New("Bitte einen gültigen Jira-Key für den Parent eingeben.")
-			}
 			return map[string]string{"key": value}, nil
 		}
 	}

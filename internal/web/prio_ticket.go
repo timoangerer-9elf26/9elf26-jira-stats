@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"net/url"
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
@@ -9,22 +10,22 @@ import (
 )
 
 type prioTicketPanel struct {
-	Row              prioRow
-	Detail           store.IssueDetail
-	History          []prioHistoryItem
-	Description      string
-	PlainDescription bool
-	ParentHref       string
-	Links            []prioTicketLink
-	Comments         []prioTicketComment
-	CanWrite         bool
-	MetadataError    string
-	Forms            []prioTicketForm
-	Transitions      []prioTicketTransition
-	EpicSuggestion   *prioEpicSuggestion
-	Params           []filterParam
-	Focused          bool
-	Result           prioTicketResult
+	Row                     prioRow
+	Detail                  store.IssueDetail
+	History                 []prioHistoryItem
+	Description             string
+	PlainDescription        bool
+	ParentHref, BacklogHref string
+	Links                   []prioTicketLink
+	Comments                []prioTicketComment
+	CanWrite                bool
+	MetadataError           string
+	Forms                   []prioTicketForm
+	Transitions             []prioTicketTransition
+	EpicSuggestion          *prioEpicSuggestion
+	Params                  []filterParam
+	Focused                 bool
+	Result                  prioTicketResult
 }
 
 func (s *Server) prioTicketPanel(ctx context.Context, key string, changes []jira.ChangelogEntry, cutoff time.Time, edit prioEdit) (*prioTicketPanel, error) {
@@ -53,6 +54,9 @@ type prioTicketComment struct {
 func (s *Server) populatePrioTicket(panel *prioTicketPanel) {
 	panel.Description, panel.PlainDescription = jira.ADFText(panel.Detail.Description)
 	panel.ParentHref = s.prioRelatedIssueHref(panel.Detail.ParentKey)
+	if s.jiraBaseURL != "" && s.jiraBoardID != "" {
+		panel.BacklogHref = s.jiraBaseURL + "/jira/software/c/projects/" + jira.PrioProject + "/boards/" + url.PathEscape(s.jiraBoardID) + "/backlog"
+	}
 	for _, link := range panel.Detail.Links {
 		panel.Links = append(panel.Links, prioTicketLink{link.Key, link.Relation, link.Summary, s.prioRelatedIssueHref(link.Key)})
 	}

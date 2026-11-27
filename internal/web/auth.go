@@ -36,6 +36,8 @@ func PersonalJiraFromContext(ctx context.Context) (jira.Client, bool) {
 	return jira.PersonalClientFromContext(ctx)
 }
 
+const projectAccessMessage = "This Atlassian account does not have permission to browse the Jira project."
+
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	protected := crossOriginProtection.Handler(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +57,14 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		identity, client, err := s.auth.Resolve(r.Context(), cookieValue(r, sessionCookieName))
 		switch {
+		case errors.Is(err, auth.ErrProjectAccess):
+			if r.Header.Get("HX-Request") == "true" {
+				query := url.Values{"next": {safeNext(safeCurrentPath(r.Header.Get("HX-Current-URL")))}, "reason": {"project-access"}}
+				w.Header().Set("HX-Redirect", "/login?"+query.Encode())
+				w.WriteHeader(http.StatusOK)
+			} else {
+				s.renderLogin(w, safeNext(r.URL.RequestURI()), projectAccessMessage, http.StatusForbidden)
+			}
 		case errors.Is(err, auth.ErrSignIn):
 			s.redirectToLogin(w, r)
 		case err != nil:
@@ -115,7 +125,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, defaultNext, http.StatusFound)
 		return
 	}
-	s.renderLogin(w, safeNext(r.URL.Query().Get("next")), "", http.StatusOK)
+	next := safeNext(r.URL.Query().Get("next"))
+	if r.URL.Query().Get("reason") == "project-access" {
+		s.renderLogin(w, next, projectAccessMessage, http.StatusForbidden)
+		return
+	}
+	s.renderLogin(w, next, "", http.StatusOK)
 }
 
 func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +164,8 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, authCookie(flowCookieName, "", -1))
 	}
 	switch {
+	case errors.Is(err, auth.ErrProjectAccess):
+		s.renderLogin(w, safeNext(next), projectAccessMessage, http.StatusForbidden)
 	case errors.Is(err, auth.ErrSignIn):
 		s.renderLogin(w, safeNext(next), "Atlassian sign-in was denied or expired. Try again with an authorized account.", http.StatusUnauthorized)
 	case err != nil:

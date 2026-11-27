@@ -27,6 +27,7 @@
     <select id="prio-overview-sort" class="select pr-8" data-prio-sort>
       {{range .SortOptions}}<option value="{{.Href}}" {{if .Active}}selected{{end}}>{{.Label}}</option>{{end}}
     </select>
+    {{if .JiraSearchHref}}<a class="btn" data-variant="outline" href="{{.JiraSearchHref}}" target="_blank" rel="noopener">Jira-Suche öffnen ↗</a>{{end}}
     <a class="btn" data-variant="outline" href="{{.NextHref}}" data-prio-next>Zur Besprechung →</a>
   </div>
 </div>

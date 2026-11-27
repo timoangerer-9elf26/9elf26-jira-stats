@@ -86,6 +86,8 @@ type Rollups interface {
 	IssueDetail(key string) (store.IssueDetail, bool, error)
 	LastPrioMeeting() (store.PrioMeeting, error)
 	CompletePrioMeeting(window int64, endedAt time.Time, accountID string) error
+	RecordPrioMeetingChange(store.PrioMeetingChange) error
+	PrioMeetingChanges(window int64) ([]store.PrioMeetingChange, error)
 	// ProjectMembers lists the people who may be assigned work on the project
 	// (CONTEXT.md → Project member), display-name ordered. It is the assign
 	// popover's candidate list — read from the projection like everything else, so
@@ -192,6 +194,7 @@ type Server struct {
 	prioLocation    *time.Location
 	velocitySprints int
 	jiraBaseURL     string
+	jiraBoardID     string
 	// version is the build identity reported by GET /version and the nav marker
 	// (docs/adr/0006). It defaults to the stamped internal/version.Version and is
 	// overridable via WithVersion so tests can assert an injected value.
@@ -199,7 +202,7 @@ type Server struct {
 	auth             *auth.Service
 	fakeJira         jira.Client
 	prioFiltersCache prioCache[string, []jira.PlanningPreset]
-	prioKeysCache    prioCache[prioQueryKey, []string]
+	prioKeysCache    prioSearchCache
 }
 
 // Option configures a Server at construction.
@@ -229,6 +232,11 @@ func WithLocation(loc *time.Location) Option {
 // without a link rather than a broken href.
 func WithJiraBaseURL(base string) Option {
 	return func(s *Server) { s.jiraBaseURL = strings.TrimRight(base, "/") }
+}
+
+// WithJiraBoardID identifies the Jira board backing the local projection.
+func WithJiraBoardID(id string) Option {
+	return func(s *Server) { s.jiraBoardID = id }
 }
 
 // WithResyncer wires the sync engine's full-resync capability into the server,
@@ -349,6 +357,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /prio/results", s.handlePrioResults)
 	s.mux.HandleFunc("POST /prio/priority", s.handlePrioPriority)
 	s.mux.HandleFunc("POST /prio/ticket", s.handlePrioTicket)
+	s.mux.HandleFunc("GET /prio/meeting/summary", s.handlePrioMeetingSummary)
 	s.mux.HandleFunc("POST /prio/meeting/complete", s.handlePrioMeetingComplete)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)

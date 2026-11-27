@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -141,8 +140,8 @@ type Syncer struct {
 	overlap        time.Duration
 	personalWrites bool
 
-	// mu serializes sync cycles, full resync and single-issue refreshes.
-	mu sync.Mutex
+	// A buffered channel serializes projection updates with cancellable acquisition.
+	projectionLock chan struct{}
 	// resyncing reports (and guards) an in-flight full resync: TriggerResync flips
 	// it true and only one resync may hold it, so an overlapping trigger is a
 	// safe no-op. It is read by the web layer to show the in-progress state.
@@ -152,7 +151,7 @@ type Syncer struct {
 // NewSyncer builds a Syncer. overlap is the window subtracted from the last
 // sync time when bounding the incremental query (e.g. 2 minutes).
 func NewSyncer(client jira.Client, store Store, overlap time.Duration, opts ...func(*Syncer)) *Syncer {
-	s := &Syncer{client: client, store: store, overlap: overlap}
+	s := &Syncer{client: client, store: store, overlap: overlap, projectionLock: make(chan struct{}, 1)}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -165,8 +164,17 @@ func RequirePersonalWrites(s *Syncer) {
 	s.personalWrites = true
 }
 
-func (s *Syncer) writeClient(ctx context.Context) (jira.Client, error) {
+func (s *Syncer) writeClient(ctx context.Context, key string) (jira.Client, error) {
 	if client, ok := jira.PersonalClientFromContext(ctx); ok {
+		scoped, ok := client.(interface {
+			CheckIssueProject(context.Context, string) error
+		})
+		if !ok {
+			return nil, errors.New("personal Jira client cannot check issue project")
+		}
+		if err := scoped.CheckIssueProject(ctx, key); err != nil {
+			return nil, err
+		}
 		return client, nil
 	}
 	if s.personalWrites {
@@ -197,18 +205,38 @@ func (s *Syncer) TriggerResync(ctx context.Context) bool {
 // Resyncing reports whether a full resync is currently running.
 func (s *Syncer) Resyncing() bool { return s.resyncing.Load() }
 
+func (s *Syncer) lockProjection(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case s.projectionLock <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			s.unlockProjection()
+			return err
+		}
+		return nil
+	}
+}
+
+func (s *Syncer) unlockProjection() { <-s.projectionLock }
+
 // RefreshIssue reads the current issue through the caller's Jira client and
 // saves its projection. Serialize the read as well as the save so a slower
 // refresh cannot overwrite a newer snapshot from another refresh or sync.
 func (s *Syncer) RefreshIssue(ctx context.Context, client interface {
 	FetchIssue(context.Context, string) (jira.Issue, error)
 }, key string) (jira.Issue, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if err := s.lockProjection(ctx); err != nil {
+		return jira.Issue{}, err
+	}
+	defer s.unlockProjection()
 
 	iss, err := client.FetchIssue(ctx, key)
 	if err != nil {
 		return jira.Issue{}, fmt.Errorf("re-fetch issue: %w", err)
+	}
+	if iss.Key != key {
+		return jira.Issue{}, fmt.Errorf("re-fetch issue %s returned incompatible key %q", key, iss.Key)
 	}
 	if err := s.store.SaveIssue(iss, time.Now().UTC().Format(time.RFC3339)); err != nil {
 		return jira.Issue{}, fmt.Errorf("save issue: %w", err)
@@ -223,7 +251,7 @@ func (s *Syncer) RefreshIssue(ctx context.Context, client interface {
 // authoritative size the re-fetched issue carries ("S"/"M"/"L" or "" for
 // no-estimate). The write can succeed even if reconciliation returns an error.
 func (s *Syncer) SetEstimate(ctx context.Context, key, size string) (string, error) {
-	client, err := s.writeClient(ctx)
+	client, err := s.writeClient(ctx, key)
 	if err != nil {
 		return "", err
 	}
@@ -243,7 +271,7 @@ func (s *Syncer) SetEstimate(ctx context.Context, key, size string) (string, err
 // what re-sorts the table around the change. The write can succeed even if
 // reconciliation returns an error.
 func (s *Syncer) SetPriority(ctx context.Context, key, priority string) error {
-	client, err := s.writeClient(ctx)
+	client, err := s.writeClient(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -251,7 +279,10 @@ func (s *Syncer) SetPriority(ctx context.Context, key, priority string) error {
 		return fmt.Errorf("update priority: %w", err)
 	}
 	_, err = s.RefreshIssue(ctx, client, key)
-	return err
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrWriteLanded, err)
+	}
+	return nil
 }
 
 // SetStatus is the Board transition write path (docs/adr/0010): it moves a
@@ -271,10 +302,9 @@ func (s *Syncer) SetPriority(ctx context.Context, key, priority string) error {
 // transition. A failure up to and including the transition itself is returned
 // and leaves both Jira and the projection unchanged; a failure in the
 // reconciliation read/save is returned too, but by then Jira HAS moved and only
-// the projection is behind (see ErrWriteLanded, which SetAssignee marks that
-// case with).
+// the projection is behind (see ErrWriteLanded).
 func (s *Syncer) SetStatus(ctx context.Context, key, statusID string) (string, error) {
-	client, err := s.writeClient(ctx)
+	client, err := s.writeClient(ctx, key)
 	if err != nil {
 		return "", err
 	}
@@ -289,8 +319,13 @@ func (s *Syncer) SetStatus(ctx context.Context, key, statusID string) (string, e
 	if err := client.TransitionIssue(ctx, key, tr.ID); err != nil {
 		return "", fmt.Errorf("transition issue: %w", err)
 	}
-	iss, err := s.RefreshIssue(ctx, client, key)
-	return iss.Status, err
+	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	iss, err := s.RefreshIssue(refreshCtx, client, key)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrWriteLanded, err)
+	}
+	return iss.Status, nil
 }
 
 // ErrWriteLanded marks an error raised AFTER a Jira write has already
@@ -314,7 +349,7 @@ var ErrWriteLanded = errors.New("the Jira write landed; the follow-up did not")
 // point is wrapped with ErrWriteLanded, because the assignment is a fact in Jira
 // by then.
 func (s *Syncer) SetAssignee(ctx context.Context, key, accountID string) (string, error) {
-	client, err := s.writeClient(ctx)
+	client, err := s.writeClient(ctx, key)
 	if err != nil {
 		return "", err
 	}
@@ -336,8 +371,10 @@ func (s *Syncer) SetAssignee(ctx context.Context, key, accountID string) (string
 // in Cycle's cold-start backfill) is what keeps a full resync distinct from a
 // cold-start backfill.
 func (s *Syncer) resync(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if err := s.lockProjection(ctx); err != nil {
+		return err
+	}
+	defer s.unlockProjection()
 
 	startedAt := time.Now().UTC()
 	if err := s.store.Reset(); err != nil {
@@ -362,10 +399,12 @@ func (s *Syncer) resync(ctx context.Context) error {
 // last sync minus the overlap window. On success it records the cycle start
 // as the new last_sync. Retries dedup transitions by changelog entry ID.
 func (s *Syncer) Cycle(ctx context.Context) error {
-	// Serialize with a full resync (which also holds mu): the periodic incremental
+	// Serialize with a full resync (which also holds the projection lock): the periodic incremental
 	// must never interleave with a resync's clear-and-rebuild.
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if err := s.lockProjection(ctx); err != nil {
+		return err
+	}
+	defer s.unlockProjection()
 
 	startedAt := time.Now().UTC()
 

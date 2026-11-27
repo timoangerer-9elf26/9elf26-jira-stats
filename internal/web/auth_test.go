@@ -319,6 +319,8 @@ func TestOAuthReturnsToRequestedPageWithOneTimeBrowserBoundState(t *testing.T) {
 			io.WriteString(w, `{"access_token":"access-1","refresh_token":"refresh-1","expires_in":3600}`)
 		case "/oauth/token/accessible-resources":
 			io.WriteString(w, `[{"id":"cloud-1","url":"https://site.example","scopes":["read:jira-work","write:jira-work","read:jira-user"]}]`)
+		case myPermissionsPath:
+			writeProjectPermission(t, w, r, validProjectPermission)
 		case "/ex/jira/cloud-1/rest/api/3/myself":
 			io.WriteString(w, `{"accountId":"person-1","timeZone":"America/New_York","active":true}`)
 		default:
@@ -361,6 +363,19 @@ func TestOAuthReturnsToRequestedPageWithOneTimeBrowserBoundState(t *testing.T) {
 }
 
 const validResources = `[{"id":"cloud-1","url":"https://site.example","scopes":["read:jira-work","write:jira-work","read:jira-user"]}]`
+const validProjectPermission = `{"permissions":{"BROWSE_PROJECTS":{"havePermission":true}}}`
+const deniedProjectPermission = `{"permissions":{"BROWSE_PROJECTS":{"havePermission":false}}}`
+const myPermissionsPath = "/ex/jira/cloud-1/rest/api/3/mypermissions"
+
+func writeProjectPermission(t *testing.T, w http.ResponseWriter, r *http.Request, payload string) {
+	t.Helper()
+	if r.Method != http.MethodGet || r.URL.Query().Get("projectKey") != "DCAI" ||
+		r.URL.Query().Get("permissions") != "BROWSE_PROJECTS" || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+		t.Errorf("unexpected project permission request: %s %s", r.Method, r.URL)
+	}
+	io.WriteString(w, payload)
+}
+
 const validMyself = `{"accountId":"person-1","timeZone":"America/New_York","active":true}`
 
 func signIn(t *testing.T, app *testApp) *http.Cookie {
@@ -390,62 +405,93 @@ func TestInteractiveJiraWritesUseTheSignedInPersonsGrant(t *testing.T) {
 			url.Values{"status": {"Ready To Do"}}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			const issuePath = "/ex/jira/cloud-1/rest/api/3/issue/DCAI-2"
-			var writeSeen, readSeen atomic.Bool
-			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/oauth/token" {
-					var fields map[string]string
-					if err := json.NewDecoder(r.Body).Decode(&fields); err != nil ||
-						fields["grant_type"] != "authorization_code" || fields["code"] != "auth-code" ||
-						fields["client_secret"] != "app-secret" || fields["client_id"] != "app-id" ||
-						fields["redirect_uri"] != "https://app.example/auth/callback" {
-						t.Errorf("unexpected authorization code exchange: %v (%v)", fields, err)
-					}
-					io.WriteString(w, `{"access_token":"personal-access","refresh_token":"refresh-1","expires_in":3600}`)
-					return
-				}
-				if got := r.Header.Get("Authorization"); got != "Bearer personal-access" {
-					t.Errorf("%s %s Authorization = %q", r.Method, r.URL.Path, got)
-					w.WriteHeader(http.StatusUnauthorized)
-					return
-				}
-				switch {
-				case r.URL.Path == "/oauth/token/accessible-resources":
-					io.WriteString(w, validResources)
-				case r.URL.Path == "/ex/jira/cloud-1/rest/api/3/myself":
-					io.WriteString(w, validMyself)
-				case r.Method == tc.method && r.URL.Path == issuePath+tc.suffix:
-					body, _ := io.ReadAll(r.Body)
-					if string(body) != tc.payload {
-						t.Errorf("Jira payload = %s, want %s", body, tc.payload)
-					}
-					writeSeen.Store(true)
-					w.WriteHeader(http.StatusNoContent)
-				case r.Method == http.MethodGet && r.URL.Path == issuePath+"/transitions":
-					fmt.Fprintf(w, `{"transitions":[{"id":"move-1","to":{"id":%q}}]}`, jira.StatusIDReadyToDo)
-				case r.Method == http.MethodGet && r.URL.Path == issuePath:
-					readSeen.Store(true)
-					io.WriteString(w, `{"key":"DCAI-2","fields":{"summary":"Personal edit reconciled","issuetype":{"name":"Task"},"status":{"name":"Ready To Do","statusCategory":{"name":"To Do"}},"priority":{"name":"High"},"assignee":{"displayName":"Ada"},"customfield_10040":{"value":"Small"},"customfield_10020":[{"id":29,"name":"KW29","state":"active"}]}}`)
-				default:
-					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-					w.WriteHeader(http.StatusNotFound)
-				}
-			}))
-			defer provider.Close()
-
-			app := newOAuthApp(t, provider, nil)
-			session := signIn(t, app)
-			form := tc.form
-			form.Set("key", "DCAI-2")
-			req, _ := http.NewRequest(http.MethodPost, app.URL+tc.route, strings.NewReader(form.Encode()))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			req.AddCookie(session)
-			body := readResponse(t, response(t)(oauthClient(app).Do(req)), http.StatusOK)
-			if !writeSeen.Load() || !readSeen.Load() {
-				t.Fatalf("expected a personal Jira write and re-read: write=%v read=%v, response %.200s", writeSeen.Load(), readSeen.Load(), body)
+		for _, scope := range []string{"DCAI", "moved", "foreign", "moved after write"} {
+			if scope == "foreign" && tc.name == "status" {
+				continue // Board already rejects tickets absent from its active sprint.
 			}
-		})
+			t.Run(tc.name+"/"+scope, func(t *testing.T) {
+				key := "DCAI-2"
+				if scope == "foreign" {
+					key = "OTHER-2"
+				}
+				issuePath := "/ex/jira/cloud-1/rest/api/3/issue/" + key
+				var writeSeen, readSeen atomic.Bool
+				provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/oauth/token" {
+						var fields map[string]string
+						if err := json.NewDecoder(r.Body).Decode(&fields); err != nil ||
+							fields["grant_type"] != "authorization_code" || fields["code"] != "auth-code" ||
+							fields["client_secret"] != "app-secret" || fields["client_id"] != "app-id" ||
+							fields["redirect_uri"] != "https://app.example/auth/callback" {
+							t.Errorf("unexpected authorization code exchange: %v (%v)", fields, err)
+						}
+						io.WriteString(w, `{"access_token":"personal-access","refresh_token":"refresh-1","expires_in":3600}`)
+						return
+					}
+					if got := r.Header.Get("Authorization"); got != "Bearer personal-access" {
+						t.Errorf("%s %s Authorization = %q", r.Method, r.URL.Path, got)
+						w.WriteHeader(http.StatusUnauthorized)
+						return
+					}
+					switch {
+					case r.URL.Path == "/oauth/token/accessible-resources":
+						io.WriteString(w, validResources)
+					case r.URL.Path == myPermissionsPath:
+						writeProjectPermission(t, w, r, validProjectPermission)
+					case r.URL.Path == "/ex/jira/cloud-1/rest/api/3/myself":
+						io.WriteString(w, validMyself)
+					case r.Method == tc.method && r.URL.Path == issuePath+tc.suffix:
+						body, _ := io.ReadAll(r.Body)
+						if string(body) != tc.payload {
+							t.Errorf("Jira payload = %s, want %s", body, tc.payload)
+						}
+						writeSeen.Store(true)
+						w.WriteHeader(http.StatusNoContent)
+					case r.Method == http.MethodGet && r.URL.Path == issuePath+"/transitions":
+						fmt.Fprintf(w, `{"transitions":[{"id":"move-1","to":{"id":%q}}]}`, jira.StatusIDReadyToDo)
+					case r.Method == http.MethodGet && r.URL.Path == issuePath:
+						readSeen.Store(true)
+						canonical, project := key, "DCAI"
+						if scope == "moved" || scope == "foreign" || (scope == "moved after write" && writeSeen.Load()) {
+							canonical, project = "OTHER-2", "OTHER"
+						}
+						fmt.Fprintf(w, `{"key":%q,"fields":{"project":{"key":%q},"summary":"Personal edit reconciled","issuetype":{"name":"Task"},"status":{"name":"Ready To Do","statusCategory":{"name":"To Do"}},"priority":{"name":"High"},"assignee":{"displayName":"Ada"},"customfield_10040":{"value":"Small"},"customfield_10020":[{"id":29,"name":"KW29","state":"active"}]}}`, canonical, project)
+					default:
+						t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+						w.WriteHeader(http.StatusNotFound)
+					}
+				}))
+				defer provider.Close()
+
+				app := newOAuthApp(t, provider, nil)
+				session := signIn(t, app)
+				form := tc.form
+				form.Set("key", key)
+				req, _ := http.NewRequest(http.MethodPost, app.URL+tc.route, strings.NewReader(form.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.AddCookie(session)
+				resp := response(t)(oauthClient(app).Do(req))
+				defer resp.Body.Close()
+				if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+					t.Fatal(err)
+				}
+				wantWrite := scope == "DCAI" || scope == "moved after write"
+				if writeSeen.Load() != wantWrite {
+					t.Fatalf("personal Jira write = %v, want %v", writeSeen.Load(), wantWrite)
+				}
+				if scope == "DCAI" && (!readSeen.Load() || resp.StatusCode != http.StatusOK) {
+					t.Fatalf("expected a successful personal Jira write and re-read: read=%v status=%d", readSeen.Load(), resp.StatusCode)
+				}
+				if scope == "moved after write" && tc.name == "status" {
+					if resp.StatusCode != http.StatusAccepted || resp.Header.Get("X-Board-Move") != "applied" {
+						t.Fatalf("expected pending projection after successful move, got %d (%v)", resp.StatusCode, resp.Header)
+					}
+				}
+				if _, found, err := app.Store.IssueDetail("OTHER-2"); found || err != nil {
+					t.Fatalf("foreign Jira issue entered the DCAI projection: found=%v err=%v", found, err)
+				}
+			})
+		}
 	}
 }
 
@@ -463,6 +509,8 @@ func TestOAuthRejectsInvalidSiteScopesOrAccount(t *testing.T) {
 					io.WriteString(w, `{"access_token":"access-1","refresh_token":"refresh-1","expires_in":3600}`)
 				case "/oauth/token/accessible-resources":
 					io.WriteString(w, tc.resources)
+				case myPermissionsPath:
+					writeProjectPermission(t, w, r, validProjectPermission)
 				case "/ex/jira/cloud-1/rest/api/3/myself":
 					io.WriteString(w, tc.myself)
 				default:
@@ -504,6 +552,8 @@ func TestSessionSurvivesRestartAndResyncWithSerializedRefresh(t *testing.T) {
 			io.WriteString(w, `{"access_token":"rotated-access","refresh_token":"rotated-refresh","expires_in":3600}`)
 		case "/oauth/token/accessible-resources":
 			io.WriteString(w, validResources)
+		case myPermissionsPath:
+			writeProjectPermission(t, w, r, validProjectPermission)
 		case "/ex/jira/cloud-1/rest/api/3/myself":
 			io.WriteString(w, validMyself)
 		default:
@@ -580,10 +630,10 @@ func TestSessionSurvivesRestartAndResyncWithSerializedRefresh(t *testing.T) {
 	readResponse(t, response(t)(oauthClient(removed).Do(req)), http.StatusFound)
 }
 
-func TestOAuthRefreshRequiresReauthorizationWhenGrantOrSiteIsLost(t *testing.T) {
-	for _, tc := range []string{"invalid grant", "site removed"} {
+func TestOAuthRefreshRequiresReauthorizationWhenGrantOrAccessIsLost(t *testing.T) {
+	for _, tc := range []string{"invalid grant", "site removed", "project removed"} {
 		t.Run(tc, func(t *testing.T) {
-			var rotatedSiteCheck atomic.Bool
+			var rotatedSiteCheck, rotatedProjectCheck atomic.Bool
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/oauth/token":
@@ -605,10 +655,19 @@ func TestOAuthRefreshRequiresReauthorizationWhenGrantOrSiteIsLost(t *testing.T) 
 				case "/oauth/token/accessible-resources":
 					if r.Header.Get("Authorization") == "Bearer rotated-access" {
 						rotatedSiteCheck.Store(true)
-						io.WriteString(w, "[]")
-						return
+						if tc == "site removed" {
+							io.WriteString(w, "[]")
+							return
+						}
 					}
 					io.WriteString(w, validResources)
+				case myPermissionsPath:
+					if r.Header.Get("Authorization") == "Bearer rotated-access" {
+						rotatedProjectCheck.Store(true)
+						writeProjectPermission(t, w, r, deniedProjectPermission)
+						return
+					}
+					writeProjectPermission(t, w, r, validProjectPermission)
 				case "/ex/jira/cloud-1/rest/api/3/myself":
 					io.WriteString(w, validMyself)
 				default:
@@ -624,12 +683,45 @@ func TestOAuthRefreshRequiresReauthorizationWhenGrantOrSiteIsLost(t *testing.T) 
 			req.AddCookie(session)
 			resp := response(t)(oauthClient(app).Do(req))
 			readResponse(t, resp, http.StatusOK)
-			if loc := resp.Header.Get("HX-Redirect"); loc != "/login?next=%2Fboard%3Fq%3Dsearch" {
+			want := "/login?next=%2Fboard%3Fq%3Dsearch"
+			if tc == "project removed" {
+				want += "&reason=project-access"
+			}
+			if loc := resp.Header.Get("HX-Redirect"); loc != want {
 				t.Fatalf("expected a full sign-in redirect, got %q", loc)
+			}
+			if tc == "project removed" && (!rotatedSiteCheck.Load() || !rotatedProjectCheck.Load()) {
+				t.Fatal("refresh did not verify site and project access with the new token")
 			}
 			if tc == "site removed" && !rotatedSiteCheck.Load() {
 				t.Fatal("refresh did not verify site access with the new token")
 			}
 		})
+	}
+}
+
+func TestOAuthRejectsAllowlistedAccountWithoutProjectAccess(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			io.WriteString(w, `{"access_token":"access-1","refresh_token":"refresh-1","expires_in":3600}`)
+		case "/oauth/token/accessible-resources":
+			io.WriteString(w, validResources)
+		case "/ex/jira/cloud-1/rest/api/3/myself":
+			io.WriteString(w, validMyself)
+		case myPermissionsPath:
+			writeProjectPermission(t, w, r, deniedProjectPermission)
+		default:
+			t.Errorf("unexpected OAuth request: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+	app := newOAuthApp(t, provider, nil)
+	dest, flow := startOAuth(t, app, "/prio")
+	resp := callback(t, app, dest.Query().Get("state"), flow)
+	body := readResponse(t, resp, http.StatusForbidden)
+	if !strings.Contains(body, "does not have permission to browse") || findCookie(resp, sessionCookie) != nil {
+		t.Fatal("denied Jira account must see an access error and receive no session")
 	}
 }

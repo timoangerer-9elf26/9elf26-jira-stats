@@ -59,10 +59,10 @@ func (s *Server) prioEpicSuggestions(issues []store.PrioIssue) map[string]*prioE
 			continue
 		}
 		for _, group := range []struct{ id, label string }{
-			{statusPlanned, "Geplant"}, {"doing", "In Arbeit"}, {"done", "Fertig"},
+			{statusPlanned, "Offen"}, {"doing", "In Arbeit"}, {"done", "Fertig"},
 			{"canceled", "Canceled"}, {"other", "Weitere Status"},
 		} {
-			if children := byGroup[group.id]; len(children) > 0 {
+			if children := byGroup[group.id]; len(children) > 0 || group.id == statusPlanned || group.id == "doing" || group.id == "done" {
 				suggestion.Children = append(suggestion.Children, prioEpicChildGroup{
 					Label: group.label, Canceled: group.id == "canceled", Issues: children,
 				})

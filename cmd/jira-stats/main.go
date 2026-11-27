@@ -96,6 +96,7 @@ func run() error {
 		web.WithLocation(loc),
 		web.WithVelocitySprints(velocitySprints),
 		web.WithJiraBaseURL(os.Getenv("JIRA_BASE_URL")),
+		web.WithJiraBoardID(getenv("JIRA_BOARD_ID", "8")),
 		// The resync button rebuilds the projection through the same Syncer that
 		// runs the periodic loop, so a resync and an incremental never overlap. It
 		// runs under the app context (ctx), not a request context, so it survives

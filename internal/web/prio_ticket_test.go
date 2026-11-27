@@ -69,8 +69,9 @@ func postPrioTicket(t *testing.T, app *testApp, form url.Values) string {
 func newWritablePrioApp(t *testing.T, client jira.Client) *testApp {
 	t.Helper()
 	app := newTestApp(t, client)
+	syncer := sync.NewSyncer(client, app.Store, time.Minute)
 	server, err := web.NewServer(app.Store, web.WithFakeJira(client), web.WithJiraBaseURL("https://jira.example"),
-		web.WithPrioIssueRefresher(sync.NewSyncer(client, app.Store, time.Minute)))
+		web.WithPrioIssueRefresher(syncer), web.WithPrioritizer(syncer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,6 +96,42 @@ func TestPrioTicketCommentUsesSignedInJiraAccount(t *testing.T) {
 	res, err := http.Get(app.URL + "/prio/results?step=overview&preset=all&ticket=DCAI-41")
 	if body := ticketResponse(t, res, err); !strings.Contains(body, "My meeting comment") || strings.Contains(body, "forged-account") {
 		t.Fatal("refreshed ticket did not show the signed-in user's comment")
+	}
+}
+
+func TestPrioMeetingSummarySharesSuccessfulWritesAndSurvivesResync(t *testing.T) {
+	client := &jira.FakeClient{Issues: []jira.Issue{{
+		Key: "DCAI-41", Type: "Task", Summary: "Panel example", Status: "Triage", Priority: "Medium",
+	}}}
+	app := newWritablePrioApp(t, client)
+	postPrioTicket(t, app, url.Values{"key": {"DCAI-41"}, "action": {"comment"}, "comment": {"Do not journal this content"}})
+	postPrioTicket(t, app, url.Values{"key": {"DCAI-41"}, "action": {"comment"}, "comment": {""}})
+	if code, _ := postForm(t, app.URL+"/prio/priority", url.Values{"key": {"DCAI-41"}, "priority": {"High"}}); code != http.StatusOK {
+		t.Fatalf("legacy priority edit returned %d", code)
+	}
+	if err := app.Store.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	page := get(t, app.URL+"/prio?preset=all")
+	for _, want := range []string{"DCAI-41 · Kommentar hinzugefügt", "DCAI-41 · Priorität Hoch", "jira-stats-fake", "<time"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("fresh participant page after resync missing %q", want)
+		}
+	}
+	if strings.Count(page, "Kommentar hinzugefügt") != 1 || strings.Contains(page, "Do not journal this content") {
+		t.Fatal("the summary duplicated a mutation or exposed the comment body")
+	}
+	res, err := noRedirectClient().PostForm(app.URL+"/prio/meeting/complete", url.Values{"meeting-window": {"0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("meeting completion returned %d", res.StatusCode)
+	}
+	page = get(t, app.URL+"/prio?preset=all")
+	if strings.Contains(page, "Kommentar hinzugefügt") || strings.Contains(page, "Priorität Hoch") {
+		t.Fatal("previous meeting's mutations appeared in the new window")
 	}
 }
 
@@ -227,12 +264,15 @@ func TestPrioTicketMutationRefreshesActiveJiraPreset(t *testing.T) {
 }
 
 func TestPrioTicketEditsParentWithoutReplacingParentFilter(t *testing.T) {
-	client := &jira.FakeClient{Issues: []jira.Issue{{Key: "DCAI-41", Type: "Task", Summary: "Parent change", Status: "Triage"}}}
+	client := &jira.FakeClient{Issues: []jira.Issue{
+		{Key: "DCAI-40", Type: "Epic", Summary: "Projected parent"},
+		{Key: "DCAI-41", Type: "Task", Summary: "Parent change", Status: "Triage"},
+	}}
 	app := newWritablePrioApp(t, client)
 	form := url.Values{"step": {"overview"}, "preset": {"all"}, "key": {"DCAI-41"},
 		"parent-filter": {"1"}, "action": {"parent"}, "parent": {"DCAI-40"}}
 	body := postPrioTicket(t, app, form)
-	for _, want := range []string{`data-ticket="DCAI-41"`, `name="parent-filter" value="1"`, `name="parent" value="DCAI-40"`, "Parent geändert"} {
+	for _, want := range []string{`data-ticket="DCAI-41"`, `name="parent-filter" value="1"`, `value="DCAI-40" selected`, "DCAI-40 · Projected parent", "Parent geändert"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("parent update missing %q", want)
 		}
@@ -242,7 +282,47 @@ func TestPrioTicketEditsParentWithoutReplacingParentFilter(t *testing.T) {
 	}
 	form.Set("parent", "DCAI-41")
 	body = postPrioTicket(t, app, form)
-	if !strings.Contains(body, "gültigen Jira-Key") {
+	if !strings.Contains(body, "Jira bietet diesen Wert für das Feld nicht an.") {
 		t.Fatal("self-parent was accepted")
+	}
+}
+
+type parentMetadataJira struct{ *jira.FakeClient }
+
+func (c parentMetadataJira) FetchEditFields(ctx context.Context, key string) (map[string]jira.EditField, error) {
+	fields, err := c.FakeClient.FetchEditFields(ctx, key)
+	if err == nil {
+		fields["parent"] = jira.EditField{Operations: []string{"set"}, AllowedValues: []jira.EditOption{
+			{Value: "DCAI-40"}, {Value: "DCAI-42", Disabled: true},
+		}}
+	}
+	return fields, err
+}
+
+func TestPrioTicketHonorsJiraParentChoicesOverProjectedEpics(t *testing.T) {
+	client := parentMetadataJira{&jira.FakeClient{Issues: []jira.Issue{
+		{Key: "DCAI-40", Type: "Epic", Summary: "Allowed parent"},
+		{Key: "DCAI-41", Type: "Task", ParentKey: "DCAI-40", Summary: "Child"},
+		{Key: "DCAI-42", Type: "Epic", Summary: "Disabled parent"},
+		{Key: "DCAI-43", Type: "Epic", Summary: "Unlisted parent"},
+	}}}
+	app := newWritablePrioApp(t, client)
+	page := get(t, app.URL+"/prio?step=overview&preset=all&ticket=DCAI-41")
+	_, selectHTML, found := strings.Cut(page, `id="prio-edit-parent"`)
+	selectHTML, _, _ = strings.Cut(selectHTML, "</select>")
+	if !found || !strings.Contains(selectHTML, `value="DCAI-40" selected`) ||
+		strings.Contains(selectHTML, "DCAI-42") || strings.Contains(selectHTML, "DCAI-43") {
+		t.Fatalf("unexpected Jira parent choices: %s", selectHTML)
+	}
+	form := url.Values{"preset": {"all"}, "key": {"DCAI-41"}, "action": {"parent"}}
+	for _, key := range []string{"DCAI-42", "DCAI-43"} {
+		form.Set("parent", key)
+		if body := postPrioTicket(t, app, form); !strings.Contains(body, "Jira bietet diesen Wert für das Feld nicht an.") {
+			t.Errorf("parent %s was accepted against Jira metadata", key)
+		}
+	}
+	form.Set("parent", "")
+	if body := postPrioTicket(t, app, form); !strings.Contains(body, "Parent geändert") {
+		t.Fatal("Jira metadata permits clearing the parent")
 	}
 }

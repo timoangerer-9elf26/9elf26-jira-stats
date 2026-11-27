@@ -216,17 +216,12 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 //     2026" (activation day → the day before now), and
 //   - /velocity's active-sprint bar is labelled by the sprint name KW29.
 //
-// The /sprint window label is computed from `now` (and the sprint start) alone,
-// and /velocity's active-sprint bar is named for the active sprint KW29, so both
-// assertions hold without waiting on the background sync to tally points.
-// /sprint renders the window because the canned fake has an active sprint (KW29).
+// The sprint entity is loaded by the background sync after HTTP starts serving.
 func TestReviewNowPinsDateViews(t *testing.T) {
 	base := startDashboardEnv(t, "REVIEW_NOW=2026-07-15T12:00:00Z")
-
-	if code, body := get(t, base+"/sprint"); code != http.StatusOK {
-		t.Fatalf("GET /sprint: got status %d, want 200", code)
-	} else if want := "13 Jul – 14 Jul 2026"; !strings.Contains(body, want) {
-		t.Fatalf("/sprint: body missing pinned sprint window %q", want)
+	waitForPageMarker(t, base+"/sprint", `data-testid="sprint-name">KW29`)
+	if code, body := get(t, base+"/sprint"); code != http.StatusOK || !strings.Contains(body, "13 Jul – 14 Jul 2026") {
+		t.Fatalf("/sprint: status %d, want 200 with the pinned window %q", code, "13 Jul – 14 Jul 2026")
 	}
 
 	if code, body := get(t, base+"/velocity"); code != http.StatusOK {
@@ -337,21 +332,17 @@ func TestPrioPriorityEditWritesThroughTheFake(t *testing.T) {
 	}
 }
 
-// waitForAssignableBoard blocks until the Board offers the given assign option,
-// which takes both the issues AND the project members having been synced: with
-// an empty member table the avatar is read-only and the handler answers 400.
-// The gate is an explicit poll rather than a sleep so a slow first sync cannot
-// turn into a flake — or, worse, into a 400 the test mistakes for a verdict.
-func waitForAssignableBoard(t *testing.T, base, marker string) {
+// waitForPageMarker polls for projected data that arrives after HTTP readiness.
+func waitForPageMarker(t *testing.T, pageURL, marker string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		code, body := get(t, base+"/board")
+		code, body := get(t, pageURL)
 		if code == http.StatusOK && strings.Contains(body, marker) {
 			return
 		}
 		if !time.Now().Before(deadline) {
-			t.Fatalf("/board never offered %s within the timeout (project members not synced?)", marker)
+			t.Fatalf("%s did not render %q before timeout (last status %d)", pageURL, marker, code)
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -385,7 +376,7 @@ func postAssignee(t *testing.T, base string, form url.Values) string {
 func TestBoardAssigneeEditWritesThroughTheFake(t *testing.T) {
 	const graceOpt = `data-testid="card:DCAI-4:assignee-opt:acct-grace"`
 	base := startDashboard(t)
-	waitForAssignableBoard(t, base, graceOpt)
+	waitForPageMarker(t, base+"/board", graceOpt)
 
 	// DCAI-4 is the canned dataset's unassigned card in the active sprint, so
 	// the assign below is a real change and not a no-op that would pass anyway.

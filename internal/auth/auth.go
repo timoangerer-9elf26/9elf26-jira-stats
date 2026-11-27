@@ -30,6 +30,9 @@ const (
 // ErrSignIn means the browser has no usable session and must authorize again.
 var ErrSignIn = errors.New("Atlassian sign-in required")
 
+// ErrProjectAccess means the personal grant cannot browse the configured Jira project.
+var ErrProjectAccess = errors.New("Jira project browse permission required")
+
 type Identity struct {
 	AccountID string
 	TimeZone  *time.Location
@@ -39,6 +42,7 @@ type grant struct {
 	AccessToken, RefreshToken, TimeZone string
 	ExpiresAt                           time.Time
 	PendingSiteCheck                    bool
+	CheckedProject                      string
 }
 
 type Service struct {
@@ -92,6 +96,9 @@ func New(st *store.Store, cfg Config) (*Service, error) {
 		return nil, err
 	}
 
+	if cfg.ProjectKey == "" {
+		cfg.ProjectKey = jira.PrioProject
+	}
 	if cfg.AuthBaseURL == "" {
 		cfg.AuthBaseURL = "https://auth.atlassian.com"
 	}
@@ -156,10 +163,13 @@ func (s *Service) Complete(ctx context.Context, state, browser, code, previous s
 	if s.accounts[account] == nil {
 		return "", next, ErrSignIn
 	}
+	if err := s.provider.checkProject(ctx, pair.AccessToken); err != nil {
+		return "", next, err
+	}
 
 	envelope, err := s.seal(account, grant{
 		AccessToken: pair.AccessToken, RefreshToken: pair.RefreshToken, TimeZone: zone,
-		ExpiresAt: now.Add(time.Duration(pair.ExpiresIn) * time.Second),
+		ExpiresAt: now.Add(time.Duration(pair.ExpiresIn) * time.Second), CheckedProject: s.provider.cfg.ProjectKey,
 	})
 	if err != nil {
 		return "", next, err
@@ -207,7 +217,7 @@ func (s *Service) Resolve(ctx context.Context, session string) (Identity, jira.C
 		return Identity{}, nil, err
 	}
 	g, err = s.usableGrant(ctx, account, g)
-	if errors.Is(err, ErrSignIn) {
+	if errors.Is(err, ErrSignIn) || errors.Is(err, ErrProjectAccess) {
 		if revokeErr := s.store.DeleteOAuthGrant(ctx, account); revokeErr != nil {
 			return Identity{}, nil, revokeErr
 		}
@@ -241,11 +251,17 @@ func (s *Service) usableGrant(ctx context.Context, account string, g grant) (gra
 			return grant{}, err
 		}
 	}
-	if g.PendingSiteCheck {
-		if err := s.provider.checkSite(ctx, g.AccessToken); err != nil {
+	if g.PendingSiteCheck || g.CheckedProject != s.provider.cfg.ProjectKey {
+		if g.PendingSiteCheck {
+			if err := s.provider.checkSite(ctx, g.AccessToken); err != nil {
+				return grant{}, err
+			}
+		}
+		if err := s.provider.checkProject(ctx, g.AccessToken); err != nil {
 			return grant{}, err
 		}
 		g.PendingSiteCheck = false
+		g.CheckedProject = s.provider.cfg.ProjectKey
 		if err := s.saveGrant(ctx, account, g); err != nil {
 			return grant{}, err
 		}

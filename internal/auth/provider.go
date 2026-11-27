@@ -101,6 +101,23 @@ func (p provider) checkSite(ctx context.Context, bearer string) error {
 	return ErrSignIn
 }
 
+func (p provider) checkProject(ctx context.Context, bearer string) error {
+	const permission = "BROWSE_PROJECTS"
+	var result struct {
+		Permissions map[string]struct {
+			HavePermission bool
+		}
+	}
+	query := url.Values{"projectKey": {p.cfg.ProjectKey}, "permissions": {permission}}
+	if err := p.get(ctx, p.jiraURL()+"/rest/api/3/mypermissions?"+query.Encode(), bearer, &result); err != nil {
+		return err
+	}
+	if !result.Permissions[permission].HavePermission {
+		return ErrProjectAccess
+	}
+	return nil
+}
+
 func (p provider) myself(ctx context.Context, bearer string) (string, string, error) {
 	var user struct {
 		AccountID string `json:"accountId"`

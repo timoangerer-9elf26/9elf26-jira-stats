@@ -14,8 +14,7 @@
   {{template "nav" "prio"}}
   <div hx-boost="true" hx-target="#prio-panel" hx-swap="innerHTML show:none"
        hx-sync="#prio-panel:drop" hx-history="false" data-prio-agenda
-       data-step="{{.Step}}" data-ticket="{{.SelectedKey}}" data-window="{{.Meeting.ID}}"
-       {{if .TicketResult.Change}}data-prio-change="{{.TicketResult.Change}}"{{else if .PriorityChange}}data-prio-change="{{.PriorityChange}}"{{end}}>
+       data-step="{{.Step}}" data-ticket="{{.SelectedKey}}" data-window="{{.Meeting.ID}}">
   {{range .Params}}<input type="hidden" data-filterparam name="{{.Name}}" value="{{.Value}}">{{end}}
   <header class="my-3 flex flex-wrap items-end justify-between gap-3">
     <div>
@@ -32,7 +31,7 @@
         <button class="btn" data-variant="outline" type="submit">Übernehmen</button>
       </form>
       <div class="text-sm text-muted-foreground">
-        <p>{{.CutoffSource}}</p>
+        <p>{{.CutoffSource}} · <time datetime="{{.Cutoff.Format "2006-01-02T15:04:05Z07:00"}}">{{.CutoffLabel}}</time></p>
         {{if .InvalidCutoff}}<p role="alert">Der gewählte Stichtag ist ungültig.</p>{{end}}
         <a class="text-xs underline" href="{{.ShareCutoffHref}}">Stichtag im Link speichern</a>
       </div>
@@ -49,7 +48,7 @@
     <h2 id="prio-summary-title" class="text-lg font-bold">Meeting abschließen</h2>
     <p class="mt-2 font-medium">Zusammenfassung</p>
     <p class="mt-2 text-sm" data-prio-summary-count></p>
-    <ul class="mt-2 list-inside list-disc space-y-1 text-sm" data-prio-summary-changes></ul>
+    <div id="prio-summary-changes">{{template "prio-summary-changes" .MeetingChanges}}</div>
     <p class="my-3 text-sm text-muted-foreground">Der Abschlusszeitpunkt wird zum neuen Stichtag.</p>
     <div class="flex flex-wrap justify-end gap-2">
       <form method="dialog" hx-boost="false"><button class="btn" data-variant="outline">Abbrechen</button></form>
@@ -98,6 +97,7 @@
         </a>
         <p class="my-1 text-xs text-muted-foreground">{{.Status}} · {{if .Priority}}{{.Priority}}{{else}}—{{end}}{{if and (eq $.Step "backlog") .CreatedLabel}} · Erstellt {{.CreatedLabel}}{{end}}</p>
         {{template "prio-markers" .Markers}}
+        {{if .Href}}<a class="text-xs underline" href="{{.Href}}" target="_blank" rel="noopener" aria-label="{{.Key}} in Jira öffnen">Jira ↗</a>{{end}}
       </li>
       {{end}}
     </ul>
@@ -126,5 +126,14 @@
   <span class="badge {{if eq .Kind "new"}}bg-sky-100 text-sky-800{{else if eq .Kind "status"}}bg-amber-100 text-amber-900{{else if or (eq .Kind "done") (eq .Kind "resolved")}}bg-emerald-100 text-emerald-900{{else if eq .Kind "raised"}}bg-rose-100 text-rose-800{{else}}bg-muted text-foreground{{end}}" data-prio-marker="{{.Kind}}">{{if eq .Kind "raised"}}↑ {{else if eq .Kind "lowered"}}↓ {{end}}{{.Label}}</span>
   {{end}}
 </span>
+{{end}}
+{{end}}
+
+{{define "prio-summary-changes"}}
+<p class="mt-2 text-sm">{{len .}} {{if eq (len .) 1}}Änderung{{else}}Änderungen{{end}}</p>
+{{if .}}
+<ul class="mt-2 max-h-[40vh] list-inside list-disc space-y-1 overflow-y-auto text-sm">
+  {{range .}}<li>{{.Label}} <span class="text-muted-foreground">· {{.AccountID}} · <time datetime="{{.Instant}}">{{.TimeLabel}}</time></span></li>{{end}}
+</ul>
 {{end}}
 {{end}}

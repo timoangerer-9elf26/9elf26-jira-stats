@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+func (c *FakeClient) CheckIssueProject(ctx context.Context, key string) error {
+	if !strings.HasPrefix(key, PrioProject+"-") {
+		return fmt.Errorf("issue %s is outside %s", key, PrioProject)
+	}
+	_, err := c.FetchIssue(ctx, key)
+	return err
+}
+
 func (c *FakeClient) ReadPrioIssueDescription(ctx context.Context, key string) (json.RawMessage, error) {
 	issue, err := c.FetchIssue(ctx, key)
 	return issue.Description, err

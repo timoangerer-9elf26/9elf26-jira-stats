@@ -33,6 +33,7 @@ type prioTicketResultKey struct{}
 var (
 	dcaiIssueKey = regexp.MustCompile(`^DCAI-[1-9][0-9]*$`)
 	jiraIssueKey = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[1-9][0-9]*$`)
+	jiraIssueID  = regexp.MustCompile(`^[1-9][0-9]*$`)
 )
 
 func (s *Server) prioTicketClient(ctx context.Context) (jira.Client, jira.IssueActions, bool) {
@@ -84,14 +85,14 @@ func (s *Server) handlePrioTicket(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		q.Set("ticket", key)
-		err = s.mutatePrioTicket(ctx, actions, detail, action, r.PostForm, author)
+		err = s.mutatePrioTicket(ctx, client, actions, detail, action, r.PostForm, author)
 	}
 	switch {
 	case errors.Is(err, errPrioFieldUnchanged):
 	case err != nil:
 		result.Message = err.Error()
 	default:
-		s.invalidatePrioSearches(identity.AccountID)
+		s.notePrioWrite(ctx, key, prioMutationLabel(action, jira.Issue{}))
 		if dcaiIssueKey.MatchString(key) {
 			refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			issue, refreshErr := s.prioRefresher.RefreshIssue(refreshCtx, client, key)
@@ -135,21 +136,9 @@ func (s *Server) handlePrioTicket(w http.ResponseWriter, r *http.Request) {
 	s.renderPrioWith(w, context.WithValue(ctx, prioTicketResultKey{}, result), q, name, prioEdit{})
 }
 
-// A successful write can change Jira preset membership and ordering. The
-// response must re-run the signed-in person's search against their own Jira.
-func (s *Server) invalidatePrioSearches(accountID string) {
-	s.prioKeysCache.mu.Lock()
-	defer s.prioKeysCache.mu.Unlock()
-	for query := range s.prioKeysCache.entries {
-		if query.account == accountID {
-			delete(s.prioKeysCache.entries, query)
-		}
-	}
-}
-
 var errPrioFieldUnchanged = errors.New("unchanged")
 
-func (s *Server) mutatePrioTicket(ctx context.Context, actions jira.IssueActions, detail store.IssueDetail, action string, form url.Values, author jira.Person) error {
+func (s *Server) mutatePrioTicket(ctx context.Context, client jira.Client, actions jira.IssueActions, detail store.IssueDetail, action string, form url.Values, author jira.Person) error {
 	currentDescription, err := actions.ReadPrioIssueDescription(ctx, detail.Key)
 	if err != nil {
 		return err
@@ -185,7 +174,7 @@ func (s *Server) mutatePrioTicket(ctx context.Context, actions jira.IssueActions
 		if value == field.Current {
 			return errPrioFieldUnchanged
 		}
-		payload, err := prioFieldValue(field, fields[prioJiraField(action)], value, detail.Key)
+		payload, err := prioFieldValue(field, fields[prioJiraField(action)], value)
 		if err != nil {
 			return err
 		}
@@ -194,6 +183,9 @@ func (s *Server) mutatePrioTicket(ctx context.Context, actions jira.IssueActions
 			if !plain || text != field.Current {
 				return errors.New("Die Beschreibung hat sich in Jira geändert. Bitte in Jira prüfen.")
 			}
+		}
+		if action == "assignee" {
+			return client.UpdateIssueAssignee(ctx, detail.Key, value)
 		}
 		return actions.EditIssueField(ctx, detail.Key, prioJiraField(action), payload, author)
 	}

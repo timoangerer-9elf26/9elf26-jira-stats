@@ -31,7 +31,7 @@ type prioAgendaStep struct {
 type prioAgendaView struct {
 	prioPresetView
 	CanonicalHref                          string
-	PriorityChange                         string
+	MeetingChanges                         []prioMeetingChangeView
 	Groups                                 []prioGroup
 	IssueCount, OverviewCount              int
 	SortOptions, TechnicalOptions          []prioAgendaOption
@@ -46,7 +46,7 @@ type prioAgendaView struct {
 	Steps                                  []prioAgendaStep
 	Step                                   string
 	Cutoff                                 time.Time
-	CutoffInput, CutoffSource              string
+	CutoffInput, CutoffSource, CutoffLabel string
 	Params                                 []filterParam
 	Overview                               bool
 	Preset                                 string
@@ -110,7 +110,12 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 		Meeting: meeting, CanComplete: identity.AccountID != "",
 		Step: step, Cutoff: cutoff, OldestFirst: q.Get("backlog-sort") == "age",
 		CutoffInput: cutoff.In(s.prioLocation).Format(prioCutoffInput), CutoffSource: source,
-		Overview: step == prioOverview, Preset: preset, InvalidCutoff: invalidCutoff,
+		CutoffLabel: cutoff.In(s.prioLocation).Format("02.01.2006 15:04 MST"),
+		Overview:    step == prioOverview, Preset: preset, InvalidCutoff: invalidCutoff,
+	}
+	view.MeetingChanges, err = s.prioMeetingChanges(meeting.ID)
+	if err != nil {
+		return prioAgendaView{}, err
 	}
 	_, _, view.CanCreateEpic = s.prioTicketClient(ctx)
 	view.TicketResult, _ = ctx.Value(prioTicketResultKey{}).(prioTicketResult)
@@ -124,11 +129,15 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	}
 	suggestions := s.prioEpicSuggestions(issues)
 	var overviewRows []prioRow
+	var reviewedEpic prioRow
+	selection := q.Get("ticket")
 	for _, issue := range issues {
 		events := prioEvents(issue, changes[issue.Key], cutoff)
 		row := s.makePrioRow(issue, edit)
 		row.Markers = events.markers()
-		row.SelectHref = prioHref(q, "ticket", issue.Key)
+		if step == prioEpicCheck && view.TicketResult.Change != "" && issue.Key == selection {
+			reviewedEpic = row
+		}
 		if view.Overview && keepPrioOverviewRow(q, issue) {
 			overviewRows = append(overviewRows, row)
 		}
@@ -145,6 +154,18 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 			steps[4].Rows = append(steps[4].Rows, row)
 		}
 	}
+	if reviewedEpic.Key != "" && len(steps[index].Rows) == 0 {
+		index++
+		step = steps[index].ID
+		view.Step = step
+		q.Set("step", step)
+		if !slices.ContainsFunc(steps[index].Rows, func(row prioRow) bool { return row.Key == selection }) {
+			selection = ""
+		}
+	}
+	for i := range overviewRows {
+		overviewRows[i].SelectHref = prioHref(q, "ticket", overviewRows[i].Key)
+	}
 	for i := range steps {
 		stepParams := prioAgendaParams(q)
 		stepParams.Del("ticket")
@@ -156,7 +177,18 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	}
 	current := steps[index]
 	sortAgendaRows(current.Rows, step == prioBacklog && view.OldestFirst)
-	selection := q.Get("ticket")
+	for i := range current.Rows {
+		current.Rows[i].SelectHref = prioHref(q, "ticket", current.Rows[i].Key)
+	}
+	if step == prioEpicCheck && !slices.ContainsFunc(current.Rows, func(row prioRow) bool { return row.Key == selection }) {
+		selection = ""
+		if reviewedEpic.Key != "" {
+			next := slices.IndexFunc(current.Rows, func(row prioRow) bool { return compareAgendaPriority(reviewedEpic, row) < 0 })
+			if next >= 0 {
+				selection = current.Rows[next].Key
+			}
+		}
+	}
 	if selection != "" {
 		view.Selected, err = s.prioTicketPanel(ctx, selection, changes[selection], cutoff, edit)
 		if err != nil {
@@ -182,14 +214,6 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 		}
 	}
 	view.SelectedKey = selection
-	if edit.Key != "" && edit.Error == "" {
-		for _, issue := range issues {
-			if issue.Key == edit.Key {
-				view.PriorityChange = issue.Key + " · Priorität " + prioLevelLabel(issue.Priority)
-				break
-			}
-		}
-	}
 	if selection != "" {
 		q.Set("ticket", selection)
 	} else {

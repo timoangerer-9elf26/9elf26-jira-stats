@@ -1,7 +1,9 @@
 package store_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -140,5 +142,58 @@ func TestRefreshIssueProjectsPersonalJiraRead(t *testing.T) {
 	if err != nil || !found || detail.Summary != "Edited using a personal Jira account" ||
 		len(detail.Comments) != 1 || detail.Comments[0].Author.AccountID != "acct-ada" {
 		t.Fatalf("refreshed detail=%+v found=%v err=%v", detail, found, err)
+	}
+}
+
+type blockingBackfillJira struct {
+	*jira.FakeClient
+	started, release chan struct{}
+}
+
+func (c blockingBackfillJira) FetchIssues(ctx context.Context) ([]jira.Issue, error) {
+	close(c.started)
+	select {
+	case <-c.release:
+		return c.FakeClient.FetchIssues(ctx)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestRefreshIssueRespectsDeadlineDuringBackfill(t *testing.T) {
+	st := openIssueStore(t)
+	jiraClient := blockingBackfillJira{
+		FakeClient: &jira.FakeClient{Issues: []jira.Issue{{Key: "DCAI-1", Status: "Refinement"}}},
+		started:    make(chan struct{}), release: make(chan struct{}),
+	}
+	syncer := sync.NewSyncer(jiraClient, st, time.Minute)
+	backfill := make(chan error, 1)
+	go func() { backfill <- syncer.Cycle(t.Context()) }()
+	defer func() {
+		close(jiraClient.release)
+		if err := <-backfill; err != nil {
+			t.Error(err)
+		}
+	}()
+	select {
+	case <-jiraClient.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("backfill did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	defer cancel()
+	refresh := make(chan error, 1)
+	go func() {
+		_, err := syncer.RefreshIssue(ctx, jiraClient, "DCAI-1")
+		refresh <- err
+	}()
+	select {
+	case err := <-refresh:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("refresh error = %v, want deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("refresh waited for backfill beyond its deadline")
 	}
 }

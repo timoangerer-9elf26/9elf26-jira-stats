@@ -32,7 +32,7 @@ func TestPrioEpicCheckSuggestsFromCurrentDirectChildrenAcrossTheProject(t *testi
 		t.Fatalf("Epic-Prüfung has %d suggestions, want 2", n)
 	}
 	assertOrder(t, page, "Publish PDF links", "In Progress", "Vorschlag · Fertig")
-	assertOrder(t, page, "Direkte Kinder (2)", "Fertig (1)", "Implement links", "Ready for Release", "Canceled (1)", "Discarded approach", "Für den Vorschlag ausgenommen")
+	assertOrder(t, page, "Direkte Kinder (2)", "Offen (0)", "In Arbeit (0)", "Fertig (1)", "Implement links", "Ready for Release", "Canceled (1)", "Discarded approach", "Für den Vorschlag ausgenommen")
 	if strings.Contains(page, "Indirect open descendant") {
 		t.Fatal("Epic-Prüfung included a grandchild")
 	}
@@ -91,12 +91,12 @@ func TestPrioEpicCheckConfirmsAnOfferedDoneTransitionAndUpdatesFertig(t *testing
 		"step": {"epic-check"}, "preset": {"all"}, "cutoff": {cutoff},
 		"key": {"DCAI-41"}, "action": {"transition"}, "transition": {"31"},
 	})
-	for _, want := range []string{`data-prio-change="DCAI-41 · Status → Ready for Release"`, "In Progress → Ready for Release", "Keine Epics zur Prüfung"} {
+	for _, want := range []string{`data-step="done" data-ticket="DCAI-41"`, "DCAI-41 · Status → Ready for Release", "In Progress → Ready for Release"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("transition response missing %q", want)
 		}
 	}
-	if strings.Contains(page, `data-prio-queue-key="DCAI-41"`) {
+	if strings.Contains(page, `data-prio-step="epic-check"`) || strings.Contains(page, "Epic-Vorschlag") {
 		t.Error("the corrected Epic still has a proposal")
 	}
 	assertOrder(t, get(t, doneURL), "2 · Fertig", `data-prio-queue-key="DCAI-41"`)

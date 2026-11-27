@@ -25,7 +25,10 @@
       <dt>Parent / Epic</dt><dd>{{if .ParentHref}}<a class="underline" href="{{.ParentHref}}" target="_blank" rel="noopener">{{.Detail.ParentKey}}</a>{{else if .Detail.ParentKey}}{{.Detail.ParentKey}}{{else}}—{{end}}</dd>
       <dt>Sprint</dt><dd>{{if .Detail.Sprint}}{{.Detail.Sprint}}{{else}}—{{end}}</dd>
     </dl>
-    {{if .Row.Href}}<a class="inline-block underline" href="{{.Row.Href}}" target="_blank" rel="noopener">Rang, Sprint und Verknüpfungen in Jira bearbeiten ↗</a>{{end}}
+    <div class="flex flex-wrap gap-x-4">
+      {{if .BacklogHref}}<a class="underline" href="{{.BacklogHref}}" target="_blank" rel="noopener">Rang im Jira-Backlog bearbeiten ↗</a>{{end}}
+      {{if .Row.Href}}<a class="underline" href="{{.Row.Href}}" target="_blank" rel="noopener">Sprint und Verknüpfungen in Jira bearbeiten ↗</a>{{end}}
+    </div>
   </section>
   <section class="space-y-2 border-b border-border p-5 text-sm" aria-label="Beschreibung">
     <h3 class="font-semibold">Beschreibung</h3>
@@ -73,7 +76,7 @@
 
 {{define "prio-ticket-result"}}
   {{template "prio-ticket-feedback" .}}
-  {{if .CreatedHref}}<p class="mt-2 text-sm" role="status"><a class="underline" href="{{.CreatedHref}}">{{.Change}} ↗</a></p>{{end}}
+  {{if .CreatedHref}}<p class="mt-2 text-sm" role="status"><a class="underline" href="{{.CreatedHref}}">{{.Change}} ↗</a></p>{{else if and .Change (not .Message)}}<p class="mt-2 text-sm" role="status">{{.Change}}</p>{{end}}
 {{end}}
 
 {{define "prio-ticket-actions"}}
@@ -92,7 +95,7 @@
         <label class="label" for="prio-edit-{{.Name}}">{{.Label}}</label>
         {{if eq .Kind "select"}}
         <select class="select w-full" id="prio-edit-{{.Name}}" name="{{.Name}}" {{if .Required}}required{{end}}>
-          <option value="" disabled selected>Wert wählen</option>
+          <option value="" disabled{{if not .HasCurrent}} selected{{end}}>Wert wählen</option>
           {{range .Options}}<option value="{{.Value}}" {{if eq .Value $current}}selected{{end}}>{{.Label}}</option>{{end}}
         </select>
         {{else if eq .Kind "textarea"}}
