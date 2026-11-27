@@ -42,8 +42,9 @@ func prioAgendaFiltersFor(q url.Values) prioAgendaFilters {
 }
 
 func (f prioAgendaFilters) keeps(issue store.PrioIssue, events prioIssueEvents) bool {
-	if f.Level.Value == "epic" && !strings.EqualFold(issue.Type, "Epic") ||
-		f.Level.Value == "unparented" && issue.ParentKey != "" {
+	isEpic := strings.EqualFold(issue.Type, "Epic")
+	if !isEpic && (f.Level.Value == "epic" ||
+		f.Level.Value == "unparented" && issue.ParentKey != "") {
 		return false
 	}
 	hasTechnical := slices.Contains(issue.Labels, technicalLabel)
@@ -52,7 +53,7 @@ func (f prioAgendaFilters) keeps(issue store.PrioIssue, events prioIssueEvents) 
 		return false
 	}
 	return f.Period.Value == "all" || events.New || events.Resolved ||
-		events.StatusChanged || len(events.PriorityChanges) > 0
+		events.StatusLabel != "" || len(events.PriorityChanges) > 0
 }
 
 func (f prioAgendaFilters) summary() string {
