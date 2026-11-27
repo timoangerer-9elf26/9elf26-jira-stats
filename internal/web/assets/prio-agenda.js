@@ -104,8 +104,11 @@
     if (queue && (ticket !== state.cells[step] || !saved)) {
       const row = selected.closest('li').getBoundingClientRect();
       const bounds = queue.getBoundingClientRect();
-      if (row.top < bounds.top) queue.scrollTop += row.top - bounds.top;
-      if (row.bottom > bounds.bottom) queue.scrollTop += row.bottom - bounds.bottom;
+      if (row.height > bounds.height || row.top < bounds.top) {
+        queue.scrollTop += row.top - bounds.top;
+      } else if (row.bottom > bounds.bottom) {
+        queue.scrollTop += row.bottom - bounds.bottom;
+      }
     }
 
     rememberView();
