@@ -31,7 +31,7 @@ const displayTimeZone = "Europe/Berlin"
 //go:embed templates/*.html
 var templatesFS embed.FS
 
-//go:embed assets/output.css assets/htmx.min.js assets/sortable.min.js assets/board-drag.js assets/card-control.js assets/favicon.svg assets/avatars/*.svg
+//go:embed assets/output.css assets/htmx.min.js assets/sortable.min.js assets/board-drag.js assets/card-control.js assets/prio-agenda.js assets/favicon.svg assets/avatars/*.svg
 var assetsFS embed.FS
 
 // Rollups is the read side the web layer depends on: rollup queries over the
@@ -81,6 +81,11 @@ type Rollups interface {
 	// projection (any sprint, any status), key-ordered. It is deliberately the one
 	// read not scoped to the active sprint.
 	PrioIssues() ([]store.PrioIssue, error)
+	IssueChangesSince(since time.Time) (map[string][]jira.ChangelogEntry, error)
+	LatestIssueStatusChanges() (map[string]time.Time, error)
+	IssueDetail(key string) (store.IssueDetail, bool, error)
+	LastPrioMeeting() (store.PrioMeeting, error)
+	CompletePrioMeeting(window int64, endedAt time.Time, accountID string) error
 	// ProjectMembers lists the people who may be assigned work on the project
 	// (CONTEXT.md → Project member), display-name ordered. It is the assign
 	// popover's candidate list — read from the projection like everything else, so
@@ -183,6 +188,7 @@ type Server struct {
 	mux             *http.ServeMux
 	now             func() time.Time
 	loc             *time.Location
+	prioLocation    *time.Location
 	velocitySprints int
 	jiraBaseURL     string
 	// version is the build identity reported by GET /version and the nav marker
@@ -309,6 +315,7 @@ func NewServer(rollups Rollups, opts ...Option) (*Server, error) {
 		mux:             http.NewServeMux(),
 		now:             time.Now,
 		loc:             loc,
+		prioLocation:    loc,
 		velocitySprints: defaultVelocitySprints,
 		version:         version.Version,
 	}
@@ -338,6 +345,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /prio", s.handlePrio)
 	s.mux.HandleFunc("GET /prio/results", s.handlePrioResults)
 	s.mux.HandleFunc("POST /prio/priority", s.handlePrioPriority)
+	s.mux.HandleFunc("POST /prio/meeting/complete", s.handlePrioMeetingComplete)
 	s.mux.HandleFunc("GET /daily", s.handleDaily)
 	s.mux.HandleFunc("GET /daily/results", s.handleDailyResults)
 	s.mux.HandleFunc("GET /sprint", s.handleSprint)

@@ -45,3 +45,34 @@ func (s *Store) IssueChangesSince(since time.Time) (map[string][]jira.ChangelogE
 	}
 	return changes, nil
 }
+
+// LatestIssueStatusChanges reports the last status change per issue, including
+// changes that predate the meeting cutoff.
+func (s *Store) LatestIssueStatusChanges() (map[string]time.Time, error) {
+	rows, err := s.db.Query(`
+		SELECT issue_key, transitioned_at, subsecond_ns
+		FROM (
+			SELECT issue_key, transitioned_at, subsecond_ns,
+			       ROW_NUMBER() OVER (PARTITION BY issue_key ORDER BY transitioned_at DESC, subsecond_ns DESC) AS position
+			FROM status_transition WHERE field = 'status'
+		) WHERE position = 1`)
+	if err != nil {
+		return nil, fmt.Errorf("read latest status changes: %w", err)
+	}
+	defer rows.Close()
+
+	changes := make(map[string]time.Time)
+	for rows.Next() {
+		var key, instant string
+		var nanoseconds time.Duration
+		if err := rows.Scan(&key, &instant, &nanoseconds); err != nil {
+			return nil, fmt.Errorf("scan latest status change: %w", err)
+		}
+		at, err := time.Parse(time.RFC3339, instant)
+		if err != nil {
+			return nil, fmt.Errorf("parse latest status change for %s: %w", key, err)
+		}
+		changes[key] = at.Add(nanoseconds)
+	}
+	return changes, rows.Err()
+}

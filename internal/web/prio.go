@@ -1,22 +1,30 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"sort"
+	"time"
+
+	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 )
 
 // prioRow is one row of the Prio table: the issue's display fields plus a
 // resolved Jira link. Href is empty when no Jira base URL is configured, so the
 // name renders unlinked rather than as a broken link — matching the board card.
 type prioRow struct {
-	Key      string
-	Type     string // Epic, Task, Bug or Story (drives the shared type badge)
-	Summary  string
-	Status   string       // plain status text
-	Priority string       // Jira level: Highest…Lowest ("" when the issue carries none)
-	Icon     priorityIcon // the level's icon; zero when Priority is unknown/empty
-	Href     string       // "<base>/browse/<KEY>", or "" when unconfigured
+	SelectHref   string
+	CreatedAt    time.Time
+	CreatedLabel string
+	Markers      []prioMarker
+	Key          string
+	Type         string // Epic, Task, Bug or Story (drives the shared type badge)
+	Summary      string
+	Status       string       // plain status text
+	Priority     string       // Jira level: Highest…Lowest ("" when the issue carries none)
+	Icon         priorityIcon // the level's icon; zero when Priority is unknown/empty
+	Href         string       // "<base>/browse/<KEY>", or "" when unconfigured
 	// Labels are the issue's Jira labels, in Jira's order; empty when it carries
 	// none, in which case the Labels cell renders empty. Kept as separate strings
 	// rather than one joined display string so a label stays individually
@@ -59,6 +67,11 @@ type prioView struct {
 
 // handlePrio renders the full standalone Prio page.
 func (s *Server) handlePrio(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Vary", "HX-Boosted")
+	if r.Header.Get("HX-Boosted") == "true" && r.Header.Get("HX-History-Restore-Request") != "true" {
+		s.renderPrio(w, r, "prio-boosted")
+		return
+	}
 	s.renderPrio(w, r, "prio.html")
 }
 
@@ -70,13 +83,31 @@ func (s *Server) handlePrioResults(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderPrio(w http.ResponseWriter, r *http.Request, name string) {
-	s.renderPrioWith(w, r.URL.Query(), name, prioEdit{})
+	s.renderPrioWith(w, r.Context(), r.URL.Query(), name, prioEdit{})
 }
 
 // renderPrioWith renders the named Prio template for the filter params q,
 // annotating the rows with the outcome of a priority edit (if any).
-func (s *Server) renderPrioWith(w http.ResponseWriter, q url.Values, name string, edit prioEdit) {
-	view, err := s.prioView(q, edit)
+func (s *Server) renderPrioWith(w http.ResponseWriter, ctx context.Context, q url.Values, name string, edit prioEdit) {
+	var view any
+	var err error
+	if legacyPrio(q) {
+		view, err = s.prioView(q, edit)
+		if name == "prio-boosted" {
+			name = "prio-panel"
+		}
+	} else {
+		agenda, agendaErr := s.prioAgenda(ctx, q, edit)
+		view, err = agenda, agendaErr
+		if name == "prio-boosted" && err == nil {
+			w.Header().Set("HX-Push-Url", agenda.CanonicalHref)
+		}
+		if name == "prio-panel" || name == "prio-boosted" {
+			name = "prio-agenda"
+		} else {
+			name = "prio-agenda.html"
+		}
+	}
 	if err != nil {
 		s.renderError(w)
 		return
@@ -85,6 +116,12 @@ func (s *Server) renderPrioWith(w http.ResponseWriter, q url.Values, name string
 	if err := s.templates.ExecuteTemplate(w, name, view); err != nil {
 		http.Error(w, "failed to render page", http.StatusInternalServerError)
 	}
+}
+
+// legacyPrio keeps existing status and toggle bookmarks usable.
+func legacyPrio(q url.Values) bool {
+	return q.Has("legacy") || (!q.Has("step") && !q.Has("preset") &&
+		(q.Has(statusParam) || q.Has(nonTechnicalParam) || q.Has(noParentParam)))
 }
 
 // prioView reads the whole projection, drops the rows the active filters (q)
@@ -103,22 +140,7 @@ func (s *Server) prioView(q url.Values, edit prioEdit) (prioView, error) {
 		if !keepPrioIssue(filters, issue) {
 			continue // hidden by a filter
 		}
-		row := prioRow{
-			Key:      issue.Key,
-			Type:     issue.Type,
-			Summary:  issue.Summary,
-			Status:   issue.Status,
-			Priority: issue.Priority,
-			Icon:     priorityIconFor(issue.Priority),
-			Href:     s.jiraIssueURL(issue.Key),
-			Labels:   issue.Labels,
-			Editable: true, // the Prio table is the sole surface the priority is editable on (#212)
-		}
-		if issue.Key == edit.Key {
-			row.Edited = edit.Error == ""
-			row.Error = edit.Error
-		}
-		rows = append(rows, row)
+		rows = append(rows, s.makePrioRow(issue, edit))
 	}
 	sortByPriority(rows)
 	return prioView{
@@ -127,6 +149,29 @@ func (s *Server) prioView(q url.Values, edit prioEdit) (prioView, error) {
 		Empty:   len(rows) == 0,
 		NoMatch: len(rows) == 0 && len(issues) > 0,
 	}, nil
+}
+
+func (s *Server) makePrioRow(issue store.PrioIssue, edit prioEdit) prioRow {
+	row := prioRow{
+		Key:       issue.Key,
+		Type:      issue.Type,
+		Summary:   issue.Summary,
+		Status:    issue.Status,
+		Priority:  issue.Priority,
+		Icon:      priorityIconFor(issue.Priority),
+		Href:      s.jiraIssueURL(issue.Key),
+		Labels:    issue.Labels,
+		Editable:  true,
+		CreatedAt: issue.CreatedAt,
+	}
+	if !issue.CreatedAt.IsZero() {
+		row.CreatedLabel = issue.CreatedAt.In(s.prioLocation).Format("02.01.2006")
+	}
+	if issue.Key == edit.Key {
+		row.Edited = edit.Error == ""
+		row.Error = edit.Error
+	}
+	return row
 }
 
 // priorityIcon is how one priority level draws in the table: a stroke colour and

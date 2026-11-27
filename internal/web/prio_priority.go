@@ -33,7 +33,11 @@ func (s *Server) handlePrioPriority(w http.ResponseWriter, r *http.Request) {
 		log.Printf("web: prio priority write %s=%q failed: %v", key, priority, err)
 		edit.Error = writeError
 	}
-	s.renderPrioWith(w, prioPriorityFilters(r.Form), "prio-panel", edit)
+	q := prioPriorityFilters(r.Form)
+	if len(q) == 0 {
+		q.Set("legacy", "1")
+	}
+	s.renderPrioWith(w, r.Context(), q, "prio-panel", edit)
 }
 
 // prioPriorityFilters is the filter query the panel re-renders with: the form

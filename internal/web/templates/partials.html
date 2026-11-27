@@ -1373,12 +1373,8 @@
 <form data-testid="prio-filters"
       hx-target="#prio-panel" hx-swap="innerHTML"
       class="app-surface mt-3 flex flex-wrap items-center gap-3 p-3 sm:justify-end">
-  {{/* Always-present filter-param anchor: a control hx-includes the OTHER
-       filters via [data-filterparam]:not([name='<own>']), and with every filter
-       at its default that selector would otherwise match nothing and make HTMX
-       log a no-match error. This valueless marker guarantees a match while
-       contributing no form value — same trick as the Board chrome. */}}
-  <span data-filterparam hidden></span>
+  {{/* Keep legacy filters active when toggling back to their defaults. */}}
+  <input type="hidden" data-filterparam name="legacy" value="1">
   {{range .Filters}}{{range .Params}}<input type="hidden" data-filterparam name="{{.Name}}" value="{{.Value}}">{{end}}{{end}}
   {{range .Filters}}{{render .Control .Data}}{{end}}
 </form>

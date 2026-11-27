@@ -137,24 +137,17 @@ func TestDenseDatasetStressesAllViews(t *testing.T) {
 		}
 	})
 
-	t.Run("prio spans every status bucket the Not-done filter splits on", func(t *testing.T) {
-		// The default (Not-done on) view must show Triage — the sprint-less backlog
-		// tickets are the only source of it, so an edit dropping them fails here.
-		body := get(t, app.URL+"/prio")
-		if !strings.Contains(body, `data-testid="prio:DCAI-T1:status">Triage<`) {
-			t.Error("prio: dense dataset must carry Triage tickets for the Not-done filter")
-		}
-		for _, done := range []string{"DONE (This Sprint)", "Ready for Release", "Released / Deployed", "Canceled"} {
-			if strings.Contains(body, `:status">`+done+`<`) {
-				t.Errorf("prio: default view should hide %q", done)
-			}
-		}
-		// With every filter toggled off, the whole project — done set and Canceled
-		// included — shows.
-		all := get(t, app.URL+"/prio?"+prioEveryFilterOff)
-		for _, status := range []string{"Triage", "DONE (This Sprint)", "Ready for Release", "Released / Deployed", "Canceled"} {
-			if !strings.Contains(all, `:status">`+status+`<`) {
-				t.Errorf("prio: every filter off should reveal %q", status)
+	t.Run("prio overview exercises all current status groups", func(t *testing.T) {
+		body := get(t, app.URL+"/prio?preset=all")
+		assertOrder(t, body,
+			`data-prio-group="planned"`, `data-key="DCAI-T1"`,
+			`data-prio-group="doing"`,
+			`data-prio-group="done"`,
+			`data-prio-group="other"`, "Canceled",
+		)
+		for _, status := range []string{"Triage", "DONE (This Sprint)", "Ready for Release", "Released / Deployed"} {
+			if !strings.Contains(body, ">"+status+"<") {
+				t.Errorf("prio overview missing fixture status %q", status)
 			}
 		}
 	})
