@@ -5,6 +5,7 @@ package jira
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -37,8 +38,9 @@ type Issue struct {
 	// ticket created directly into a sprint — whose Sprint field was set at creation,
 	// so it carries no "Sprint" changelog item and would otherwise be missing from
 	// history (see #55).
-	ActiveSprintID int
-	Assignee       string
+	ActiveSprintID    int
+	Assignee          string
+	AssigneeAccountID string
 	// AssigneeAvatarURL is the public Jira avatar image URL of the current
 	// assignee (from the assignee's avatarUrls), "" when unassigned or Jira
 	// reported no avatar. The Board card renders it, falling back to computed
@@ -58,8 +60,12 @@ type Issue struct {
 	// reports them; nil when the issue carries none. Jira labels are whitespace-free
 	// strings. The Prio view renders them as pills and keys its Non-Technical
 	// filter off the exact label "Technical".
-	Labels    []string
-	Changelog []ChangelogEntry
+	Labels      []string
+	Description json.RawMessage // Atlassian Document Format; nil when unset
+	Comments    []Comment
+	Links       []IssueLink
+	ResolvedAt  time.Time // current Jira resolutiondate, zero when unset
+	Changelog   []ChangelogEntry
 	// SprintChanges is the issue's sprint-membership history: each entering or
 	// leaving of a single sprint, derived from the "Sprint" changelog field. It
 	// lets the store reconstruct which sprint(s) the issue belonged to at any past
@@ -152,6 +158,28 @@ func projectMembers(users []AssignableUser) []ProjectMember {
 	return members
 }
 
+// Person identifies a Jira user as reported on a comment or change.
+type Person struct {
+	AccountID   string
+	DisplayName string
+}
+
+// Comment is a Jira comment visible without group or role restrictions.
+type Comment struct {
+	ID        string
+	Author    Person
+	Body      json.RawMessage `json:"Body,omitempty"` // Atlassian Document Format
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// IssueLink describes the other issue and the relation from this issue to it.
+type IssueLink struct {
+	Key      string
+	Summary  string
+	Relation string
+}
+
 // ChangelogEntry is a single field change recorded in a Jira issue's history.
 // ID is the stable Jira changelog entry id used to dedup transitions on re-sync.
 type ChangelogEntry struct {
@@ -159,6 +187,9 @@ type ChangelogEntry struct {
 	Field     string // changed field, e.g. "status" or "Estimated Time"
 	From      string
 	To        string
+	FromID    string
+	ToID      string
+	Author    Person
 	Timestamp time.Time
 }
 

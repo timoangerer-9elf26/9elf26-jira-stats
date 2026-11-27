@@ -21,6 +21,7 @@ type recordingStore struct {
 	members       [][]jira.ProjectMember // one entry per ReplaceProjectMembers call
 	saveErr       error
 	memberSaveErr error
+	lastSync      time.Time
 }
 
 func (s *recordingStore) SaveIssue(iss jira.Issue, syncedAt string) error {
@@ -38,11 +39,16 @@ func (s *recordingStore) ReplaceProjectMembers(members []jira.ProjectMember) err
 	s.members = append(s.members, members)
 	return nil
 }
-func (s *recordingStore) IssueCount() (int, error)           { return len(s.saved), nil }
-func (s *recordingStore) LastSync() (time.Time, bool, error) { return time.Time{}, false, nil }
-func (s *recordingStore) SetLastSync(time.Time) error        { return nil }
-func (s *recordingStore) SetLastFullResync(time.Time) error  { return nil }
-func (s *recordingStore) Reset() error                       { return nil }
+func (s *recordingStore) IssueCount() (int, error) { return len(s.saved), nil }
+func (s *recordingStore) LastSync() (time.Time, bool, error) {
+	return s.lastSync, !s.lastSync.IsZero(), nil
+}
+func (s *recordingStore) SetLastSync(at time.Time) error {
+	s.lastSync = at
+	return nil
+}
+func (s *recordingStore) SetLastFullResync(time.Time) error { return nil }
+func (s *recordingStore) Reset() error                      { return nil }
 
 // transitionClient is a jira.Client that records the call sequence, so the test
 // can assert write-then-read-then-persist rather than trusting the fake's state.

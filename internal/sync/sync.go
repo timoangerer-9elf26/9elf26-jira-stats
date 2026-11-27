@@ -34,11 +34,9 @@ type Store interface {
 	Reset() error
 }
 
-// Backfill walks the whole project through the client and persists every
-// issue: the current snapshot plus all status- and Estimated-Time-change
-// transitions. Transitions are deduped by changelog entry id in the store, so a
-// re-run inserts no duplicates. Returns the number of issues persisted. Each
-// snapshot is stamped with a single shared synced_at timestamp.
+// Backfill persists every issue snapshot, its details and tracked changes.
+// The store dedups changes by Jira changelog entry ID. It returns the number
+// of issues persisted, all stamped with the same synced_at timestamp.
 func Backfill(ctx context.Context, client jira.Client, store Store) (int, error) {
 	if err := syncSprints(ctx, client, store); err != nil {
 		return 0, err
@@ -134,18 +132,15 @@ func incremental(ctx context.Context, client jira.Client, store Store, since tim
 	return nil
 }
 
-// Syncer keeps the store current by running sync cycles: a full backfill when
-// the store is empty, then cheap incremental syncs bounded by the last sync
-// time (less an overlap window that absorbs clock skew between the app and
-// Jira, so no change is missed at the boundary).
+// Syncer keeps the store current through full backfill and incremental sync
+// cycles. It reads incremental changes since the last successful sync with an
+// overlap to account for clock skew.
 type Syncer struct {
 	client  jira.Client
 	store   Store
 	overlap time.Duration
 
-	// mu serializes the periodic Cycle and a full Resync so a resync (clear +
-	// re-backfill) never interleaves with an incremental cycle — only one sync
-	// operation touches the store at a time.
+	// mu serializes sync cycles, full resync and single-issue refreshes.
 	mu sync.Mutex
 	// resyncing reports (and guards) an in-flight full resync: TriggerResync flips
 	// it true and only one resync may hold it, so an overlapping trigger is a
@@ -181,34 +176,37 @@ func (s *Syncer) TriggerResync(ctx context.Context) bool {
 // Resyncing reports whether a full resync is currently running.
 func (s *Syncer) Resyncing() bool { return s.resyncing.Load() }
 
+// RefreshIssue reads the current issue through the caller's Jira client and
+// saves its projection. Serialize the read as well as the save so a slower
+// refresh cannot overwrite a newer snapshot from another refresh or sync.
+func (s *Syncer) RefreshIssue(ctx context.Context, client interface {
+	FetchIssue(context.Context, string) (jira.Issue, error)
+}, key string) (jira.Issue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	iss, err := client.FetchIssue(ctx, key)
+	if err != nil {
+		return jira.Issue{}, fmt.Errorf("re-fetch issue: %w", err)
+	}
+	if err := s.store.SaveIssue(iss, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return jira.Issue{}, fmt.Errorf("save issue: %w", err)
+	}
+	return iss, nil
+}
+
 // SetEstimate is the Board estimate edit's write path (docs/adr/0005): it writes
 // the ticket's size back to Jira, then immediately re-reads that one issue from
 // Jira and persists it, so the projection is set only ever from a Jira read
 // (never from local UI state) and stays a pure projection. It returns the
 // authoritative size the re-fetched issue carries ("S"/"M"/"L" or "" for
-// no-estimate). Any failure — the write or the reconciliation read/save — is
-// returned so the handler can revert the pill and surface an inline error,
-// leaving Jira and the projection unchanged (last-write-wins, no locking guard).
-//
-// The Jira write and re-fetch run without the sync mutex (they must not block on
-// an in-flight cycle); only the SaveIssue persist is serialized with the sync
-// loop, so a resync's clear-and-rebuild never interleaves with this write.
+// no-estimate). The write can succeed even if reconciliation returns an error.
 func (s *Syncer) SetEstimate(ctx context.Context, key, size string) (string, error) {
 	if err := s.client.UpdateIssueSize(ctx, key, size); err != nil {
 		return "", fmt.Errorf("update size: %w", err)
 	}
-	iss, err := s.client.FetchIssue(ctx, key)
-	if err != nil {
-		return "", fmt.Errorf("re-fetch issue: %w", err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	syncedAt := time.Now().UTC().Format(time.RFC3339)
-	if err := s.store.SaveIssue(iss, syncedAt); err != nil {
-		return "", fmt.Errorf("save issue: %w", err)
-	}
-	return iss.Size, nil
+	iss, err := s.RefreshIssue(ctx, s.client, key)
+	return iss.Size, err
 }
 
 // SetPriority is the Prio view's priority edit write path (#212): it writes the
@@ -217,27 +215,14 @@ func (s *Syncer) SetEstimate(ctx context.Context, key, size string) (string, err
 // SetEstimate (docs/adr/0005) and SetStatus (docs/adr/0010), so the projection
 // is only ever set from a Jira read. Unlike SetEstimate it hands nothing back:
 // the caller re-renders the whole Prio panel from the store afterwards, which is
-// what re-sorts the table around the change. Any failure (write, re-read or
-// save) is returned and leaves both Jira and the projection unchanged.
-//
-// As with the other two writes, only the SaveIssue persist takes the sync mutex,
-// so the Jira round-trips never block on an in-flight cycle.
+// what re-sorts the table around the change. The write can succeed even if
+// reconciliation returns an error.
 func (s *Syncer) SetPriority(ctx context.Context, key, priority string) error {
 	if err := s.client.UpdateIssuePriority(ctx, key, priority); err != nil {
 		return fmt.Errorf("update priority: %w", err)
 	}
-	iss, err := s.client.FetchIssue(ctx, key)
-	if err != nil {
-		return fmt.Errorf("re-fetch issue: %w", err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	syncedAt := time.Now().UTC().Format(time.RFC3339)
-	if err := s.store.SaveIssue(iss, syncedAt); err != nil {
-		return fmt.Errorf("save issue: %w", err)
-	}
-	return nil
+	_, err := s.RefreshIssue(ctx, s.client, key)
+	return err
 }
 
 // SetStatus is the Board transition write path (docs/adr/0010): it moves a
@@ -259,9 +244,6 @@ func (s *Syncer) SetPriority(ctx context.Context, key, priority string) error {
 // reconciliation read/save is returned too, but by then Jira HAS moved and only
 // the projection is behind (see ErrWriteLanded, which SetAssignee marks that
 // case with).
-//
-// As with SetEstimate, only the SaveIssue persist takes the sync mutex, so the
-// Jira round-trips never block on an in-flight cycle.
 func (s *Syncer) SetStatus(ctx context.Context, key, statusID string) (string, error) {
 	offered, err := s.client.FetchTransitions(ctx, key)
 	if err != nil {
@@ -274,18 +256,8 @@ func (s *Syncer) SetStatus(ctx context.Context, key, statusID string) (string, e
 	if err := s.client.TransitionIssue(ctx, key, tr.ID); err != nil {
 		return "", fmt.Errorf("transition issue: %w", err)
 	}
-	iss, err := s.client.FetchIssue(ctx, key)
-	if err != nil {
-		return "", fmt.Errorf("re-fetch issue: %w", err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	syncedAt := time.Now().UTC().Format(time.RFC3339)
-	if err := s.store.SaveIssue(iss, syncedAt); err != nil {
-		return "", fmt.Errorf("save issue: %w", err)
-	}
-	return iss.Status, nil
+	iss, err := s.RefreshIssue(ctx, s.client, key)
+	return iss.Status, err
 }
 
 // ErrWriteLanded marks an error raised AFTER a Jira write has already
@@ -307,22 +279,14 @@ var ErrWriteLanded = errors.New("the Jira write landed; the follow-up did not")
 //
 // A failed write persists nothing and leaves Jira untouched. A failure past that
 // point is wrapped with ErrWriteLanded, because the assignment is a fact in Jira
-// by then. The Jira round-trips deliberately run OUTSIDE the sync mutex — only
-// the persist takes it — so a slow Jira does not hold up a sync cycle.
+// by then.
 func (s *Syncer) SetAssignee(ctx context.Context, key, accountID string) (string, error) {
 	if err := s.client.UpdateIssueAssignee(ctx, key, accountID); err != nil {
 		return "", fmt.Errorf("update assignee: %w", err)
 	}
-	iss, err := s.client.FetchIssue(ctx, key)
+	iss, err := s.RefreshIssue(ctx, s.client, key)
 	if err != nil {
-		return "", fmt.Errorf("re-fetch issue: %w: %w", ErrWriteLanded, err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	syncedAt := time.Now().UTC().Format(time.RFC3339)
-	if err := s.store.SaveIssue(iss, syncedAt); err != nil {
-		return "", fmt.Errorf("save issue: %w: %w", ErrWriteLanded, err)
+		return "", fmt.Errorf("%w: %w", ErrWriteLanded, err)
 	}
 	return iss.Assignee, nil
 }
@@ -356,11 +320,10 @@ func (s *Syncer) resync(ctx context.Context) error {
 	return nil
 }
 
-// Cycle runs one sync cycle: a full backfill if the store is empty, otherwise
-// an incremental sync of issues changed since the last sync (minus the overlap
-// window). On success it records the cycle's start time as the new last_sync,
-// so the next incremental picks up from here. Cycles are idempotent — the store
-// dedups transitions — so a retried cycle inserts no duplicates.
+// Cycle runs one sync cycle: a full backfill if the store is empty or the
+// incremental watermark is missing, otherwise it fetches changes since the
+// last sync minus the overlap window. On success it records the cycle start
+// as the new last_sync. Retries dedup transitions by changelog entry ID.
 func (s *Syncer) Cycle(ctx context.Context) error {
 	// Serialize with a full resync (which also holds mu): the periodic incremental
 	// must never interleave with a resync's clear-and-rebuild.
@@ -374,20 +337,18 @@ func (s *Syncer) Cycle(ctx context.Context) error {
 		return fmt.Errorf("issue count: %w", err)
 	}
 
-	if count == 0 {
+	last, hasWatermark, err := s.store.LastSync()
+	if err != nil {
+		return err
+	}
+	if count == 0 || !hasWatermark {
 		n, err := Backfill(ctx, s.client, s.store)
 		if err != nil {
 			return err
 		}
 		log.Printf("sync: backfilled %d issues", n)
 	} else {
-		since := time.Time{}
-		if last, ok, err := s.store.LastSync(); err != nil {
-			return err
-		} else if ok {
-			since = last.Add(-s.overlap)
-		}
-		if err := incremental(ctx, s.client, s.store, since); err != nil {
+		if err := incremental(ctx, s.client, s.store, last.Add(-s.overlap)); err != nil {
 			return err
 		}
 	}

@@ -85,6 +85,18 @@ func (c *gatedClient) TransitionIssue(context.Context, string, string) error {
 func TestTriggerResyncRebuildsProjectionAndGuardsOverlap(t *testing.T) {
 	st := openTempStore(t)
 
+	// Independent application state shares the SQLite file with the projection.
+	for _, stmt := range []string{
+		`CREATE TABLE test_auth_state (account_id TEXT)`,
+		`INSERT INTO test_auth_state VALUES ('acct-ada')`,
+		`CREATE TABLE test_meeting_state (finished_at TEXT)`,
+		`INSERT INTO test_meeting_state VALUES ('2026-07-01T09:00:00Z')`,
+	} {
+		if _, err := st.db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	// Pre-seed a stale issue that is NOT in the fake's set, so a correct resync
 	// (clear + re-backfill) must drop it.
 	if err := st.SaveIssue(jira.Issue{
@@ -142,6 +154,8 @@ func TestTriggerResyncRebuildsProjectionAndGuardsOverlap(t *testing.T) {
 	assertEq(t, "stale issue dropped", countRows(t, st, "SELECT COUNT(*) FROM issue WHERE key='DCAI-STALE'"), 0)
 	assertEq(t, "fresh issue backfilled", countRows(t, st, "SELECT COUNT(*) FROM issue WHERE key='DCAI-1'"), 1)
 	assertEq(t, "sprint backfilled", countRows(t, st, "SELECT COUNT(*) FROM sprint"), 1)
+	assertEq(t, "auth state preserved", countRows(t, st, "SELECT COUNT(*) FROM test_auth_state WHERE account_id='acct-ada'"), 1)
+	assertEq(t, "meeting state preserved", countRows(t, st, "SELECT COUNT(*) FROM test_meeting_state WHERE finished_at='2026-07-01T09:00:00Z'"), 1)
 	// The member table is rebuilt like every other table: the stale member is
 	// gone and Jira's current answer is what remains.
 	assertEq(t, "stale member dropped",
