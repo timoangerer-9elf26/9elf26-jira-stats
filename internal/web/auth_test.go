@@ -73,9 +73,10 @@ func newOAuthAppAt(t *testing.T, provider *httptest.Server, path string, configu
 }
 
 func oauthClient(app *testApp) *http.Client {
-	client := app.Client()
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return client
+	return &http.Client{
+		Transport:     app.Client().Transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 }
 
 // noRedirectClient returns an http.Client that never follows redirects, so a
@@ -543,9 +544,11 @@ func TestSessionSurvivesRestartAndResyncWithSerializedRefresh(t *testing.T) {
 				t.Errorf("authenticated board: %v", err)
 				return
 			}
-			resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				t.Errorf("authenticated board after restart and resync: status %d", resp.StatusCode)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil || resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "</html>") {
+				t.Errorf("authenticated board after restart and resync: status %d, body end %q (%v)",
+					resp.StatusCode, body[max(0, len(body)-320):], err)
 			}
 		})
 	}
