@@ -39,7 +39,9 @@
   function renderProgress() {
     const view = agenda();
     if (!view) return;
-    const discussed = new Set();
+    const discussed = new Set(Object.entries(state.discussed)
+      .filter(([stepID]) => stepID !== 'overview')
+      .flatMap(([, keys]) => keys));
     for (const step of view.querySelectorAll('[data-prio-step]')) {
       const stepID = step.dataset.prioStep;
       const reviewed = state.discussed[stepID] || [];
@@ -49,9 +51,6 @@
       if (stepID === view.dataset.step) {
         const queueCount = view.querySelector('[data-prio-queue-progress]');
         if (queueCount) queueCount.textContent = count;
-      }
-      if (stepID !== 'overview') {
-        for (const key of reviewed) discussed.add(key);
       }
     }
     view.querySelector('[data-prio-summary-count]').textContent =
@@ -97,6 +96,14 @@
       window.scrollTo({top: 0, behavior: 'instant'});
     }
     renderedStep = step;
+    const activeStep = view.querySelector('[aria-current="step"]');
+    if (activeStep) {
+      const bar = activeStep.parentElement;
+      const tab = activeStep.getBoundingClientRect();
+      const bounds = bar.getBoundingClientRect();
+      if (tab.left < bounds.left) bar.scrollLeft += tab.left - bounds.left;
+      if (tab.right > bounds.right) bar.scrollLeft += tab.right - bounds.right;
+    }
     const selected = view.querySelector('[data-prio-queue-key][aria-current="true"]');
     const queue = selected?.closest('[data-prio-scroll]');
     if (queue && (ticket !== state.cells[step] || !saved)) {
@@ -192,11 +199,15 @@
         focused?.id ? `#${CSS.escape(focused.id)}` : '';
     }
   });
-  document.addEventListener('htmx:afterSettle', event => {
+  document.addEventListener('htmx:afterSwap', event => {
     if (event.detail.target !== panel) return;
     const view = agenda();
-    restoreView();
-    if (view?.dataset.prioChange) recordChange(view.dataset.prioChange);
+    if (!view?.dataset.prioChange) return;
+    if (state.windowID !== view.dataset.window) state = loadState(view.dataset.window);
+    recordChange(view.dataset.prioChange);
+  });
+  document.addEventListener('htmx:afterSettle', event => {
+    if (event.detail.target === panel) restoreView();
   });
   document.addEventListener('htmx:historyRestore', restoreView);
   document.addEventListener('prio:change', event => recordChange(event.detail));

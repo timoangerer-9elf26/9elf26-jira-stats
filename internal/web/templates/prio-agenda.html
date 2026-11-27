@@ -61,10 +61,12 @@
       {{else}}<p class="text-sm">Jira-Anmeldung erforderlich.</p>{{end}}
     </div>
   </dialog>
-  <nav aria-label="Meeting-Agenda" class="app-surface app-scroll flex gap-2 overflow-x-auto p-2">
-    {{range .Steps}}
-    <a class="grid min-w-max flex-1 gap-1 rounded-md px-3 py-2 text-sm font-semibold hover:bg-muted{{if .Active}} bg-accent text-accent-foreground{{end}}" href="{{.Href}}" data-prio-step="{{.ID}}" data-prio-keys="{{if eq .ID "overview"}}overview{{else}}{{range .Rows}}{{.Key}} {{end}}{{end}}"{{if .Active}} aria-current="step"{{end}}><span class="flex items-center justify-between gap-3"><span>{{.Label}}</span><small class="tabular-nums"><span data-prio-progress>0</span>/{{.Total}}</small></span>
+  <nav aria-label="Meeting-Agenda" class="app-surface app-scroll flex gap-2 overflow-x-auto p-2" data-prio-scroll="agenda">
+    {{range $number, $step := .Steps}}
+    {{if or .Active .Total (ne .ID "epic-check")}}
+    <a class="grid min-w-max flex-1 gap-1 rounded-md px-3 py-2 text-sm font-semibold hover:bg-muted{{if .Active}} bg-accent text-accent-foreground{{end}}" href="{{.Href}}" data-prio-step="{{.ID}}" data-prio-keys="{{if eq .ID "overview"}}overview{{else}}{{range .Rows}}{{.Key}} {{end}}{{end}}"{{if .Active}} aria-current="step"{{end}}><span class="flex items-center justify-between gap-3"><span>{{$number}} · {{.Label}}</span><small class="tabular-nums"><span data-prio-progress>0</span>/{{.Total}}</small></span>
       <progress class="h-0.5 w-full appearance-none overflow-hidden rounded bg-border align-top [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary" value="0" max="{{if .Total}}{{.Total}}{{else}}1{{end}}" aria-hidden="true"></progress></a>
+    {{end}}
     {{end}}
   </nav>
   {{if .Overview}}

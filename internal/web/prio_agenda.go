@@ -122,6 +122,7 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	if err != nil {
 		return prioAgendaView{}, err
 	}
+	suggestions := s.prioEpicSuggestions(issues)
 	var overviewRows []prioRow
 	for _, issue := range issues {
 		events := prioEvents(issue, changes[issue.Key], cutoff)
@@ -130,6 +131,9 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 		row.SelectHref = prioHref(q, "ticket", issue.Key)
 		if view.Overview && keepPrioOverviewRow(q, issue) {
 			overviewRows = append(overviewRows, row)
+		}
+		if suggestions[issue.Key] != nil {
+			steps[1].Rows = append(steps[1].Rows, row)
 		}
 		if strings.EqualFold(issue.Type, "Epic") && events.DoneFromOpen {
 			steps[2].Rows = append(steps[2].Rows, row)
@@ -173,6 +177,9 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	if view.Selected != nil {
 		view.Selected.Focused = !view.Overview
 		view.Selected.Result = view.TicketResult
+		if step == prioEpicCheck && suggestions[selection] != nil {
+			view.Selected.showEpicSuggestion(suggestions[selection])
+		}
 	}
 	view.SelectedKey = selection
 	if edit.Key != "" && edit.Error == "" {

@@ -16,7 +16,13 @@ func TestPrioAgendaOpensAtOverviewWithBerlinFallback(t *testing.T) {
 	app := newTestAppWith(t, prioFixture(), now)
 	body := get(t, app.URL+"/prio")
 
-	assertOrder(t, body, "Übersicht", "Epic-Prüfung", "Fertig", "Neu", "Backlog")
+	assertOrder(t, body, "0 · Übersicht", "2 · Fertig", "3 · Neu", "4 · Backlog")
+	if strings.Contains(body, `data-prio-step="epic-check"`) {
+		t.Error("the agenda should skip an empty Epic-Prüfung")
+	}
+	if !strings.Contains(body, `step=done" data-prio-next>Zur Besprechung`) {
+		t.Error("the overview should advance directly to Fertig")
+	}
 	for _, want := range []string{`value="2026-11-20T17:45"`, "Vor sieben Tagen", "Seit letztem Prio-Meeting", "Alle Tickets", "Meeting abschließen"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("overview missing %q", want)

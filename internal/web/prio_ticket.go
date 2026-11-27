@@ -21,6 +21,7 @@ type prioTicketPanel struct {
 	MetadataError    string
 	Forms            []prioTicketForm
 	Transitions      []prioTicketTransition
+	EpicSuggestion   *prioEpicSuggestion
 	Params           []filterParam
 	Focused          bool
 	Result           prioTicketResult

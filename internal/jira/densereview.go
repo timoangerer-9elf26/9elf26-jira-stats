@@ -157,7 +157,22 @@ func denseIssues() []Issue {
 	issues = append(issues, denseKW29Issues()...)
 	issues = append(issues, denseHistoricIssues()...)
 	issues = append(issues, denseBacklogIssues()...)
+	issues = append(issues, densePrioEpicIssues()...)
 	return withDenseLabels(withDensePriorities(issues))
+}
+
+// The Epic can be completed from Epic-Prüfung and then reviewed in Fertig.
+func densePrioEpicIssues() []Issue {
+	created := mustInstant("2026-06-15T09:00:00Z")
+	return []Issue{
+		{Key: "DCAI-990001", Type: "Epic", Summary: "PDF-Quellenlinks veröffentlichen",
+			Status: stInProgress, StatusCategory: denseCategory(stInProgress), Priority: "Highest",
+			CreatedAt: created, Description: PlainADF("Quellenlinks im PDF-Export für alle Dokumente verfügbar machen.")},
+		{Key: "DCAI-990002", Type: "Task", Summary: "Quellenlinks für mehrere Dokumente abdecken",
+			ParentKey: "DCAI-990001", Status: stReadyForR, StatusCategory: denseCategory(stReadyForR), CreatedAt: created},
+		{Key: "DCAI-990003", Type: "Task", Summary: "Verworfener Entwurf der Tabellenansicht",
+			ParentKey: "DCAI-990001", Status: stCanceled, StatusCategory: denseCategory(stCanceled), CreatedAt: created},
+	}
 }
 
 // densePriorities cycles the five Jira levels so the Prio view's priority icons
