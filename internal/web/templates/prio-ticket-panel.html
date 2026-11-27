@@ -14,7 +14,7 @@
   {{with .Result}}{{template "prio-ticket-result" .}}{{end}}
   {{if .CanWrite}}<div id="prio-ticket-feedback" class="empty:hidden" aria-live="polite"></div>{{end}}
 </header>
-<div{{if .Focused}} class="app-scroll max-h-[65vh] overflow-y-auto" data-prio-scroll="ticket"{{end}}>
+<div{{if .Focused}} class="app-scroll lg:max-h-[65vh] lg:overflow-y-auto" data-prio-scroll="ticket"{{end}}>
   {{if .EpicSuggestion}}{{template "prio-epic-suggestion" .}}{{end}}
   {{if .CanWrite}}<div class="border-b border-border p-5">{{template "prio-ticket-actions" .}}</div>{{end}}
   <section class="space-y-2 border-b border-border p-5 text-sm" aria-label="Ticketdaten">

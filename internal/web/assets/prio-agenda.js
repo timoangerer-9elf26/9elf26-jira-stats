@@ -26,14 +26,19 @@
     } catch { /* Keep the current page usable without session storage. */ }
   }
 
+  function scrollKey(area, ticket) {
+    const name = area.dataset.prioScroll;
+    return name === 'drawer' || name === 'ticket' ? name + ':' + ticket : name;
+  }
+
   function rememberView() {
     const view = agenda();
     if (!view) return;
     const {step, ticket} = view.dataset;
     state.cells[step] = ticket;
-    const scroll = {page: window.scrollY};
+    const scroll = {...state.scroll[step], page: window.scrollY};
     for (const area of view.querySelectorAll('[data-prio-scroll]')) {
-      scroll[area.dataset.prioScroll] = [area.scrollLeft, area.scrollTop];
+      scroll[scrollKey(area, ticket)] = [area.scrollLeft, area.scrollTop];
     }
     state.scroll[step] = scroll;
     saveState();
@@ -85,7 +90,7 @@
     const saved = state.scroll[step];
     if (saved) {
       for (const area of view.querySelectorAll('[data-prio-scroll]')) {
-        const position = saved[area.dataset.prioScroll];
+        const position = saved[scrollKey(area, ticket)];
         if (position) area.scrollTo({left: position[0], top: position[1], behavior: 'instant'});
       }
       window.scrollTo({top: saved.page, behavior: 'instant'});
@@ -93,14 +98,6 @@
       window.scrollTo({top: 0, behavior: 'instant'});
     }
     renderedStep = step;
-    const activeStep = view.querySelector('[aria-current="step"]');
-    if (activeStep) {
-      const bar = activeStep.parentElement;
-      const tab = activeStep.getBoundingClientRect();
-      const bounds = bar.getBoundingClientRect();
-      if (tab.left < bounds.left) bar.scrollLeft += tab.left - bounds.left;
-      if (tab.right > bounds.right) bar.scrollLeft += tab.right - bounds.right;
-    }
     const selected = view.querySelector('[data-prio-queue-key][aria-current="true"]');
     const queue = selected?.closest('[data-prio-scroll]');
     if (queue && (ticket !== state.cells[step] || !saved)) {

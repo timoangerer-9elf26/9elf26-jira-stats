@@ -181,6 +181,15 @@ func (s *Server) sprintWindow(sprint store.ActiveSprint) (from, to time.Time) {
 // rangeLabel formats [from, to) inclusively for humans, e.g.
 // "13 Jul – 15 Jul 2026" (the exclusive upper bound is shown as its last day).
 func rangeLabel(from, to time.Time) string {
-	lastDay := to.AddDate(0, 0, -1)
+	lastDay := from
+	if to.After(from) {
+		lastDay = to.Add(-time.Nanosecond).In(from.Location())
+	}
+	if from.Format(time.DateOnly) == lastDay.Format(time.DateOnly) {
+		return from.Format("2 Jan 2006")
+	}
+	if from.Year() != lastDay.Year() {
+		return from.Format("2 Jan 2006") + " – " + lastDay.Format("2 Jan 2006")
+	}
 	return from.Format("2 Jan") + " – " + lastDay.Format("2 Jan 2006")
 }

@@ -212,16 +212,16 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 // (independent of the wall clock this test runs on). The pinned instant
 // 2026-07-15T12:00:00Z is 14:00 Europe/Berlin on Wednesday 15 Jul 2026, which
 // sits in ISO week KW29 (activated 2026-07-13 09:00 Berlin), so:
-//   - /sprint (window [sprint start, now)) echoes the window "13 Jul – 14 Jul
-//     2026" (activation day → the day before now), and
+//   - /sprint (window [sprint start, now)) echoes the window "13 Jul – 15 Jul
+//     2026" (activation day through the partial current day), and
 //   - /velocity's active-sprint bar is labelled by the sprint name KW29.
 //
 // The sprint entity is loaded by the background sync after HTTP starts serving.
 func TestReviewNowPinsDateViews(t *testing.T) {
 	base := startDashboardEnv(t, "REVIEW_NOW=2026-07-15T12:00:00Z")
 	waitForPageMarker(t, base+"/sprint", `data-testid="sprint-name">KW29`)
-	if code, body := get(t, base+"/sprint"); code != http.StatusOK || !strings.Contains(body, "13 Jul – 14 Jul 2026") {
-		t.Fatalf("/sprint: status %d, want 200 with the pinned window %q", code, "13 Jul – 14 Jul 2026")
+	if code, body := get(t, base+"/sprint"); code != http.StatusOK || !strings.Contains(body, "13 Jul – 15 Jul 2026") {
+		t.Fatalf("/sprint: status %d, want 200 with the pinned window %q", code, "13 Jul – 15 Jul 2026")
 	}
 
 	if code, body := get(t, base+"/velocity"); code != http.StatusOK {

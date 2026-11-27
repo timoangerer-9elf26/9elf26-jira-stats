@@ -13,7 +13,11 @@
         <h2 id="velocity-chart-heading">Finished points per sprint</h2>
       </header>
       <section>
-        <div class="app-scroll overflow-x-auto" role="region" aria-labelledby="velocity-chart-heading" tabindex="0">
+        <div id="velocity-history-controls" class="flex justify-end gap-2" hidden>
+          <button class="btn" data-variant="outline" type="button" aria-controls="velocity-history" data-velocity-direction="-1">← Earlier</button>
+          <button class="btn" data-variant="outline" type="button" aria-controls="velocity-history" data-velocity-direction="1">Later →</button>
+        </div>
+        <div id="velocity-history" class="app-scroll overflow-x-auto" role="region" aria-labelledby="velocity-chart-heading" tabindex="0">
           <div class="mt-6 flex items-start gap-2 sm:gap-3" role="list" aria-labelledby="velocity-chart-heading">
             {{range .Sprints}}
               {{template "velocity-bar" .}}
@@ -28,5 +32,6 @@
       </section>
     </section>
   </main>
+  <script src="/static/velocity.js" defer></script>
 </body>
 </html>
