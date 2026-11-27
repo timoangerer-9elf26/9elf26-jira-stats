@@ -195,9 +195,11 @@ type Server struct {
 	// version is the build identity reported by GET /version and the nav marker
 	// (docs/adr/0006). It defaults to the stamped internal/version.Version and is
 	// overridable via WithVersion so tests can assert an injected value.
-	version  string
-	auth     *auth.Service
-	fakeJira jira.Client
+	version          string
+	auth             *auth.Service
+	fakeJira         jira.Client
+	prioFiltersCache prioCache[string, []jira.PlanningPreset]
+	prioKeysCache    prioCache[prioQueryKey, []string]
 }
 
 // Option configures a Server at construction.
