@@ -749,7 +749,7 @@ func TestPrioAllTicketsRemainsAvailableWhenJiraTimezoneRefreshFails(t *testing.T
 			w.WriteHeader(http.StatusForbidden)
 		case "/ex/jira/cloud-1/rest/api/3/filter/search":
 			writePlanningFilters(w,
-				jira.PlanningPreset{ID: "10519", Name: "Planning Recent", JQL: `project = DCAI AND status CHANGED AFTER "2026-11-20 00:00"`, Description: `stichtag: "2026-11-20 00:00"`},
+				jira.PlanningPreset{ID: "42", Name: "Planning Recent", JQL: `project = DCAI AND status CHANGED AFTER "2026-11-20 00:00"`, Description: `stichtag: "2026-11-20 00:00"`},
 				jira.PlanningPreset{ID: "22", Name: "Planning All", JQL: "project = DCAI"})
 		case "/ex/jira/cloud-1/rest/api/3/search/jql":
 			searchCalls.Add(1)
@@ -797,7 +797,7 @@ func TestPrioAllTicketsRemainsAvailableWhenJiraTimezoneRefreshFails(t *testing.T
 	if body := getPrio("22"); !strings.Contains(body, `data-key="DCAI-1"`) || myselfCalls.Load() != 1 || searchCalls.Load() != 1 {
 		t.Fatal("unmarked Jira preset depended on Jira Myself")
 	}
-	if body := getPrio("10519"); !strings.Contains(body, "Die Jira-Zeitzone konnte nicht geladen werden.") ||
+	if body := getPrio("42"); !strings.Contains(body, "Die Jira-Zeitzone konnte nicht geladen werden.") ||
 		!strings.Contains(body, "Jira-Filter entfernen") || myselfCalls.Load() != 2 || searchCalls.Load() != 1 {
 		t.Fatal("date-marked preset did not offer the local fallback when Jira Myself failed")
 	}

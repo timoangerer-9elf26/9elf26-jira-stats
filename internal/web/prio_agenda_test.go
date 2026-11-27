@@ -24,7 +24,7 @@ func TestPrioAgendaOpensAtOverviewWithBerlinFallback(t *testing.T) {
 	if !strings.Contains(body, `step=done" data-prio-next>Zur Besprechung`) {
 		t.Error("the overview should advance directly to Fertig")
 	}
-	for _, want := range []string{`value="2026-11-20T17:45"`, "Vor sieben Tagen", "Keiner", "Nur Epics", "Meeting abschließen"} {
+	for _, want := range []string{`value="2026-11-20T17:45"`, "Stichtag", "Keiner", "Nur Epics", "Meeting abschließen"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("overview missing %q", want)
 		}
@@ -237,24 +237,23 @@ func TestPrioStatusMarkerUsesCurrentStatusWithIncompleteHistory(t *testing.T) {
 type agendaFilterJira struct{ *jira.FakeClient }
 
 func (agendaFilterJira) PlanningPresets(context.Context) ([]jira.PlanningPreset, error) {
-	return []jira.PlanningPreset{{
-		ID: "10519", Name: "Planning: seit letztem Meeting", Description: "Freigegebene Jira-Auswahl",
-		JQL: "project = DCAI",
-	}}, nil
+	return []jira.PlanningPreset{
+		{ID: "42", Name: "Planning (To Do)", Description: "Freigegebene Jira-Auswahl", JQL: "project = DCAI"},
+		{ID: "10519", Name: "Planning Since Meeting", JQL: "project = DCAI"},
+	}, nil
 }
 
 func (agendaFilterJira) SearchIssueKeys(context.Context, string) ([]string, error) {
 	return []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-4", "DCAI-5", "DCAI-8", "DCAI-9"}, nil
 }
 
-func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
-	cutoff := time.Date(2026, time.November, 20, 10, 0, 0, 0, time.UTC)
+func prioAgendaFilterFixture(cutoff time.Time) *jira.FakeClient {
 	before, after := cutoff.Add(-time.Hour), cutoff.Add(time.Hour)
 	done := func(id string) []jira.ChangelogEntry {
 		return []jira.ChangelogEntry{{ID: id, Field: "status", From: "In Progress", To: "Ready for Release", Timestamp: after}}
 	}
 	technical := []string{"Technical"}
-	fixture := &jira.FakeClient{Issues: []jira.Issue{
+	return &jira.FakeClient{Issues: []jira.Issue{
 		{Key: "DCAI-1", Type: "Epic", Status: "Triage", Labels: technical, CreatedAt: after},
 		{Key: "DCAI-2", Type: "Epic", Status: "Triage", Labels: technical, CreatedAt: before, ParentKey: "DCAI-99"},
 		{Key: "DCAI-3", Type: "Task", Status: "Triage", Labels: technical, CreatedAt: after},
@@ -265,9 +264,14 @@ func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
 		{Key: "DCAI-8", Type: "Task", Status: "Triage", Labels: technical, CreatedAt: after, ParentKey: "DCAI-6"},
 		{Key: "DCAI-9", Type: "Task", Status: "Triage", CreatedAt: after},
 	}}
+}
+
+func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
+	cutoff := time.Date(2026, time.November, 20, 10, 0, 0, 0, time.UTC)
+	fixture := prioAgendaFilterFixture(cutoff)
 	app := newTestAppWith(t, fixture, cutoff.AddDate(0, 0, 7), web.WithFakeJira(agendaFilterJira{fixture}))
 	base := app.URL + "/prio?cutoff=" + url.QueryEscape(cutoff.Format(time.RFC3339))
-	get(t, app.URL+"/prio/preset-results?preset=10519")
+	get(t, app.URL+"/prio/preset-results?preset=42")
 	for _, tc := range []struct {
 		name, query string
 		want        []string
@@ -275,13 +279,13 @@ func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
 		{"default Done", "step=done", []string{"DCAI-4"}},
 		{"default New", "step=new", []string{"DCAI-1", "DCAI-6"}},
 		{"default Backlog", "step=backlog", []string{"DCAI-1", "DCAI-2", "DCAI-6"}},
-		{"Jira and since", "step=backlog&preset=10519&period=since&level=unparented", []string{"DCAI-1", "DCAI-3", "DCAI-9"}},
-		{"Jira and all dates", "step=backlog&preset=10519&period=all&level=unparented", []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-9"}},
-		{"Fertig keeps its cutoff and transition", "step=done&preset=10519&period=all&level=all", []string{"DCAI-4", "DCAI-5"}},
-		{"Neu keeps creation cutoff", "step=new&preset=10519&period=all&level=all", []string{"DCAI-1", "DCAI-3", "DCAI-8", "DCAI-9"}},
-		{"Retired Technical parameters are ignored", "step=new&preset=10519&tech=non-technical&non-technical=1&level=all", []string{"DCAI-1", "DCAI-3", "DCAI-8", "DCAI-9"}},
-		{"old parent parameter", "step=new&preset=10519&parent=1", []string{"DCAI-1", "DCAI-3", "DCAI-9"}},
-		{"Epic check is project-wide", "step=epic-check&preset=10519&period=since", []string{"DCAI-6"}},
+		{"Backlog ignores Jira and since", "step=backlog&preset=42&period=since&level=unparented", []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-6", "DCAI-9"}},
+		{"Backlog carries level", "step=backlog&level=unparented", []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-6", "DCAI-9"}},
+		{"Fertig keeps its cutoff and transition", "step=done&preset=42&period=all&level=all", []string{"DCAI-4", "DCAI-5"}},
+		{"Neu keeps creation cutoff", "step=new&preset=42&period=all&level=all", []string{"DCAI-1", "DCAI-3", "DCAI-6", "DCAI-8", "DCAI-9"}},
+		{"Retired Technical parameters are ignored", "step=new&preset=42&tech=non-technical&non-technical=1&level=all", []string{"DCAI-1", "DCAI-3", "DCAI-6", "DCAI-8", "DCAI-9"}},
+		{"old parent parameter", "step=new&preset=42&parent=1", []string{"DCAI-1", "DCAI-3", "DCAI-6", "DCAI-9"}},
+		{"Epic check is project-wide", "step=epic-check&preset=42&period=since", []string{"DCAI-6"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			page := get(t, base+"&"+tc.query)
@@ -293,17 +297,16 @@ func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
 					t.Errorf("queue missing %s", key)
 				}
 			}
-			if strings.Contains(tc.query, "step=epic-check") == strings.Contains(page, "data-prio-active-filters") {
-				t.Error("active filter summary should appear only on filtered steps")
+			if !strings.Contains(page, "data-prio-shared-controls") || strings.Contains(page, `name="period"`) || strings.Contains(page, `name="preset"`) {
+				t.Error("focus steps should expose the shared controls only")
 			}
 		})
 	}
 
-	page := get(t, base+"&step=backlog&preset=10519&period=since&tech=technical&level=unparented&ticket=DCAI-2")
+	page := get(t, base+"&step=backlog&preset=42&period=since&tech=technical&level=unparented&ticket=DCAI-2")
 	for _, want := range []string{
-		`data-ticket="DCAI-1"`, "Jira-Filter: Seit letztem Prio-Meeting · Ebene: Ohne Parent · Nur seit Stichtag",
-		`level=unparented&amp;period=since&amp;preset=10519&amp;step=overview#prio-filter-controls`,
-		`level=unparented&amp;period=since&amp;preset=10519&amp;step=backlog&amp;ticket=DCAI-3" data-prio-next`,
+		`data-ticket="DCAI-2"`, `level=unparented&amp;step=overview`,
+		`level=unparented&amp;step=backlog&amp;ticket=DCAI-3" data-prio-next`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("filtered agenda missing %q", want)
@@ -312,14 +315,22 @@ func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
 	if strings.Contains(page, "tech=technical") || strings.Contains(page, `name="tech"`) {
 		t.Error("retired Technical filter should not propagate")
 	}
-	page = get(t, base+"&preset=10519&period=since&tech=technical")
-	if !strings.Contains(page, `value="10519" data-description="Freigegebene Jira-Auswahl" selected`) {
-		t.Error("explicit legacy Jira preset should remain selected and show its description")
+	page = get(t, base+"&preset=42&period=since&tech=technical")
+	if !strings.Contains(page, `value="42" data-description="Freigegebene Jira-Auswahl" selected`) {
+		t.Error("the Jira preset should remain selected and show its description")
 	}
 	if !strings.Contains(page, `name="period" value="since" class="checkbox" data-prio-filter checked`) {
 		t.Error("the cutoff checkbox should reflect the URL")
 	}
 	if strings.Contains(page, `id="prio-technical"`) || strings.Contains(page, "Filter anwenden") {
-		t.Error("the overview should render only the three instant filters")
+		t.Error("the retired overview controls should not render")
+	}
+	page = get(t, app.URL+"/prio/preset-picker")
+	if strings.Contains(page, `value="10519"`) || !strings.Contains(page, `value="42"`) {
+		t.Error("the picker must omit the retired meeting preset and retain the other Planning presets")
+	}
+	page = get(t, base+"&preset=10519")
+	if !strings.Contains(page, `value="all" data-description="Tickets aus dem lokalen Jira-Abbild." selected`) {
+		t.Error("the retired preset bookmark should use the local projection")
 	}
 }

@@ -10,6 +10,10 @@ import (
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 )
 
+// Bump when existing Prio JavaScript cannot handle the new agenda markup.
+const prioAgendaRevision = "2"
+const prioAgendaRevisionHeader = "X-Prio-Agenda-Revision"
+
 // prioRow is one row of the Prio table: the issue's display fields plus a
 // resolved Jira link. Href is empty when no Jira base URL is configured, so the
 // name renders unlinked rather than as a broken link — matching the board card.
@@ -67,18 +71,40 @@ type prioView struct {
 
 // handlePrio renders the full standalone Prio page.
 func (s *Server) handlePrio(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Vary", "HX-Boosted, HX-Trigger")
+	w.Header().Add("Vary", "HX-Boosted, HX-Trigger, "+prioAgendaRevisionHeader)
 	if r.Header.Get("HX-Boosted") == "true" && r.Header.Get("HX-History-Restore-Request") != "true" {
 		q, ctx := r.URL.Query(), r.Context()
-		if r.Header.Get("HX-Trigger") == "prio-filter-controls" && jiraIssueID.MatchString(q.Get("preset")) {
+		if !legacyPrio(q) && redirectStalePrioAgenda(w, r, prioAgendaParams(q)) {
+			return
+		}
+		trigger := r.Header.Get("HX-Trigger")
+		name := "prio-boosted"
+		if trigger == "prio-cutoff-form" {
+			name = "prio-boosted-replace"
+		}
+		if (trigger == "prio-filter-controls" || trigger == "prio-level-controls" || trigger == "prio-cutoff-form") &&
+			jiraIssueID.MatchString(q.Get("preset")) {
 			// An interactive filter change already has results on screen. Keep
 			// them visible while Jira runs, then swap in the finished response.
 			ctx = context.WithValue(ctx, prioPresetLoadKey{}, prioPresetLoad{})
 		}
-		s.renderPrioWith(w, ctx, q, "prio-boosted", prioEdit{})
+		s.renderPrioWith(w, ctx, q, name, prioEdit{})
 		return
 	}
 	s.renderPrio(w, r, "prio.html")
+}
+
+func redirectStalePrioAgenda(w http.ResponseWriter, r *http.Request, q url.Values) bool {
+	if r.Header.Get(prioAgendaRevisionHeader) == prioAgendaRevision {
+		return false
+	}
+	destination := url.URL{Path: "/prio", RawQuery: q.Encode()}
+	if r.Header.Get("HX-Trigger") == "prio-filter-controls" {
+		destination.Fragment = "prio-filter-controls"
+	}
+	// A full navigation loads the matching script while keeping the user's choice.
+	w.Header().Set("HX-Redirect", destination.String())
+	return true
 }
 
 // handlePrioResults renders the Prio panel fragment (the HTMX swap target), so a
@@ -99,16 +125,18 @@ func (s *Server) renderPrioWith(w http.ResponseWriter, ctx context.Context, q ur
 	var err error
 	if legacyPrio(q) {
 		view, err = s.prioView(q, edit)
-		if name == "prio-boosted" {
+		if name == "prio-boosted" || name == "prio-boosted-replace" {
 			name = "prio-panel"
 		}
 	} else {
 		agenda, agendaErr := s.prioAgenda(ctx, q, edit)
 		view, err = agenda, agendaErr
-		if name == "prio-boosted" && err == nil {
+		if name == "prio-boosted-replace" && err == nil {
+			w.Header().Set("HX-Replace-Url", agenda.CanonicalHref)
+		} else if name == "prio-boosted" && err == nil {
 			w.Header().Set("HX-Push-Url", agenda.CanonicalHref)
 		}
-		if name == "prio-panel" || name == "prio-boosted" {
+		if name == "prio-panel" || name == "prio-boosted" || name == "prio-boosted-replace" {
 			name = "prio-agenda"
 		} else if name != "prio-agenda-content" {
 			name = "prio-agenda.html"

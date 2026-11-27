@@ -10,7 +10,7 @@ New work does **not** go straight to `main`. Each **bigger feature or set of bug
 2. **A PR against `main`** — `gh pr create --base main`. Link the GitHub issues it addresses (the issue tracker is GitHub — see [issue-tracker.md](./issue-tracker.md)).
 3. **A squash merge on green**, deleting the branch after.
 
-PRs exist mainly for **traceability** — one reviewable unit per feature — not as a human-review gate. The agent driving the work **enables auto-merge on green** rather than polling CI and merging by hand: open the PR, then hand it off to GitHub-native auto-merge so it lands the moment the required `build-and-test` check passes.
+PRs provide one traceable unit per feature. The agent driving a UI change completes the browser acceptance gate below before enabling auto-merge. GitHub then merges once the required `build-and-test` check passes.
 
 ```sh
 gh auth switch --user timoangerer-9elf26      # repo-admin scope for the merge
@@ -52,6 +52,12 @@ JSON
 ```
 
 Full rationale and sharp edges (e.g. never add a `paths:` filter to a required workflow — it would leave the check `Pending` and wedge every merge) are in [`../research/pr-merge-gate-ci.md`](../research/pr-merge-gate-ci.md).
+
+## Browser acceptance before deploy
+
+Before deploying any PR, run the **exact PR head in headed Chrome** locally or on the Mac mini. Click every changed control and assert the functional result in the rendered UI. For Prio, visit every agenda step and compare the returned ticket keys or counts with the expected filter state. Confirm that the URL and carry-over match the selections. Capture the observations in the PR. For changes that affect layout or control scope, capture and inspect screenshots of the relevant steps.
+
+Complete these checks **before enabling auto-merge or deploying**. Run them again if the tested behavior changes on a later PR head. After deploy, repeat the same functional interactions in production and record the deployed version and observed results.
 
 ## Commit messages
 

@@ -13,7 +13,6 @@ import (
 type prioMeetingCutoff struct {
 	meeting store.PrioMeeting
 	at      time.Time
-	source  string
 	invalid bool
 }
 
@@ -22,9 +21,9 @@ func (s *Server) prioCutoff(q url.Values) (prioMeetingCutoff, error) {
 	if err != nil {
 		return prioMeetingCutoff{}, err
 	}
-	cutoff := prioMeetingCutoff{meeting: meeting, at: s.now().In(s.prioLocation).AddDate(0, 0, -7), source: "Vor sieben Tagen"}
+	cutoff := prioMeetingCutoff{meeting: meeting, at: s.now().In(s.prioLocation).AddDate(0, 0, -7)}
 	if meeting.ID != 0 {
-		cutoff.at, cutoff.source = meeting.EndedAt, "Ende des letzten Meetings"
+		cutoff.at = meeting.EndedAt
 	}
 	raw := q.Get("cutoff")
 	requested, err := time.Parse(time.RFC3339Nano, raw)
@@ -36,7 +35,7 @@ func (s *Server) prioCutoff(q url.Values) (prioMeetingCutoff, error) {
 			return cutoff, nil
 		}
 	}
-	cutoff.at, cutoff.source = requested, "Gewählter Stichtag"
+	cutoff.at = requested
 	q.Set("cutoff", requested.UTC().Format(time.RFC3339Nano))
 	return cutoff, nil
 }

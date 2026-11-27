@@ -4,9 +4,9 @@
 <body class="min-h-screen">
   <main class="app-main">
     {{template "prio-priority-style"}}
-    <div id="prio-panel" hx-history-elt>{{template "prio-agenda" .}}</div>
+    <div id="prio-panel" data-prio-agenda-revision="{{prioAgendaRevision}}" hx-history-elt>{{template "prio-agenda" .}}</div>
   </main>
-  <script src="/static/prio-agenda.js" defer></script>
+  <script src="/static/prio-agenda.js?v={{prioAgendaRevision}}" defer></script>
 </body>
 </html>
 
@@ -30,19 +30,6 @@
       <p class="text-sm text-muted-foreground">DCAI</p>
     </div>
     <div class="flex flex-wrap items-end gap-2">
-      <form action="/prio" method="get" class="flex flex-wrap items-end gap-2" data-prio-cutoff-form>
-        {{range .CutoffParams}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
-        <div>
-          <label for="prio-cutoff" class="label">Stichtag · Europe/Berlin</label>
-          <input id="prio-cutoff" class="input" type="datetime-local" name="cutoff" value="{{.CutoffInput}}" required>
-        </div>
-        <button class="btn" data-variant="outline" type="submit">Übernehmen</button>
-      </form>
-      <div class="text-sm text-muted-foreground">
-        <p>{{.CutoffSource}} · <time datetime="{{.Cutoff.Format "2006-01-02T15:04:05Z07:00"}}">{{.CutoffLabel}}</time></p>
-        {{if .InvalidCutoff}}<p role="alert">Der gewählte Stichtag ist ungültig.</p>{{end}}
-        <a class="text-xs underline" href="{{.ShareCutoffHref}}" data-prio-share-cutoff>Stichtag im Link speichern</a>
-      </div>
       {{if .MeetingEnd}}
       <time class="text-sm text-muted-foreground" datetime="{{.MeetingEnd}}" title="Abgeschlossen von {{.Meeting.AccountID}}">{{.MeetingLabel}}</time>
       {{end}}
@@ -68,6 +55,26 @@
       {{else}}<p class="text-sm">Jira-Anmeldung erforderlich.</p>{{end}}
     </div>
   </dialog>
+  <div class="app-surface mb-3 flex flex-wrap items-start gap-4 p-3" data-prio-shared-controls>
+    <form id="prio-cutoff-form" action="/prio" method="get" class="grid min-w-0 gap-1" data-prio-cutoff-form>
+      {{range .CutoffParams}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+      <label for="prio-cutoff" class="label" title="{{.CutoffZone}}">Stichtag</label>
+      <input id="prio-cutoff" class="input" type="datetime-local" name="cutoff" value="{{.CutoffInput}}" required>
+      {{if .InvalidCutoff}}<p class="text-sm text-muted-foreground" role="alert">Der gewählte Stichtag ist ungültig.</p>{{end}}
+    </form>
+    <form id="prio-level-controls" action="/prio" method="get" class="min-w-0" data-prio-level-form>
+      {{range .LevelParams}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+      <fieldset class="min-w-0">
+        <legend class="label mb-1">Ebene</legend>
+        <div class="prio-level">
+          {{template "prio-level-option" (dict "Value" "epic" "Label" "Nur Epics" "Selected" .Filters.Level.Value)}}
+          {{template "prio-level-option" (dict "Value" "unparented" "Label" "Ohne Parent" "Selected" .Filters.Level.Value)}}
+          {{template "prio-level-option" (dict "Value" "all" "Label" "Alle" "Selected" .Filters.Level.Value)}}
+        </div>
+      </fieldset>
+      <noscript><button type="submit" class="btn" data-variant="outline">Ebene übernehmen</button></noscript>
+    </form>
+  </div>
   <nav aria-label="Meeting-Agenda" class="app-surface flex flex-wrap gap-1 p-2 sm:gap-2">
     {{range $number, $step := .Steps}}
     {{if or .Active .Total (ne .ID "epic-check")}}
@@ -85,24 +92,19 @@
 {{end}}
 
 {{define "prio-agenda-focus"}}
-{{if ne .Step "epic-check"}}{{template "prio-preset-error" .}}{{end}}
 <div class="mt-3 grid items-start gap-4 lg:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
   <section class="app-surface overflow-hidden" aria-labelledby="prio-queue-title">
     <header class="border-b border-border px-3 py-2 lg:p-4">
       <h2 id="prio-queue-title" class="font-bold">{{.Current.Heading}}</h2>
       <p class="text-sm text-muted-foreground"><span data-prio-queue-progress>0</span> von {{.Current.Total}} besprochen</p>
-      {{if ne .Step "epic-check"}}
-      <p class="mt-1 text-xs wrap-anywhere text-muted-foreground" data-prio-active-filters>
-        {{.FilterSummary}} · <a class="underline" href="{{.FilterHref}}" data-prio-edit-filters>ändern</a>
-      </p>
+      {{if eq .Step "epic-check"}}
+      <p class="mt-1 text-xs text-muted-foreground">Die Epic-Prüfung gilt projektweit.</p>
       {{end}}
       {{if eq .Step "backlog"}}
       <a class="btn mt-2" data-variant="outline" href="{{.BacklogSortHref}}">{{if .OldestFirst}}Nach Priorität sortieren{{else}}Älteste zuerst{{end}}</a>
       {{end}}
     </header>
-    {{if and .PresetLoadingResults (ne .Step "epic-check")}}
-    <p class="p-4 text-sm text-muted-foreground" role="status">Jira-Filter wird geladen …</p>
-    {{else if .Current.Rows}}
+    {{if .Current.Rows}}
     <ul class="app-scroll max-h-36 overflow-y-auto p-2 lg:max-h-[65vh]" data-prio-scroll="queue">
       {{range .Current.Rows}}
       <li class="rounded-md border p-2 text-sm{{if eq .Key $.SelectedKey}} border-primary bg-accent{{else}} border-transparent{{end}}">

@@ -125,23 +125,27 @@ be changed on.
 
 ## Prio filters
 
-The **Übersicht** combines three URL-encoded controls. Each change applies
-immediately and the results stay visible while the filter request runs.
+**Stichtag** and **Ebene** sit above the agenda on every step. Editing
+Stichtag recalculates the view and replaces the current URL with a shareable
+cutoff. Ebene applies to Übersicht, Fertig, Neu, and Backlog. **Nur Epics** is
+the default, **Ohne Parent** also includes unparented tickets, and **Alle**
+includes every level (`level=unparented|all`). Epic-Prüfung considers the
+whole project.
+
+**Ansicht der Übersicht** contains two options for the table. Changes apply
+automatically and the old results stay visible while a Jira search runs.
 
 - **Jira-Filter** (`preset=<Jira filter ID>`) defaults to **Keiner**, which
   uses the local Jira projection. An optional shared **Planning** filter
   restricts the results to its Jira search, and the picker shows its description.
-- **Ebene** (`level=unparented|all`) defaults to **Nur Epics**. **Ohne Parent**
-  includes all Epics and tickets without a parent. **Alle** includes every level.
+  The old meeting preset 10519 is retired in the app and its links use Keiner.
 - **Nur seit Stichtag** (`period=since`) is off by default. When checked it
   keeps tickets created, resolved, or changed in status or priority after the
   selected cutoff. This checkbox is independent of the Jira filter's own JQL.
 
-**Fertig**, **Neu**, and **Backlog** carry these choices forward. Fertig and Neu
-also enforce their workflow cutoff. **Epic-Prüfung** always considers the whole
-project. Stored agenda links with `period=since` or an old parent parameter
-still work. Agenda links ignore retired Technical parameters. Technical labels
-on tickets still render.
+Fertig and Neu always use the shared Stichtag. Jira-Filter and Nur seit
+Stichtag stay in Übersicht and are restored when returning to it in the same
+meeting. Technical labels on tickets still render.
 
 The separate historical Prio table remains available for its existing status
 and toggle bookmarks. Those controls apply only to that table.
