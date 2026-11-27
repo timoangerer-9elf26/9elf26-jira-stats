@@ -5,6 +5,7 @@ package store
 import (
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -61,9 +62,8 @@ func migrate(db *sql.DB) error {
 	return nil
 }
 
-// SaveIssue upserts an issue snapshot and appends any not-yet-seen status
-// transitions (deduped by changelog entry id). syncedAt is the RFC3339 UTC
-// timestamp stamped onto the snapshot.
+// SaveIssue atomically upserts an issue snapshot and its field changes, keyed
+// by changelog entry ID. syncedAt is the snapshot's RFC3339 UTC sync timestamp.
 func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -109,9 +109,22 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 	if len(iss.Labels) > 0 {
 		labels = strings.Join(iss.Labels, " ")
 	}
+	var resolvedAt any
+	if !iss.ResolvedAt.IsZero() {
+		resolvedAt = iss.ResolvedAt.UTC().Format(time.RFC3339Nano)
+	}
+	comments, err := json.Marshal(iss.Comments)
+	if err != nil {
+		return fmt.Errorf("encode issue %s comments: %w", iss.Key, err)
+	}
+	links, err := json.Marshal(iss.Links)
+	if err != nil {
+		return fmt.Errorf("encode issue %s links: %w", iss.Key, err)
+	}
 	if _, err := tx.Exec(
-		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, assignee_avatar_url, parent_key, epic_color, priority, labels, created_at, creator, synced_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, assignee_avatar_url, parent_key, epic_color, priority, labels, created_at, creator, synced_at,
+		                    description, comments, links, assignee_account_id, resolved_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
 		     type=excluded.type, summary=excluded.summary, status=excluded.status,
 		     status_category=excluded.status_category, size=excluded.size,
@@ -120,8 +133,11 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 		     parent_key=excluded.parent_key, epic_color=excluded.epic_color,
 		     priority=excluded.priority, labels=excluded.labels,
 		     created_at=excluded.created_at,
-		     creator=excluded.creator, synced_at=excluded.synced_at`,
+		     creator=excluded.creator, synced_at=excluded.synced_at,
+		     description=excluded.description, comments=excluded.comments, links=excluded.links,
+		     assignee_account_id=excluded.assignee_account_id, resolved_at=excluded.resolved_at`,
 		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, assigneeAvatarURL, parentKey, epicColor, priority, labels, createdAt, creator, syncedAt,
+		[]byte(iss.Description), comments, links, iss.AssigneeAccountID, resolvedAt,
 	); err != nil {
 		return fmt.Errorf("upsert issue %s: %w", iss.Key, err)
 	}
@@ -134,10 +150,15 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 	for _, e := range iss.Changelog {
 		if _, err := tx.Exec(
 			`INSERT INTO status_transition
-			     (changelog_entry_id, issue_key, field, from_status, to_status, transitioned_at)
-			 VALUES (?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(changelog_entry_id) DO NOTHING`,
-			e.ID, iss.Key, e.Field, e.From, e.To, e.Timestamp.UTC().Format("2006-01-02T15:04:05Z07:00"),
+			     (changelog_entry_id, issue_key, field, from_status, to_status, transitioned_at,
+			      from_id, to_id, author_account_id, author_display_name, subsecond_ns)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(changelog_entry_id) DO UPDATE SET
+			   from_id=excluded.from_id, to_id=excluded.to_id,
+			   author_account_id=excluded.author_account_id, author_display_name=excluded.author_display_name,
+			   subsecond_ns=excluded.subsecond_ns`,
+			e.ID, iss.Key, e.Field, e.From, e.To, e.Timestamp.UTC().Format(time.RFC3339),
+			e.FromID, e.ToID, e.Author.AccountID, e.Author.DisplayName, e.Timestamp.Nanosecond(),
 		); err != nil {
 			return fmt.Errorf("insert transition %s: %w", e.ID, err)
 		}

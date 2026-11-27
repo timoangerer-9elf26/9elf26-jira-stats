@@ -27,25 +27,31 @@ The root path `/` redirects to the **Sprint** view.
 ## Architecture in one line
 
 A background loop syncs Jira into SQLite using a service account. Interactive
-Jira edits use the signed-in person’s Atlassian authorization. The SQLite
-database holds the rebuildable Jira projection, encrypted OAuth grants and
-server-side sessions. Full resync preserves authentication data.
+Jira edits use the signed-in person’s Atlassian authorization. Full resync
+rebuilds the Jira projection and preserves independent application state,
+including encrypted OAuth grants and server-side sessions.
 
 ## Full resync
 
 Every view carries a **refresh-icon button** (top-right of the nav, tooltip
 "Resync full database") that rebuilds the SQLite projection from Jira on demand:
-it clears the projection and re-runs the full backfill (all issues, complete
-changelog history, sprints, and project members). Use it to heal data gaps or
+it clears the projection and re-runs the full backfill (all issues, ticket
+details, tracked changelog fields, sprints, and project members). Use it to heal data gaps or
 pick up past capture/schema fixes **without shell access** — it supersedes the
 old "stop the server, `rm jira-stats.db`, restart" step.
 
-The rebuild runs in the background: clicking the icon returns immediately, the
-icon spins and the label shows **Resyncing…** while it runs (a full backfill
-takes ~15–30s against live Jira), and the views refresh on their own once it
-completes (the label then shows how fresh the data is). A resync already in progress is a safe no-op, and
-it never overlaps the periodic incremental sync. No confirmation is required —
-the data is fully rebuildable.
+The rebuild runs in the background. The icon spins and the label shows
+**Resyncing…** until the rebuild completes. The views then refresh and the label
+shows the latest successful sync. Repeat clicks during a rebuild have no effect.
+Background incremental sync waits for the rebuild to finish.
+
+After migration 00013, the next automatic sync fills ticket details and
+historical changes for the entire project in place. If Jira is unavailable, the
+existing projection stays readable and sync retries the backfill on the next
+cycle. Incremental sync resumes after the backfill succeeds. The full-resync
+button can rebuild the same data on demand. The shared projection includes Jira
+comments visible without group or role restrictions. Open the ticket in Jira
+for comments with restricted visibility.
 
 ## Configuration
 

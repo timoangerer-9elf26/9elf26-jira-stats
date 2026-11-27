@@ -190,9 +190,6 @@ func (c *FakeClient) UpdateIssuePriority(ctx context.Context, key, priority stri
 // alone (docs/adr/0012 — "if agents start owning tickets, drop the filter"), and
 // live Jira would assign one happily. A fake that refused would be stricter than
 // production, which is the one direction a fake must never be.
-//
-// An issue stores its assignee as a display name and an avatar URL, so the
-// resolved user's are what land on it.
 func (c *FakeClient) UpdateIssueAssignee(ctx context.Context, key, accountID string) error {
 	if c.WriteErr != nil {
 		return c.WriteErr
@@ -213,6 +210,7 @@ func (c *FakeClient) UpdateIssueAssignee(ctx context.Context, key, accountID str
 	for i := range c.Issues {
 		if c.Issues[i].Key == key {
 			c.Issues[i].Assignee = assignee.DisplayName
+			c.Issues[i].AssigneeAccountID = assignee.AccountID
 			c.Issues[i].AssigneeAvatarURL = assignee.AvatarURL
 			return nil
 		}

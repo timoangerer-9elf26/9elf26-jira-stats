@@ -9,13 +9,20 @@
     "Sprint": "KW29",
     "ActiveSprint": "KW29",
     "Assignee": "Ada",
+    "AssigneeAccountID": "acct-ada",
     "AssigneeAvatarURL": "/static/avatars/ada.svg",
     "ParentKey": "DCAI-6",
+    "Description": {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Set up the first views and their shared navigation."}]}]},
+    "Comments": [
+      {"ID": "10001", "Author": {"AccountID": "acct-grace", "DisplayName": "Grace"}, "Body": {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Navigation checked with the sample dataset."}]}]}, "CreatedAt": "2026-07-13T10:30:00Z"}
+    ],
+    "Links": [{"Key": "DCAI-4", "Summary": "Unestimated mid-sprint chore", "Relation": "relates to"}],
+    "ResolvedAt": "2026-07-14T09:00:00Z",
     "Creator": "Ada",
     "CreatedAt": "2026-07-09T09:00:00Z",
     "Changelog": [
       {"ID": "1001", "Field": "status", "From": "Ready To Do", "To": "In Progress", "Timestamp": "2026-07-10T09:00:00Z"},
-      {"ID": "1002", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-14T09:00:00Z"}
+      {"ID": "1002", "Field": "status", "From": "In Progress", "To": "DONE (This Sprint)", "Timestamp": "2026-07-14T09:00:00Z", "Author": {"AccountID": "acct-ada", "DisplayName": "Ada"}}
     ],
     "SprintChanges": [
       {"EntryID": "sm-1", "SprintID": 29, "SprintName": "KW29", "Entered": true, "Timestamp": "2026-07-10T08:00:00Z"}
