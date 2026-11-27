@@ -3,6 +3,9 @@
   <div class="flex flex-wrap gap-1">
     <a class="btn" data-variant="{{if eq .Preset "10519"}}secondary{{else}}outline{{end}}" href="{{.RecentHref}}" {{if eq .Preset "10519"}}aria-current="true"{{end}}>Seit letztem Prio-Meeting</a>
     <a class="btn" data-variant="{{if eq .Preset "all"}}secondary{{else}}outline{{end}}" href="{{.AllHref}}" {{if eq .Preset "all"}}aria-current="true"{{end}}>Alle Tickets</a>
+    {{range .PresetOptions}}
+    <a class="btn" data-variant="{{if .Active}}secondary{{else}}outline{{end}}" href="{{.Href}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>
+    {{end}}
   </div>
   <div class="flex flex-wrap items-center gap-1">
     {{range .TechnicalOptions}}
@@ -11,8 +14,14 @@
     <a class="btn" data-variant="{{if .ParentOnly}}secondary{{else}}outline{{end}}" href="{{.ParentHref}}"{{if .ParentOnly}} aria-current="true"{{end}}>Nur ohne Parent</a>
   </div>
 </section>
+{{if .PresetError}}
+<div class="app-surface mt-3 flex flex-wrap items-center gap-3 p-3" role="status">
+  <p class="text-sm">{{.PresetError}}{{if eq .Preset "all"}} Die Ansicht zeigt den letzten lokalen Stand.{{end}}</p>
+  {{if ne .Preset "all"}}<a class="btn" data-variant="outline" href="{{.AllHref}}">Alle Tickets · lokaler Stand</a>{{end}}
+</div>
+{{end}}
 <div class="my-3 flex flex-wrap items-center justify-between gap-2">
-  <p class="text-sm text-muted-foreground">{{.OverviewCount}} von {{.IssueCount}} Tickets · DCAI</p>
+  <p class="text-sm text-muted-foreground">{{.OverviewCount}} von {{.IssueCount}} Tickets · DCAI{{if .Missing}} · {{len .Missing}} ausstehend{{end}}</p>
   <div class="flex flex-wrap items-center gap-2">
     <label class="label" for="prio-overview-sort">Sortieren nach</label>
     <select id="prio-overview-sort" class="select pr-8" data-prio-sort>
@@ -57,10 +66,20 @@
     {{end}}{{end}}
   </table>
 </div>
-{{else if .IssueCount}}
-<p data-testid="prio-no-match" class="app-surface p-6 text-sm text-muted-foreground">Keine Tickets für diese Auswahl.</p>
-{{else}}
+{{else if not (or .IssueCount .Missing .JiraOrder)}}
 <p data-testid="prio-empty" class="app-surface p-6 text-sm text-muted-foreground">Noch keine Tickets synchronisiert.</p>
+{{else if not (or .Missing .PresetError)}}
+<p data-testid="prio-no-match" class="app-surface p-6 text-sm text-muted-foreground">Keine Tickets für diese Auswahl.</p>
+{{end}}
+{{if .Missing}}
+<section class="app-surface mt-3 p-3" aria-label="Ausstehende Tickets">
+  <p class="text-sm text-muted-foreground">Diese Jira-Tickets sind noch nicht synchronisiert.</p>
+  <ul class="mt-2 flex flex-wrap gap-1">
+    {{range .Missing}}
+    <li>{{if .Href}}<a class="btn" data-variant="outline" href="{{.Href}}" target="_blank" rel="noopener">{{.Key}} ↗</a>{{else}}{{.Key}}{{end}}</li>
+    {{end}}
+  </ul>
+</section>
 {{end}}
 {{with .Selected}}
 <aside class="app-surface fixed inset-y-0 right-0 z-40 w-full overflow-y-auto shadow-lg sm:max-w-[40rem]" id="prio-drawer" aria-label="Ticketdetails" data-prio-scroll="drawer">

@@ -35,6 +35,7 @@ type prioTicketPanel struct {
 }
 
 type prioAgendaView struct {
+	prioPresetView
 	CanonicalHref                          string
 	PriorityChange                         string
 	Groups                                 []prioGroup
@@ -129,7 +130,7 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 		row := s.makePrioRow(issue, edit)
 		row.Markers = events.markers()
 		row.SelectHref = prioHref(q, "ticket", issue.Key)
-		if view.Overview && keepPrioOverviewRow(q, issue, events) {
+		if view.Overview && keepPrioOverviewRow(q, issue) {
 			overviewRows = append(overviewRows, row)
 		}
 		if strings.EqualFold(issue.Type, "Epic") && events.DoneFromOpen {
@@ -192,7 +193,7 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	}
 	view.Steps, view.Current = steps, current
 	if view.Overview {
-		if err := s.populatePrioOverview(&view, q, overviewRows, len(issues)); err != nil {
+		if err := s.populatePrioOverview(ctx, &view, q, overviewRows, issues); err != nil {
 			return prioAgendaView{}, err
 		}
 	}
