@@ -18,12 +18,77 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/jira"
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/sync"
 )
+
+type projectMembershipJira struct {
+	*jira.FakeClient
+	confirmed []string
+	checks    []string
+	searches  int
+	checkErr  error
+}
+
+func (c *projectMembershipJira) FetchProjectIssueKeys(context.Context) ([]string, error) {
+	c.searches++
+	return []string{"DCAI-1"}, nil
+}
+
+func (c *projectMembershipJira) IssueInProject(_ context.Context, key string) (bool, error) {
+	c.checks = append(c.checks, key)
+	if key == "DCAI-new" && c.checkErr != nil {
+		return false, c.checkErr
+	}
+	return slices.Contains(c.confirmed, key), nil
+}
+
+func TestIncrementalSyncReconcilesDeletedAndMovedIssues(t *testing.T) {
+	st := openTempStore(t)
+	now := time.Now().UTC()
+	for _, key := range []string{"DCAI-1", "DCAI-deleted", "DCAI-moved", "DCAI-new"} {
+		issue := jira.Issue{Key: key, Status: "Triage", Changelog: []jira.ChangelogEntry{
+			{ID: key, Field: "status", From: "Open", To: "Triage", Timestamp: now},
+		}}
+		if err := st.SaveIssue(issue, now.Format(time.RFC3339)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SetLastSync(now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	// The project search index has not yet seen DCAI-new. The direct
+	// check retains it while confirming the deletion and the move.
+	client := &projectMembershipJira{
+		FakeClient: &jira.FakeClient{}, confirmed: []string{"DCAI-new"}, checkErr: errors.New("lookup unavailable"),
+	}
+	syncer := sync.NewSyncer(client, st, 2*time.Minute)
+	if err := syncer.Cycle(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertEq(t, "issues after an incomplete verification", countRows(t, st, "SELECT COUNT(*) FROM issue"), 4)
+
+	client.checkErr, client.checks = nil, nil
+	if err := syncer.Cycle(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertEq(t, "remaining issues", countRows(t, st, "SELECT COUNT(*) FROM issue WHERE key IN ('DCAI-1', 'DCAI-new')"), 2)
+	assertEq(t, "deleted and moved issues", countRows(t, st, "SELECT COUNT(*) FROM issue WHERE key IN ('DCAI-deleted', 'DCAI-moved')"), 0)
+	assertEq(t, "remaining transitions", countRows(t, st, "SELECT COUNT(*) FROM status_transition"), 2)
+	slices.Sort(client.checks)
+	if want := []string{"DCAI-deleted", "DCAI-moved", "DCAI-new"}; !slices.Equal(client.checks, want) {
+		t.Errorf("checked missing keys %v, want %v", client.checks, want)
+	}
+	if err := syncer.Cycle(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertEq(t, "key searches after one failed and two successful cycles", client.searches, 2)
+}
 
 func TestSyncerBackfillsThenIncrementallyPicksUpChanges(t *testing.T) {
 	fake := &jira.FakeClient{

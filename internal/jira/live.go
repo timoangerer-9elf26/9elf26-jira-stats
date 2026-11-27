@@ -94,6 +94,32 @@ func (c *LiveClient) FetchIssuesUpdatedSince(ctx context.Context, since time.Tim
 	return c.search(ctx, jql)
 }
 
+// FetchProjectIssueKeys reads only membership for the configured sync project.
+func (c *LiveClient) FetchProjectIssueKeys(ctx context.Context) ([]string, error) {
+	return c.SearchIssueKeys(ctx, fmt.Sprintf("project = %q ORDER BY key ASC", c.cfg.ProjectKey))
+}
+
+// IssueInProject confirms whether the exact key still belongs to this project.
+// Jira can resolve an old key to the issue's new key after a move.
+func (c *LiveClient) IssueInProject(ctx context.Context, key string) (bool, error) {
+	var issue struct {
+		Key    string
+		Fields struct{ Project struct{ Key string } }
+	}
+	path := "/rest/api/3/issue/" + url.PathEscape(key)
+	if err := c.get(ctx, path, url.Values{"fields": {"project"}}, &issue); err != nil {
+		var response *getResponseError
+		if errors.As(err, &response) && (response.status == http.StatusNotFound || response.status == http.StatusGone) {
+			return false, nil
+		}
+		return false, err
+	}
+	if issue.Key == "" || issue.Fields.Project.Key == "" {
+		return false, fmt.Errorf("Jira membership response for %s omitted the issue key or project", key)
+	}
+	return issue.Key == key && strings.EqualFold(issue.Fields.Project.Key, c.cfg.ProjectKey), nil
+}
+
 // FetchSprints walks the board's sprints via the Jira Agile API
 // (GET /rest/agile/1.0/board/{boardID}/sprint), startAt-paginated until isLast.
 // It maps each sprint to the domain entity (see toSprint): Jira Cloud exposes no
@@ -410,6 +436,16 @@ func (c *LiveClient) fetchFullChangelog(ctx context.Context, key string) ([]hist
 	return histories, nil
 }
 
+type getResponseError struct {
+	path   string
+	status int
+	body   string
+}
+
+func (e *getResponseError) Error() string {
+	return fmt.Sprintf("GET %s: status %d: %s", e.path, e.status, e.body)
+}
+
 // get issues an authenticated GET and decodes the JSON body into out.
 func (c *LiveClient) get(ctx context.Context, path string, q url.Values, out any) error {
 	u := c.cfg.BaseURL + path
@@ -431,7 +467,7 @@ func (c *LiveClient) get(ctx context.Context, path string, q url.Values, out any
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("GET %s: status %d: %s", path, resp.StatusCode, body)
+		return &getResponseError{path, resp.StatusCode, string(body)}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("decode %s: %w", path, err)

@@ -68,7 +68,7 @@ try {
     await mkdir(evidence, { recursive: true });
     await page.screenshot({ path: evidence + '/step-0.png' });
   }
-  for (const [step, ids] of [['epic-check', [6]], ['done', [4, 5]], ['new', [1, 3, 6, 9]], ['backlog', [1, 2, 3, 6, 9]]]) {
+  for (const [step, ids] of [['epic-check', [6]], ['done', [4, 5]], ['new', [1, 3, 6, 9]], ['backlog', [1, 3, 6, 9]]]) {
     await page.locator('[data-prio-step=' + step + ']').click();
     await has('step', step);
     await settled();

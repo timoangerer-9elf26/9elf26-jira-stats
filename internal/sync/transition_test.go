@@ -39,7 +39,9 @@ func (s *recordingStore) ReplaceProjectMembers(members []jira.ProjectMember) err
 	s.members = append(s.members, members)
 	return nil
 }
-func (s *recordingStore) IssueCount() (int, error) { return len(s.saved), nil }
+func (s *recordingStore) IssueCount() (int, error)                     { return len(s.saved), nil }
+func (s *recordingStore) IssueKeys(context.Context) ([]string, error)  { return nil, nil }
+func (s *recordingStore) RemoveIssues(context.Context, []string) error { return nil }
 func (s *recordingStore) LastSync() (time.Time, bool, error) {
 	return s.lastSync, !s.lastSync.IsZero(), nil
 }

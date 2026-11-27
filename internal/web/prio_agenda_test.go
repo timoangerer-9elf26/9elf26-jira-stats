@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -236,6 +238,66 @@ func TestPrioStatusMarkerUsesCurrentStatusWithIncompleteHistory(t *testing.T) {
 
 type agendaFilterJira struct{ *jira.FakeClient }
 
+type backlogPlanningJira struct{ *jira.FakeClient }
+
+func (backlogPlanningJira) PlanningPresets(context.Context) ([]jira.PlanningPreset, error) {
+	return []jira.PlanningPreset{
+		{ID: "10417", Name: "Planning (To Do) - Not Technical", JQL: "non-technical"},
+		{ID: "10452", Name: "Planning (To Do) - Technical", JQL: "technical"},
+	}, nil
+}
+
+func (backlogPlanningJira) SearchIssueKeys(_ context.Context, jql string) ([]string, error) {
+	if jql == "technical" {
+		return []string{"DCAI-2"}, nil
+	}
+	return []string{"DCAI-1", "DCAI-4"}, nil
+}
+
+func TestPrioBacklogMatchesPlanningToDoUnion(t *testing.T) {
+	fixture := &jira.FakeClient{Issues: []jira.Issue{
+		{Key: "DCAI-1", Type: "Epic", Status: "Triage"},
+		{Key: "DCAI-2", Type: "Epic", Status: "Refinement", Labels: []string{"Technical"}},
+		{Key: "DCAI-3", Type: "Epic", Status: "Ready To Do", ParentKey: "DCAI-99"},
+		{Key: "DCAI-4", Type: "Task", Status: "Ready To Do"},
+		{Key: "DCAI-5", Type: "Task", Status: "Ready To Do", ParentKey: "DCAI-1"},
+		{Key: "DCAI-6", Type: "Epic", Status: "In Progress"},
+	}}
+	app := newTestAppWith(t, fixture, time.Now(), web.WithFakeJira(backlogPlanningJira{fixture}))
+	keys := func(body string, attr string) []string {
+		matches := regexp.MustCompile(attr+`="(DCAI-[0-9]+)"`).FindAllStringSubmatch(body, -1)
+		out := make([]string, len(matches))
+		for i, m := range matches {
+			out[i] = m[1]
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		level string
+		want  []string
+	}{{"epic", []string{"DCAI-1", "DCAI-2"}}, {"unparented", []string{"DCAI-1", "DCAI-2", "DCAI-4"}}} {
+		t.Run(tc.level, func(t *testing.T) {
+			query := "level=" + tc.level
+			backlog := get(t, app.URL+"/prio?step=backlog&"+query)
+			var union []string
+			for _, preset := range []string{"10417", "10452"} {
+				overview := get(t, app.URL+"/prio/preset-results?step=overview&"+query+"&preset="+preset)
+				union = append(union, keys(overview, "data-key")...)
+			}
+			slices.Sort(union)
+			union = slices.Compact(union)
+			if !slices.Equal(union, tc.want) {
+				t.Fatalf("fixture Planning union = %v, want %v", union, tc.want)
+			}
+			got := keys(backlog, "data-prio-queue-key")
+			slices.Sort(got)
+			if !slices.Equal(got, union) {
+				t.Errorf("Backlog %v differs from Planning union %v", got, union)
+			}
+		})
+	}
+}
+
 func (agendaFilterJira) PlanningPresets(context.Context) ([]jira.PlanningPreset, error) {
 	return []jira.PlanningPreset{
 		{ID: "42", Name: "Planning (To Do)", Description: "Freigegebene Jira-Auswahl", JQL: "project = DCAI"},
@@ -278,9 +340,9 @@ func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
 	}{
 		{"default Done", "step=done", []string{"DCAI-4"}},
 		{"default New", "step=new", []string{"DCAI-1", "DCAI-6"}},
-		{"default Backlog", "step=backlog", []string{"DCAI-1", "DCAI-2", "DCAI-6"}},
-		{"Backlog ignores Jira and since", "step=backlog&preset=42&period=since&level=unparented", []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-6", "DCAI-9"}},
-		{"Backlog carries level", "step=backlog&level=unparented", []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-6", "DCAI-9"}},
+		{"default Backlog", "step=backlog", []string{"DCAI-1", "DCAI-6"}},
+		{"Backlog ignores Jira and since", "step=backlog&preset=42&period=since&level=unparented", []string{"DCAI-1", "DCAI-3", "DCAI-6", "DCAI-9"}},
+		{"Backlog carries level", "step=backlog&level=unparented", []string{"DCAI-1", "DCAI-3", "DCAI-6", "DCAI-9"}},
 		{"Fertig keeps its cutoff and transition", "step=done&preset=42&period=all&level=all", []string{"DCAI-4", "DCAI-5"}},
 		{"Neu keeps creation cutoff", "step=new&preset=42&period=all&level=all", []string{"DCAI-1", "DCAI-3", "DCAI-6", "DCAI-8", "DCAI-9"}},
 		{"Retired Technical parameters are ignored", "step=new&preset=42&tech=non-technical&non-technical=1&level=all", []string{"DCAI-1", "DCAI-3", "DCAI-6", "DCAI-8", "DCAI-9"}},
@@ -305,7 +367,7 @@ func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
 
 	page := get(t, base+"&step=backlog&preset=42&period=since&tech=technical&level=unparented&ticket=DCAI-2")
 	for _, want := range []string{
-		`data-ticket="DCAI-2"`, `level=unparented&amp;step=overview`,
+		`data-ticket="DCAI-1"`, `level=unparented&amp;step=overview`,
 		`level=unparented&amp;step=backlog&amp;ticket=DCAI-3" data-prio-next`,
 	} {
 		if !strings.Contains(page, want) {
