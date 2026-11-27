@@ -220,8 +220,8 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 func TestReviewNowPinsDateViews(t *testing.T) {
 	base := startDashboardEnv(t, "REVIEW_NOW=2026-07-15T12:00:00Z")
 	waitForPageMarker(t, base+"/sprint", `data-testid="sprint-name">KW29`)
-	if code, body := get(t, base+"/sprint"); code != http.StatusOK || !strings.Contains(body, "13 Jul – 14 Jul 2026") {
-		t.Fatalf("/sprint: status %d, want 200 with the pinned window %q", code, "13 Jul – 14 Jul 2026")
+	if code, body := get(t, base+"/sprint"); code != http.StatusOK || !strings.Contains(body, "13 Jul – 15 Jul 2026") {
+		t.Fatalf("/sprint: status %d, want 200 with the pinned window %q", code, "13 Jul – 15 Jul 2026")
 	}
 
 	if code, body := get(t, base+"/velocity"); code != http.StatusOK {
