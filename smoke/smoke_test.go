@@ -188,7 +188,7 @@ func TestDashboardServesAllRoutes(t *testing.T) {
 		{"/daily/results", ""},
 		{"/resync/status", ""},
 		{"/version", "dev"}, // unstamped build reports the "dev" default
-		{"/static/output.css", ""},
+		{"/static/output.css", ".badge"}, // Basecoat badges are compiled into the embedded stylesheet
 		{"/static/htmx.min.js", ""},
 		{"/static/sortable.min.js", "Sortable"},          // vendored drag library (#195)
 		{"/static/board-drag.js", "board/move"},          // the Board's drag-and-drop glue (#195)
