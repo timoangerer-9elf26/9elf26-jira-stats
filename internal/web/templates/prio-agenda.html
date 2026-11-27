@@ -60,10 +60,10 @@
       {{else}}<p class="text-sm">Jira-Anmeldung erforderlich.</p>{{end}}
     </div>
   </dialog>
-  <nav aria-label="Meeting-Agenda" class="app-surface app-scroll flex gap-2 overflow-x-auto p-2" data-prio-scroll="agenda">
+  <nav aria-label="Meeting-Agenda" class="app-surface flex flex-wrap gap-1 p-2 sm:gap-2">
     {{range $number, $step := .Steps}}
     {{if or .Active .Total (ne .ID "epic-check")}}
-    <a class="grid min-w-max flex-1 gap-1 rounded-md px-3 py-2 text-sm font-semibold hover:bg-muted{{if .Active}} bg-accent text-accent-foreground{{end}}" href="{{.Href}}" data-prio-step="{{.ID}}" data-prio-keys="{{if eq .ID "overview"}}overview{{else}}{{range .Rows}}{{.Key}} {{end}}{{end}}"{{if .Active}} aria-current="step"{{end}}><span class="flex items-center justify-between gap-3"><span>{{$number}} · {{.Label}}</span><small class="tabular-nums"><span data-prio-progress>0</span>/{{.Total}}</small></span>
+    <a class="grid min-w-max flex-1 gap-1 rounded-md px-2 py-2 text-sm sm:px-3 font-semibold hover:bg-muted{{if .Active}} bg-accent text-accent-foreground{{end}}" href="{{.Href}}" data-prio-step="{{.ID}}" data-prio-keys="{{if eq .ID "overview"}}overview{{else}}{{range .Rows}}{{.Key}} {{end}}{{end}}"{{if .Active}} aria-current="step"{{end}}><span class="flex items-center justify-between gap-2 sm:gap-3"><span>{{$number}} · {{.Label}}</span><small class="tabular-nums"><span data-prio-progress>0</span>/{{.Total}}</small></span>
       <progress class="h-0.5 w-full appearance-none overflow-hidden rounded bg-border align-top [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary" value="0" max="{{if .Total}}{{.Total}}{{else}}1{{end}}" aria-hidden="true"></progress></a>
     {{end}}
     {{end}}
@@ -79,7 +79,7 @@
 {{define "prio-agenda-focus"}}
 <div class="mt-3 grid items-start gap-4 lg:grid-cols-[minmax(16rem,1fr)_minmax(0,3fr)]">
   <section class="app-surface overflow-hidden" aria-labelledby="prio-queue-title">
-    <header class="border-b border-border p-4">
+    <header class="border-b border-border px-3 py-2 lg:p-4">
       <h2 id="prio-queue-title" class="font-bold">{{.Current.Heading}}</h2>
       <p class="text-sm text-muted-foreground"><span data-prio-queue-progress>0</span> von {{.Current.Total}} besprochen</p>
       {{if eq .Step "backlog"}}
@@ -87,7 +87,7 @@
       {{end}}
     </header>
     {{if .Current.Rows}}
-    <ul class="app-scroll max-h-[65vh] overflow-y-auto p-2" data-prio-scroll="queue">
+    <ul class="app-scroll max-h-36 overflow-y-auto p-2 lg:max-h-[65vh]" data-prio-scroll="queue">
       {{range .Current.Rows}}
       <li class="rounded-md border p-2 text-sm{{if eq .Key $.SelectedKey}} border-primary bg-accent{{else}} border-transparent{{end}}">
         <a class="block rounded-sm hover:underline" href="{{.SelectHref}}" data-prio-queue-key="{{.Key}}" {{if eq .Key $.SelectedKey}}aria-current="true"{{end}}>
@@ -106,15 +106,15 @@
     {{end}}
   </section>
   <section class="app-surface overflow-hidden" aria-label="Ticketdetails">
-    {{with .Selected}}{{template "prio-ticket-panel" .}}{{else}}
-    <p class="p-4 text-sm text-muted-foreground">Über die Agenda kannst du zu einem anderen Schritt wechseln.</p>
-    {{end}}
-    <footer class="flex flex-wrap items-center justify-end gap-2 border-t border-border bg-muted p-3">
-      <span class="mr-auto text-xs text-muted-foreground"><kbd>k</kbd> zurück · <kbd>j</kbd> weiter</span>
+    <nav aria-label="Ticketbesprechung" class="flex flex-wrap items-center justify-end gap-2 border-b border-border bg-muted p-3">
+      <span class="mr-auto hidden text-xs sm:inline text-muted-foreground"><kbd>k</kbd> zurück · <kbd>j</kbd> weiter</span>
       {{if .PrevHref}}<a class="btn" data-variant="outline" href="{{.PrevHref}}" data-prio-prev>← Zurück</a>{{end}}
       {{if .NextHref}}<a class="btn" href="{{.NextHref}}" data-prio-next>Weiter →</a>
       {{else}}<button class="btn" type="button" data-prio-next data-prio-summary>Zum Abschluss</button>{{end}}
-    </footer>
+    </nav>
+    {{with .Selected}}{{template "prio-ticket-panel" .}}{{else}}
+    <p class="p-4 text-sm text-muted-foreground">Über die Agenda kannst du zu einem anderen Schritt wechseln.</p>
+    {{end}}
   </section>
 </div>
 {{end}}

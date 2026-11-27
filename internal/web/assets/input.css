@@ -107,3 +107,40 @@ button:not(:disabled) {
     position: static;
   }
 }
+
+@media (width < 40rem) {
+  .prio-table tbody,
+  .prio-table tbody tr {
+    display: block;
+  }
+
+  .prio-table tbody th {
+    display: block;
+  }
+
+  .prio-table tr[data-key] {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, auto)) 1fr;
+    align-items: center;
+  }
+
+  .prio-table-ticket,
+  .prio-table-labels,
+  .prio-table-markers {
+    grid-column: 1 / -1;
+  }
+
+  .prio-table-ticket {
+    grid-row: 1;
+  }
+
+  .prio-table-link {
+    grid-column: 4;
+    grid-row: 2;
+    justify-self: end;
+  }
+
+  .prio-table td:empty {
+    display: none;
+  }
+}

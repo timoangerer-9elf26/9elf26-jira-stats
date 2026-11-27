@@ -1105,8 +1105,7 @@
      [name='assignee'] inputs (which would double-count). Zero selected = all;
      multiple selected = union (OR).
 
-     Selected chips read full-colour with a ring; unselected are dimmed and
-     greyscale. The avatar itself reuses the shared
+     Selected chips use a ring. The avatar itself reuses the shared
      card-avatar partial (image → initials → neutral circle for Unassigned), so
      the image is served from Jira/​/static, never inlined as a data: URI (the
      #ZgotmplZ gotcha). Takes a dailyView (needs .Assignees, .AnySelected).
@@ -1137,8 +1136,7 @@
      OTHER controls (via the caller's IncludeAttr), never its own assignee inputs
      (which would double-count). Zero selected = all; multiple = union (OR).
 
-     Selected chips read full-colour with a ring; unselected are dimmed and
-     greyscale. The avatar reuses the shared card-avatar partial (image → initials
+     Selected chips use a ring. The avatar reuses the shared card-avatar partial (image → initials
      → neutral circle for Unassigned), served from Jira/​/static, never inlined as
      a data: URI (the #ZgotmplZ gotcha). Takes an assigneeBarView (Prefix, Chips,
      AnySelected, ClearHref, IncludeAttr). */}}
@@ -1148,11 +1146,10 @@
     {{range .Chips}}
     <button type="button" data-testid="{{$.Prefix}}:{{.Value}}"
             title="{{.Name}}" aria-label="{{.Name}}"
-            {{if .Selected}}aria-pressed="true"{{end}}
+            aria-pressed="{{.Selected}}"
             hx-get="{{.ToggleHref}}" {{$.IncludeAttr}}
-            class="inline-flex cursor-pointer rounded-full border-2 p-0.5 leading-none transition-[filter,opacity,border-color]
-                   {{if .Selected}}border-slate-900 opacity-100
-                   {{else}}border-transparent grayscale opacity-55 hover:grayscale-0 hover:opacity-85{{end}}">
+            class="inline-flex cursor-pointer rounded-full border-2 p-0.5 leading-none transition-colors
+                   {{if .Selected}}border-slate-900{{else}}border-transparent hover:border-slate-400{{end}}">
       {{template "card-avatar" (dict "Key" .Value "Assignee" .Assignee "AvatarURL" .AvatarURL "Initials" .Initials)}}
     </button>
     {{end}}
@@ -1317,7 +1314,7 @@
     <span class="font-mono text-xs font-semibold text-slate-500" data-testid="card:{{.Key}}:key">{{.Key}}</span>
     {{template "type-badge" (dict "Type" .Type "Testid" (printf "card:%s:type" .Key))}}
   </div>
-  <p class="mt-1.5 truncate text-sm text-slate-800" title="{{.Summary}}" data-testid="card:{{.Key}}:title">{{.Summary}}</p>
+  <p class="mt-1.5 wrap-anywhere text-sm text-slate-800" title="{{.Summary}}" data-testid="card:{{.Key}}:title">{{.Summary}}</p>
   <div class="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
     {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "" "Href" .Href)}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
     <span class="flex min-w-0 items-center gap-2">
@@ -1434,9 +1431,21 @@
      An issue with no labels renders an empty cell (no placeholder), so the
      column stays quiet on the many unlabelled rows. Takes a prioRow. */}}
 {{define "labels-cell"}}
-{{- range .Labels -}}
-<span class="badge mr-1 bg-slate-100" data-variant="secondary" data-testid="prio:{{$.Key}}:label:{{.}}">{{.}}</span>
-{{- end -}}
+{{if .Labels}}
+<div class="flex flex-wrap gap-1 sm:max-w-44">
+  {{range $index, $label := .Labels}}{{if lt $index 2}}{{template "prio-label" (dict "Key" $.Key "Label" $label)}}{{end}}{{end}}
+  {{if gt (len .Labels) 2}}
+  <details class="max-w-full">
+    <summary class="cursor-pointer text-xs text-muted-foreground">+{{len (slice .Labels 2)}} <span class="sr-only">weitere Labels</span></summary>
+    <span class="mt-1 flex flex-wrap gap-1">{{range slice .Labels 2}}{{template "prio-label" (dict "Key" $.Key "Label" .)}}{{end}}</span>
+  </details>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
+{{define "prio-label"}}
+<span class="badge max-w-full text-wrap wrap-anywhere bg-slate-100" data-variant="secondary" data-testid="prio:{{.Key}}:label:{{.Label}}">{{.Label}}</span>
 {{end}}
 
 {{/* priority-glyph draws one priority level's icon: a Jira-like severity glyph
