@@ -225,3 +225,24 @@ func TestPrioTicketMutationRefreshesActiveJiraPreset(t *testing.T) {
 		t.Fatal("preset membership or focused selection is stale after mutation")
 	}
 }
+
+func TestPrioTicketEditsParentWithoutReplacingParentFilter(t *testing.T) {
+	client := &jira.FakeClient{Issues: []jira.Issue{{Key: "DCAI-41", Type: "Task", Summary: "Parent change", Status: "Triage"}}}
+	app := newWritablePrioApp(t, client)
+	form := url.Values{"step": {"overview"}, "preset": {"all"}, "key": {"DCAI-41"},
+		"parent-filter": {"1"}, "action": {"parent"}, "parent": {"DCAI-40"}}
+	body := postPrioTicket(t, app, form)
+	for _, want := range []string{`data-ticket="DCAI-41"`, `name="parent-filter" value="1"`, `name="parent" value="DCAI-40"`, "Parent geändert"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("parent update missing %q", want)
+		}
+	}
+	if strings.Contains(body, `data-key="DCAI-41"`) {
+		t.Fatal("issue with a parent still appears on the parent-only list")
+	}
+	form.Set("parent", "DCAI-41")
+	body = postPrioTicket(t, app, form)
+	if !strings.Contains(body, "gültigen Jira-Key") {
+		t.Fatal("self-parent was accepted")
+	}
+}

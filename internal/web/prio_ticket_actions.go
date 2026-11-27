@@ -54,11 +54,17 @@ func (s *Server) handlePrioTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	action := r.PostForm.Get("action")
 	q := prioAgendaParams(r.PostForm)
+	if action == "parent" {
+		q.Del("parent")
+	}
+	if parentFilter := r.PostForm.Get("parent-filter"); parentFilter != "" {
+		q.Set("parent", parentFilter)
+	}
 	if !q.Has("preset") {
 		q.Set("preset", prioDefaultPreset)
 	}
-	action := r.PostForm.Get("action")
 	key := r.PostForm.Get("key")
 	var result prioTicketResult
 	ctx := r.Context()
@@ -113,6 +119,8 @@ func (s *Server) handlePrioTicket(w http.ResponseWriter, r *http.Request) {
 				target = "#prio-epic-feedback"
 			case "comment":
 				target = "#prio-comment-feedback"
+			case "summary", "description", "priority", "assignee", "size", "labels", "parent":
+				target = "#prio-ticket-feedback-" + action
 			}
 			w.Header().Set("HX-Retarget", target)
 			w.Header().Set("HX-Reswap", "innerHTML")

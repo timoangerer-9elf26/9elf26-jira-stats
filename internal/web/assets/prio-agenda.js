@@ -195,8 +195,8 @@
   document.addEventListener('htmx:afterSettle', event => {
     if (event.detail.target !== panel) return;
     const view = agenda();
-    if (view?.dataset.prioChange) recordChange(view.dataset.prioChange);
     restoreView();
+    if (view?.dataset.prioChange) recordChange(view.dataset.prioChange);
   });
   document.addEventListener('htmx:historyRestore', restoreView);
   document.addEventListener('prio:change', event => recordChange(event.detail));

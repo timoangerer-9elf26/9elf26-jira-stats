@@ -62,7 +62,7 @@
 {{end}}
 
 {{define "prio-ticket-params"}}
-  {{range .}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+  {{range .}}<input type="hidden" name="{{if eq .Name "parent"}}parent-filter{{else}}{{.Name}}{{end}}" value="{{.Value}}">{{end}}
 {{end}}
 
 {{define "prio-ticket-feedback"}}
@@ -102,6 +102,7 @@
         {{end}}
       </div>
       <button class="btn" data-variant="outline" type="submit" aria-label="{{.Label}} speichern" id="prio-save-{{.Name}}">Speichern</button>
+      <div id="prio-ticket-feedback-{{.Name}}" class="empty:hidden sm:col-span-2" aria-live="polite"></div>
     </form>
     {{end}}
   </div>
