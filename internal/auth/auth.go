@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	FlowLifetime    = 10 * time.Minute
-	SessionLifetime = 30 * 24 * time.Hour
+	FlowLifetime            = 10 * time.Minute
+	SessionLifetime         = 30 * 24 * time.Hour
+	atlassianRequestTimeout = 15 * time.Second
 )
 
 // ErrSignIn means the browser has no usable session and must authorize again.
@@ -105,7 +106,7 @@ func New(st *store.Store, cfg Config) (*Service, error) {
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = "https://api.atlassian.com"
 	}
-	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+	client := &http.Client{Timeout: atlassianRequestTimeout, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
 	return &Service{store: st, provider: provider{cfg, client}, cipher: aead, accounts: accounts}, nil
@@ -177,6 +178,9 @@ func (s *Service) Complete(ctx context.Context, state, browser, code, previous s
 	session = randomToken()
 	if err := s.store.SaveOAuthLogin(ctx, account, envelope, digest(session), digest(previous),
 		now.Unix(), now.Add(SessionLifetime).Unix()); err != nil {
+		if errors.Is(err, store.ErrOAuthAccountUnavailable) {
+			err = ErrSignIn
+		}
 		return "", next, err
 	}
 	return session, next, nil
@@ -205,31 +209,52 @@ func (s *Service) Resolve(ctx context.Context, session string) (Identity, jira.C
 	lock.Lock()
 	defer lock.Unlock()
 
-	envelope, err := s.store.OAuthGrant(ctx, account)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Identity{}, nil, ErrSignIn
-	}
+	g, err := s.loadUsableGrant(ctx, account)
 	if err != nil {
 		return Identity{}, nil, err
 	}
-	g, err := s.open(account, envelope)
-	if err != nil {
-		return Identity{}, nil, err
-	}
-	g, err = s.usableGrant(ctx, account, g)
-	if errors.Is(err, ErrSignIn) || errors.Is(err, ErrProjectAccess) {
-		if revokeErr := s.store.DeleteOAuthGrant(ctx, account); revokeErr != nil {
-			return Identity{}, nil, revokeErr
+	if g.TimeZone == "" {
+		// A privacy update erased the timezone stored at login.
+		id, zone, err := s.provider.myself(ctx, g.AccessToken)
+		if err != nil {
+			return Identity{}, nil, err
 		}
-	}
-	if err != nil {
-		return Identity{}, nil, err
+		if id != account {
+			return Identity{}, nil, ErrSignIn
+		}
+		g.TimeZone = zone
+		if err := s.saveGrant(ctx, account, g); err != nil {
+			return Identity{}, nil, err
+		}
 	}
 	zone, err := jiraTimeZone(g.TimeZone)
 	if err != nil {
 		return Identity{}, nil, err
 	}
 	return Identity{AccountID: account, TimeZone: zone}, s.provider.client(g.AccessToken), nil
+}
+
+// loadUsableGrant shares the browser's rotating-grant logic with background
+// reporting. Callers hold the exchange read lock and the account lock.
+func (s *Service) loadUsableGrant(ctx context.Context, account string) (grant, error) {
+	envelope, err := s.store.OAuthGrant(ctx, account)
+	if errors.Is(err, sql.ErrNoRows) {
+		return grant{}, ErrSignIn
+	}
+	if err != nil {
+		return grant{}, err
+	}
+	g, err := s.open(account, envelope)
+	if err != nil {
+		return grant{}, err
+	}
+	g, err = s.usableGrant(ctx, account, g)
+	if errors.Is(err, ErrSignIn) || errors.Is(err, ErrProjectAccess) {
+		if revokeErr := s.store.DeleteOAuthGrant(ctx, account); revokeErr != nil {
+			return grant{}, revokeErr
+		}
+	}
+	return g, err
 }
 
 func (s *Service) usableGrant(ctx context.Context, account string, g grant) (grant, error) {

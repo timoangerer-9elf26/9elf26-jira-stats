@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -355,6 +356,7 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		Comments:          comments,
 		Links:             toIssueLinks(dto.Fields.Links),
 		Creator:           assigneeName(dto.Fields.Creator),
+		CreatorAccountID:  person(dto.Fields.Creator).AccountID,
 		Changelog:         entries,
 		SprintChanges:     sprintChanges,
 	}
@@ -760,6 +762,19 @@ func optionalJiraTime(s string) (time.Time, error) {
 		return time.Time{}, nil
 	}
 	return parseJiraTime(s)
+}
+
+// FetchUserProfile reads display data subject to Jira's profile visibility.
+func (c *LiveClient) FetchUserProfile(ctx context.Context, account string) (ProjectMember, error) {
+	query := url.Values{"accountId": {account}}
+	var dto userDTO
+	if err := c.get(ctx, "/rest/api/3/user", query, &dto); err != nil {
+		return ProjectMember{}, errors.New("Jira user profile is unavailable")
+	}
+	if dto.AccountID != account || strings.TrimSpace(dto.DisplayName) == "" {
+		return ProjectMember{}, errors.New("Jira user profile is incomplete")
+	}
+	return ProjectMember{AccountID: dto.AccountID, DisplayName: dto.DisplayName, AvatarURL: largestAvatarURL(dto.AvatarUrls)}, nil
 }
 
 func assigneeName(u *userDTO) string {

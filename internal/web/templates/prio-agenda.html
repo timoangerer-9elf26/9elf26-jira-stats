@@ -133,7 +133,7 @@
 <p class="mt-2 text-sm">{{len .}} {{if eq (len .) 1}}Änderung{{else}}Änderungen{{end}}</p>
 {{if .}}
 <ul class="mt-2 max-h-[40vh] list-inside list-disc space-y-1 overflow-y-auto text-sm">
-  {{range .}}<li>{{.Label}} <span class="text-muted-foreground">· {{.AccountID}} · <time datetime="{{.Instant}}">{{.TimeLabel}}</time></span></li>{{end}}
+  {{range .}}<li>{{.Label}} <span class="text-muted-foreground">{{if .AccountID}}· {{.AccountID}} {{end}}· <time datetime="{{.Instant}}">{{.TimeLabel}}</time></span></li>{{end}}
 </ul>
 {{end}}
 {{end}}

@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 )
+
+var ErrOAuthAccountUnavailable = errors.New("Atlassian account unavailable")
 
 // SaveOAuthFlow records the hashed state and browser binding for one authorization attempt.
 func (s *Store) SaveOAuthFlow(ctx context.Context, state, browser, next string, now, expires int64) error {
@@ -32,15 +35,22 @@ func (s *Store) SaveOAuthLogin(ctx context.Context, account string, grant []byte
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO jira_auth_grant (account_id, ciphertext) VALUES (?, ?)
-		ON CONFLICT(account_id) DO UPDATE SET ciphertext = excluded.ciphertext`, account, grant); err != nil {
+	rule, err := readIdentityRule(tx, account)
+	if err != nil {
+		return err
+	}
+	if account == "" || rule.closed {
+		return ErrOAuthAccountUnavailable
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO jira_auth_grant (account_id, ciphertext, retrieved_at) VALUES (?, ?, ?)
+		ON CONFLICT(account_id) DO UPDATE SET ciphertext = excluded.ciphertext, retrieved_at = excluded.retrieved_at`, account, grant, now); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM jira_auth_session WHERE token_hash = ? OR expires_at <= ?", previous, now); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "INSERT INTO jira_auth_session (token_hash, account_id, expires_at) VALUES (?, ?, ?)",
-		token, account, expires); err != nil {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO jira_auth_session (token_hash, account_id, expires_at, retrieved_at) VALUES (?, ?, ?, ?)",
+		token, account, expires, now); err != nil {
 		return err
 	}
 	return tx.Commit()

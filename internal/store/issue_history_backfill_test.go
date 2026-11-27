@@ -104,3 +104,83 @@ func seedPreMeetingProjection(t *testing.T, path string) {
 		}
 	}
 }
+
+func TestPrivacyMigrationInventoriesIdentifiableLegacyRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pre-privacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, migrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(t.Context(), 15); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`INSERT INTO issue (key, type, summary, status, status_category, synced_at, assignee, assignee_account_id, creator, comments)
+		 VALUES ('DCAI-1', 'Epic', 'Existing ticket', 'Done', 'Done', '2026-01-05T09:00:00Z', 'Assignee', 'assignee-account', 'Name without ID',
+		         '[{"ID":"comment-1","Author":{"AccountID":"comment-account","DisplayName":"Comment Name"}},{"ID":"comment-2","Author":{"DisplayName":"Unlinked Author"}}]'),
+		        ('DCAI-2', 'Task', 'Older ticket', 'Done', 'Done', '2026-01-04T09:00:00Z', 'Unlinked Assignee', '', 'Unlinked Creator', NULL)`,
+		`INSERT INTO status_transition (changelog_entry_id, issue_key, field, to_status, transitioned_at, author_account_id, author_display_name)
+		 VALUES ('old-entry', 'DCAI-1', 'status', 'Done', '2025-12-20T10:00:00Z', 'transition-account', 'Transition Name')`,
+		`INSERT INTO prio_meeting (ended_at, account_id) VALUES ('2026-01-01T07:00:00Z', 'meeting-account')`,
+		`INSERT INTO prio_meeting_change (meeting_window, issue_key, label, account_id, occurred_at)
+		 VALUES (1, 'DCAI-1', 'Status', 'audit-account', '2026-01-02T07:00:00Z')`,
+		`INSERT INTO project_member (account_id, display_name) VALUES ('member-account', 'Member Name'), ('unknown', 'Unknown')`,
+		`INSERT INTO jira_auth_grant (account_id, ciphertext) VALUES ('grant-account', X'AB')`,
+		`INSERT INTO jira_auth_session (account_id, token_hash, expires_at) VALUES ('session-account', 's', unixepoch('2026-02-01T12:00:00Z'))`,
+		`INSERT INTO meta (key, value) VALUES ('last_sync', '2026-01-05T09:00:00Z')`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	due, err := st.PrivacyDue(t.Context(), time.Now(), 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := map[string]string{
+		"assignee-account": "2026-01-05T09:00:00Z", "comment-account": "2026-01-05T09:00:00Z",
+		"transition-account": "2026-01-05T09:00:00Z", "meeting-account": "2026-01-01T07:00:00Z",
+		"audit-account": "2026-01-02T07:00:00Z", "member-account": "2026-01-04T09:00:00Z",
+		"session-account": "2026-01-02T12:00:00Z", "grant-account": "",
+	}
+	for _, account := range due {
+		want, ok := expected[account.AccountID]
+		if !ok || (want != "" && account.UpdatedAt.Format(time.RFC3339) != want) {
+			t.Errorf("unexpected migrated inventory entry: %+v", account)
+		}
+		delete(expected, account.AccountID)
+	}
+	if len(expected) != 0 {
+		t.Fatalf("missing migrated inventory entries: %v", expected)
+	}
+	ticket, found, err := st.IssueDetail("DCAI-1")
+	if err != nil || !found || len(ticket.Comments) != 2 || ticket.Comments[0].Author.DisplayName != "Comment Name" ||
+		ticket.Comments[1].ID != "comment-2" || ticket.Comments[1].Author != (jira.Person{}) {
+		t.Fatalf("migrated comment authors: %+v found=%v err=%v", ticket.Comments, found, err)
+	}
+
+	old, found, err := st.IssueDetail("DCAI-2")
+	if err != nil || !found || old.Assignee != "" || old.Summary != "Older ticket" {
+		t.Fatalf("legacy name-only projection: %+v found=%v err=%v", old, found, err)
+	}
+	if _, hasWatermark, err := st.LastSync(); err != nil || hasWatermark {
+		t.Fatalf("migration should schedule a historical fetch: watermark=%v err=%v", hasWatermark, err)
+	}
+}

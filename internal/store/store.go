@@ -31,7 +31,7 @@ type Store struct {
 // Store. Access is serialized through a single connection per the SQLite
 // single-writer constraint.
 func Open(dsnPath string) (*Store, error) {
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dsnPath)
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=secure_delete(ON)", dsnPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -70,6 +70,11 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 		return err
 	}
 	defer tx.Rollback()
+
+	iss, err = protectIssueIdentities(tx, iss)
+	if err != nil {
+		return err
+	}
 
 	var size any
 	if iss.Size != "" {
@@ -123,8 +128,8 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO issue (key, type, summary, status, status_category, size, sprint, active_sprint, assignee, assignee_avatar_url, parent_key, epic_color, priority, labels, created_at, creator, synced_at,
-		                    description, comments, links, assignee_account_id, resolved_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                    description, comments, links, assignee_account_id, creator_account_id, resolved_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(key) DO UPDATE SET
 		     type=excluded.type, summary=excluded.summary, status=excluded.status,
 		     status_category=excluded.status_category, size=excluded.size,
@@ -135,9 +140,10 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 		     created_at=excluded.created_at,
 		     creator=excluded.creator, synced_at=excluded.synced_at,
 		     description=excluded.description, comments=excluded.comments, links=excluded.links,
-		     assignee_account_id=excluded.assignee_account_id, resolved_at=excluded.resolved_at`,
+		     assignee_account_id=excluded.assignee_account_id, creator_account_id=excluded.creator_account_id,
+		     resolved_at=excluded.resolved_at`,
 		iss.Key, iss.Type, iss.Summary, iss.Status, iss.StatusCategory, size, iss.Sprint, activeSprint, iss.Assignee, assigneeAvatarURL, parentKey, epicColor, priority, labels, createdAt, creator, syncedAt,
-		[]byte(iss.Description), comments, links, iss.AssigneeAccountID, resolvedAt,
+		[]byte(iss.Description), comments, links, iss.AssigneeAccountID, iss.CreatorAccountID, resolvedAt,
 	); err != nil {
 		return fmt.Errorf("upsert issue %s: %w", iss.Key, err)
 	}
@@ -151,14 +157,14 @@ func (s *Store) SaveIssue(iss jira.Issue, syncedAt string) error {
 		if _, err := tx.Exec(
 			`INSERT INTO status_transition
 			     (changelog_entry_id, issue_key, field, from_status, to_status, transitioned_at,
-			      from_id, to_id, author_account_id, author_display_name, subsecond_ns)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			      from_id, to_id, author_account_id, author_display_name, subsecond_ns, author_retrieved_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(changelog_entry_id) DO UPDATE SET
 			   from_id=excluded.from_id, to_id=excluded.to_id,
 			   author_account_id=excluded.author_account_id, author_display_name=excluded.author_display_name,
-			   subsecond_ns=excluded.subsecond_ns`,
+			   subsecond_ns=excluded.subsecond_ns, author_retrieved_at=excluded.author_retrieved_at`,
 			e.ID, iss.Key, e.Field, e.From, e.To, e.Timestamp.UTC().Format(time.RFC3339),
-			e.FromID, e.ToID, e.Author.AccountID, e.Author.DisplayName, e.Timestamp.Nanosecond(),
+			e.FromID, e.ToID, e.Author.AccountID, e.Author.DisplayName, e.Timestamp.Nanosecond(), syncedAt,
 		); err != nil {
 			return fmt.Errorf("insert transition %s: %w", e.ID, err)
 		}
@@ -385,7 +391,18 @@ func (s *Store) ReplaceProjectMembers(members []jira.ProjectMember) error {
 	if _, err := tx.Exec(`DELETE FROM project_member`); err != nil {
 		return fmt.Errorf("clear project members: %w", err)
 	}
+	retrievedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, m := range members {
+		rule, err := readIdentityRule(tx, m.AccountID)
+		if err != nil {
+			return err
+		}
+		if m.AccountID == "" || rule.closed {
+			continue
+		}
+		if rule.update {
+			m.DisplayName, m.AvatarURL = rule.name, rule.avatar
+		}
 		var avatarURL any
 		if m.AvatarURL != "" {
 			avatarURL = m.AvatarURL
@@ -394,12 +411,12 @@ func (s *Store) ReplaceProjectMembers(members []jira.ProjectMember) error {
 		// WITHIN this batch — which startAt pagination over a directory changing
 		// mid-walk can genuinely produce. A plain insert would fail the sync.
 		if _, err := tx.Exec(
-			`INSERT INTO project_member (account_id, display_name, avatar_url) VALUES (?, ?, ?)
+			`INSERT INTO project_member (account_id, display_name, avatar_url, retrieved_at) VALUES (?, ?, ?, ?)
 			 ON CONFLICT(account_id) DO UPDATE SET
 			     display_name=excluded.display_name, avatar_url=excluded.avatar_url`,
-			m.AccountID, m.DisplayName, avatarURL,
+			m.AccountID, m.DisplayName, avatarURL, retrievedAt,
 		); err != nil {
-			return fmt.Errorf("insert project member %s: %w", m.AccountID, err)
+			return fmt.Errorf("insert project member: %w", err)
 		}
 	}
 	return tx.Commit()
@@ -412,7 +429,10 @@ func (s *Store) ReplaceProjectMembers(members []jira.ProjectMember) error {
 func (s *Store) ProjectMembers() ([]ProjectMember, error) {
 	rows, err := s.db.Query(
 		`SELECT account_id, display_name, COALESCE(avatar_url, '')
-		 FROM project_member ORDER BY display_name, account_id`)
+		 FROM project_member AS member
+		 WHERE NOT EXISTS (SELECT 1 FROM jira_privacy_profile
+		                   WHERE account_id = member.account_id AND retrieved_at = '')
+		 ORDER BY display_name, account_id`)
 	if err != nil {
 		return nil, fmt.Errorf("list project members: %w", err)
 	}

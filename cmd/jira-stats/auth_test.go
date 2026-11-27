@@ -15,7 +15,7 @@ func TestLiveJiraRequiresOAuthEvenWithAuthDisabled(t *testing.T) {
 	if err != nil || fake {
 		t.Fatalf("expected live Jira configuration, got fake=%v, err=%v", fake, err)
 	}
-	if _, err := authOption(nil, fake); err == nil || !strings.Contains(err.Error(), "AUTH_DISABLED") {
+	if _, err := configureAuth(nil, fake); err == nil || !strings.Contains(err.Error(), "AUTH_DISABLED") {
 		t.Fatalf("live mode must reject disabled auth, got %v", err)
 	}
 }
@@ -46,7 +46,7 @@ func TestExplicitFakeModeCanRenderOAuthLogin(t *testing.T) {
 	if err != nil || !fake {
 		t.Fatalf("expected fake Jira configuration, got fake=%v, err=%v", fake, err)
 	}
-	if opt, err := authOption(nil, fake); err != nil || opt == nil {
+	if opt, err := configureAuth(nil, fake); err != nil || opt == nil {
 		t.Fatalf("expected OAuth to be enabled, got err=%v", err)
 	}
 }

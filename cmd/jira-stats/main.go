@@ -79,7 +79,7 @@ func run() error {
 	}
 	defer st.Close()
 
-	authOpt, err := authOption(st, fake)
+	oauth, err := configureAuth(st, fake)
 	if err != nil {
 		return err
 	}
@@ -131,8 +131,8 @@ func run() error {
 	if fake {
 		opts = append(opts, web.WithFakeJira(client))
 	}
-	if authOpt != nil {
-		opts = append(opts, authOpt)
+	if oauth != nil {
+		opts = append(opts, web.WithOAuth(oauth))
 	}
 
 	srv, err := web.NewServer(st, opts...)
@@ -140,6 +140,18 @@ func run() error {
 		return err
 	}
 
+	if oauth != nil && !fake {
+		reporter := auth.NewPrivacyReporter(oauth, os.Getenv("JIRA_PRIVACY_OWNER_ACCOUNT_ID"), time.Now)
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			reporter.Run(ctx)
+		}()
+		defer func() {
+			stop()
+			<-stopped
+		}()
+	}
 	go syncer.Run(ctx, interval)
 	log.Printf("syncing %s from Jira every %s", getenv("JIRA_PROJECT", "DCAI"), interval)
 
@@ -171,9 +183,9 @@ type resyncer struct {
 func (r resyncer) Resync() bool    { return r.syncer.TriggerResync(r.ctx) }
 func (r resyncer) Resyncing() bool { return r.syncer.Resyncing() }
 
-// authOption enforces OAuth for live Jira. The explicit local bypass only
+// configureAuth enforces OAuth for live Jira. The explicit local bypass only
 // works with fake data.
-func authOption(st *store.Store, fake bool) (web.Option, error) {
+func configureAuth(st *store.Store, fake bool) (*auth.Service, error) {
 	if envEnabled("AUTH_DISABLED") {
 		if !fake {
 			return nil, errors.New("AUTH_DISABLED=true is only supported with fake Jira")
@@ -195,7 +207,7 @@ func authOption(st *store.Store, fake bool) (web.Option, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure Atlassian sign-in: %w", err)
 	}
-	return web.WithOAuth(oauth), nil
+	return oauth, nil
 }
 
 func envEnabled(key string) bool {
