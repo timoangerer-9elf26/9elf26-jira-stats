@@ -54,6 +54,9 @@ func (s *Server) handlePrioPresetPicker(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handlePrioPresetResults(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	q := prioAgendaParams(r.URL.Query())
+	if r.Header.Get("HX-Request") == "true" && redirectStalePrioAgenda(w, r, q) {
+		return
+	}
 	ctx := context.WithValue(r.Context(), prioPresetLoadKey{}, prioPresetLoad{keepTicket: r.URL.Query().Get("keep-ticket") == "1"})
 	s.renderPrioWith(w, ctx, q, "prio-agenda-content", prioEdit{})
 }
@@ -255,12 +258,11 @@ func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, _ url
 		s.prioFiltersCache.put(account, filters, s.now())
 	}
 	for _, filter := range filters {
-		label := filter.Name
-		if filter.ID == prioDefaultPreset {
-			label = "Seit letztem Prio-Meeting"
+		if filter.ID == prioRetiredPreset {
+			continue
 		}
 		view.PresetOptions = append(view.PresetOptions, prioAgendaOption{
-			Label: label, Value: filter.ID, Description: filter.Description, Active: filter.ID == view.Preset,
+			Label: filter.Name, Value: filter.ID, Description: filter.Description, Active: filter.ID == view.Preset,
 		})
 	}
 	if view.Preset == prioLocalPreset {

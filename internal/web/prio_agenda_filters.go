@@ -29,18 +29,18 @@ func prioAgendaFiltersFor(q url.Values) prioAgendaFilters {
 	return prioAgendaFilters{Level: level, SinceCutoff: sinceCutoff}
 }
 
-func (f prioAgendaFilters) keeps(issue store.PrioIssue, events prioIssueEvents) bool {
-	isEpic := strings.EqualFold(issue.Type, "Epic")
-	if !isEpic && (f.Level.Value == "epic" ||
-		f.Level.Value == "unparented" && issue.ParentKey != "") {
-		return false
-	}
+func (f prioAgendaFilters) keepsLevel(issue store.PrioIssue) bool {
+	return strings.EqualFold(issue.Type, "Epic") || f.Level.Value == "all" ||
+		f.Level.Value == "unparented" && issue.ParentKey == ""
+}
+
+func (f prioAgendaFilters) keepsPeriod(events prioIssueEvents) bool {
 	return !f.SinceCutoff || events.New || events.Resolved ||
 		events.StatusLabel != "" || len(events.PriorityChanges) > 0
 }
 
 func (f prioAgendaFilters) summary() string {
-	parts := []string{"Jira-Filter: " + f.Jira.Label, "Ebene: " + f.Level.Label}
+	parts := []string{"Jira-Filter: " + f.Jira.Label}
 	if f.SinceCutoff {
 		parts = append(parts, "Nur seit Stichtag")
 	}
@@ -56,9 +56,5 @@ func (v prioAgendaView) prioJiraFilterOption() prioAgendaOption {
 			return option
 		}
 	}
-	label := "Filter " + v.Preset
-	if v.Preset == prioDefaultPreset {
-		label = "Seit letztem Prio-Meeting"
-	}
-	return prioAgendaOption{Value: v.Preset, Label: label}
+	return prioAgendaOption{Value: v.Preset, Label: "Filter " + v.Preset}
 }

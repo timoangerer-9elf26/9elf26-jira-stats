@@ -455,7 +455,8 @@ func (s *Server) templateFuncs() template.FuncMap {
 		// tag alone (#164). The full "tag (sha)" string still stays reachable at
 		// GET /version (the deploy health check asserts equality against it) — this
 		// trim is display-only.
-		"displayVersion": func() string { return trimVersionSHA(s.version) },
+		"displayVersion":     func() string { return trimVersionSHA(s.version) },
+		"prioAgendaRevision": func() string { return prioAgendaRevision },
 		// render executes a named partial and returns its HTML, so a caller can
 		// dispatch on a template name resolved at render time — html/template's
 		// {{template}} needs a static name. The Board filter chrome uses it to range

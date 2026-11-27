@@ -24,7 +24,7 @@ func TestPrioOverviewFilterSwapReturnsReadyJiraResults(t *testing.T) {
 		{Key: "DCAI-1", Type: "Epic", Status: "Triage"},
 	}}
 	app := newTestAppWith(t, fixture, time.Now(), web.WithFakeJira(agendaFilterJira{fixture}))
-	address := app.URL + "/prio?preset=10519"
+	address := app.URL + "/prio?preset=42"
 	if page := get(t, address); !strings.Contains(page, "data-prio-preset-loading") {
 		t.Fatal("a cold standalone page must still render progressively")
 	}
@@ -34,13 +34,14 @@ func TestPrioOverviewFilterSwapReturnsReadyJiraResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("HX-Boosted", "true")
+	req.Header.Set("X-Prio-Agenda-Revision", "2")
 	req.Header.Set("HX-Trigger", "prio-filter-controls")
 	resp := response(t)(app.Client().Do(req))
 	page := readResponse(t, resp, http.StatusOK)
 	if !strings.Contains(page, `data-key="DCAI-1"`) || strings.Contains(page, "data-prio-preset-loading") {
 		t.Fatal("a filter swap must already contain its Jira results")
 	}
-	if got := resp.Header.Get("HX-Push-Url"); got != "/prio?preset=10519&step=overview" {
+	if got := resp.Header.Get("HX-Push-Url"); got != "/prio?preset=42&step=overview" {
 		t.Errorf("push URL = %q", got)
 	}
 }
@@ -54,7 +55,7 @@ func TestPrioOverviewRunsTheSelectedPresetAndRendersLocalRows(t *testing.T) {
 		case "/rest/api/3/filter/search":
 			discoveries.Add(1)
 			writePlanningFilters(w,
-				jira.PlanningPreset{ID: "10519", Name: "Planning Since Meeting", JQL: saved, Description: `stichtag: "2026-11-20 00:00"`},
+				jira.PlanningPreset{ID: "42", Name: "Planning Since Meeting", JQL: saved, Description: `stichtag: "2026-11-20 00:00"`},
 				jira.PlanningPreset{ID: "22", Name: "Planning Epics", JQL: unmarked},
 				jira.PlanningPreset{ID: "23", Name: "Planning Broken", JQL: `project = DCAI AND status CHANGED BEFORE "2026-11-20 00:00"`, Description: `stichtag: "2026-11-20 00:00"`})
 		case "/rest/api/3/search/jql":
@@ -103,8 +104,8 @@ func TestPrioOverviewRunsTheSelectedPresetAndRendersLocalRows(t *testing.T) {
 	app := newTestAppWith(t, fixture, now, web.WithClock(func() time.Time { return time.Unix(0, clock.Load()) }), web.WithLocation(location), web.WithJiraBaseURL(jiraServer.URL), web.WithFakeJira(client))
 
 	const first = "cutoff=2026-03-08T07:59&ticket=DCAI-2&level=all"
-	page := get(t, app.URL+"/prio/preset-results?"+first+"&preset=10519")
-	assertOrder(t, page, "Keiner", `<option value="10519"`, "Planning Epics")
+	page := get(t, app.URL+"/prio/preset-results?"+first+"&preset=42")
+	assertOrder(t, page, "Keiner", `<option value="42"`, "Planning Epics")
 	assertOrder(t, page, `data-key="DCAI-2"`, `data-key="DCAI-1"`, `data-key="DCAI-4"`)
 	for _, want := range []string{"DCAI-404", "/browse/DCAI-404", "synchronisiert", "Jira-Reihenfolge", "prio-drawer"} {
 		if !strings.Contains(page, want) {
@@ -120,11 +121,11 @@ func TestPrioOverviewRunsTheSelectedPresetAndRendersLocalRows(t *testing.T) {
 	if strings.Contains(page, `data-key="DCAI-3"`) || strings.Contains(page, "OTHER-12") {
 		t.Fatal("overview included a ticket outside the DCAI preset results")
 	}
-	page = get(t, app.URL+"/prio/results?"+first+"&preset=10519&sort=priority")
+	page = get(t, app.URL+"/prio/results?"+first+"&preset=42&sort=priority")
 	assertOrder(t, page, `data-key="DCAI-1"`, `data-key="DCAI-4"`, `data-key="DCAI-2"`)
-	page = get(t, app.URL+"/prio/results?"+first+"&preset=10519&sort=recent")
+	page = get(t, app.URL+"/prio/results?"+first+"&preset=42&sort=recent")
 	assertOrder(t, page, `data-key="DCAI-4"`, `data-key="DCAI-2"`, `data-key="DCAI-1"`)
-	get(t, app.URL+"/prio/preset-results?cutoff=2026-03-08T08:00&preset=10519")
+	get(t, app.URL+"/prio/preset-results?cutoff=2026-03-08T08:00&preset=42")
 	get(t, app.URL+"/prio/preset-results?"+first+"&preset=22")
 	get(t, app.URL+"/prio/preset-results?cutoff=2026-03-09T08:00&preset=22")
 	page = get(t, app.URL+"/prio/preset-results?"+first+"&preset=23")
@@ -185,7 +186,7 @@ func TestPrioPresetCachesAreIsolatedByJiraAccount(t *testing.T) {
 		case "/ex/jira/cloud-1/rest/api/3/filter/search":
 			discoveries.Add(1)
 			writePlanningFilters(w,
-				jira.PlanningPreset{ID: "10519", Name: "Planning Since Meeting", JQL: "project = DCAI"},
+				jira.PlanningPreset{ID: "42", Name: "Planning Since Meeting", JQL: "project = DCAI"},
 				jira.PlanningPreset{ID: "99", Name: "Planning " + person})
 		case "/ex/jira/cloud-1/rest/api/3/search/jql":
 			searches.Add(1)
@@ -203,7 +204,7 @@ func TestPrioPresetCachesAreIsolatedByJiraAccount(t *testing.T) {
 		session    *http.Cookie
 		own, other string
 	}{{first, "1", "2"}, {second, "2", "1"}, {first, "1", "2"}, {second, "2", "1"}} {
-		req, err := http.NewRequest(http.MethodGet, app.URL+"/prio/preset-results?preset=10519", nil)
+		req, err := http.NewRequest(http.MethodGet, app.URL+"/prio/preset-results?preset=42", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

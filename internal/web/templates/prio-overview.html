@@ -1,17 +1,9 @@
 {{define "prio-overview"}}
 <details class="group app-surface mt-3 p-3" data-testid="prio-filters">
-  <summary class="cursor-pointer text-sm font-semibold">Filter<span class="group-open:hidden"> · <span data-prio-filter-summary>{{.FilterSummary}}</span></span></summary>
+  <summary class="cursor-pointer text-sm font-semibold">Ansicht der Übersicht<span class="group-open:hidden"> · <span data-prio-filter-summary>{{.FilterSummary}}</span></span></summary>
   <form id="prio-filter-controls" action="/prio" method="get" class="mt-3 grid min-w-0 gap-3 sm:grid-cols-2" data-prio-filters>
     {{range .FilterParams}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
     {{template "prio-preset-picker" .}}
-    <fieldset class="min-w-0">
-      <legend class="label mb-1">Ebene</legend>
-      <div class="prio-level">
-        {{template "prio-level-option" (dict "Value" "epic" "Label" "Nur Epics" "Selected" .Filters.Level.Value)}}
-        {{template "prio-level-option" (dict "Value" "unparented" "Label" "Ohne Parent" "Selected" .Filters.Level.Value)}}
-        {{template "prio-level-option" (dict "Value" "all" "Label" "Alle" "Selected" .Filters.Level.Value)}}
-      </div>
-    </fieldset>
     <label class="inline-flex items-center gap-2 text-sm font-medium" for="prio-since-cutoff">
       <input type="checkbox" id="prio-since-cutoff" name="period" value="since" class="checkbox" data-prio-filter{{if .Filters.SinceCutoff}} checked{{end}}>
       Nur seit Stichtag
@@ -114,7 +106,7 @@
 {{end}}
 
 {{define "prio-level-option"}}
-<label>
+<label for="prio-level-{{.Value}}">
   <input type="radio" name="level" class="sr-only" id="prio-level-{{.Value}}" value="{{.Value}}" data-prio-filter{{if eq .Value .Selected}} checked{{end}}>
   <span>{{.Label}}</span>
 </label>

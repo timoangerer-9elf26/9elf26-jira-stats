@@ -69,6 +69,7 @@ jobs:
           make review-up
           trap 'make review-down' EXIT
           node e2e/prio-filter.mjs
+          go test -tags browser -count=1 ./internal/web/ -run "^TestPrioFilterResultsInBrowser$"
 
   # Cut a release on every merge to main (docs/adr/0006). Gated behind
   # build-and-test via `needs`, so a red build never releases, and behind the
