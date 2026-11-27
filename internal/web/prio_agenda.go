@@ -37,7 +37,7 @@ type prioAgendaView struct {
 	SortOptions                            []prioAgendaOption
 	Filters                                prioAgendaFilters
 	FilterParams                           []filterParam
-	FilterSummary, FilterHref, ResetHref   string
+	FilterSummary, FilterHref              string
 	CloseHref, ShareCutoffHref             string
 	InvalidCutoff                          bool
 	Current                                prioAgendaStep
@@ -232,11 +232,6 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	overviewParams := prioAgendaParams(q)
 	overviewParams.Del("ticket")
 	view.FilterHref = prioHref(overviewParams, "step", prioOverview) + "#prio-filter-controls"
-	resetParams := prioAgendaParams(q)
-	for _, name := range prioAgendaFilterNames {
-		resetParams.Del(name)
-	}
-	view.ResetHref = prioHref(resetParams, "step", prioOverview) + "#prio-filter-controls"
 	view.BacklogSortHref = prioHref(q, "backlog-sort", "age")
 	if view.OldestFirst {
 		view.BacklogSortHref = prioHref(q, "backlog-sort", "")
@@ -275,7 +270,7 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	return view, nil
 }
 
-var prioAgendaFilterNames = []string{"period", "level", "tech", "preset"}
+var prioAgendaFilterNames = []string{"period", "level", "preset"}
 var prioAgendaParamNames = append([]string{"step", "cutoff", "ticket", "sort", "backlog-sort", "page"}, prioAgendaFilterNames...)
 
 func prioAgendaParams(q url.Values) url.Values {
@@ -285,11 +280,7 @@ func prioAgendaParams(q url.Values) url.Values {
 			params.Set(name, value)
 		}
 	}
-	// Old agenda URLs used tech/parent and the original table used these
-	// toggle names. The short parameters take precedence when both are present.
-	if !params.Has("tech") && q.Has(nonTechnicalParam) && q.Get(nonTechnicalParam) != nonTechnicalOff {
-		params.Set("tech", "non-technical")
-	}
+	// Keep resolving historical parent filters when an agenda URL has no level.
 	if !params.Has("level") {
 		switch {
 		case q.Get("parent-filter") == "1", q.Get("parent") == "1",

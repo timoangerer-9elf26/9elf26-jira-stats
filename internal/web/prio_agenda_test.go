@@ -275,13 +275,13 @@ func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
 		{"default Done", "step=done", []string{"DCAI-4"}},
 		{"default New", "step=new", []string{"DCAI-1", "DCAI-6"}},
 		{"default Backlog", "step=backlog", []string{"DCAI-1", "DCAI-2", "DCAI-6"}},
-		{"Jira and since", "step=backlog&preset=10519&period=since&tech=technical&level=unparented", []string{"DCAI-1", "DCAI-3"}},
-		{"Jira and all dates", "step=backlog&preset=10519&period=all&tech=technical&level=unparented", []string{"DCAI-1", "DCAI-2", "DCAI-3"}},
+		{"Jira and since", "step=backlog&preset=10519&period=since&level=unparented", []string{"DCAI-1", "DCAI-3", "DCAI-9"}},
+		{"Jira and all dates", "step=backlog&preset=10519&period=all&level=unparented", []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-9"}},
 		{"Fertig keeps its cutoff and transition", "step=done&preset=10519&period=all&level=all", []string{"DCAI-4", "DCAI-5"}},
 		{"Neu keeps creation cutoff", "step=new&preset=10519&period=all&level=all", []string{"DCAI-1", "DCAI-3", "DCAI-8", "DCAI-9"}},
-		{"Technical excluded", "step=new&preset=10519&tech=non-technical&level=all", []string{"DCAI-9"}},
+		{"Retired Technical parameters are ignored", "step=new&preset=10519&tech=non-technical&non-technical=1&level=all", []string{"DCAI-1", "DCAI-3", "DCAI-8", "DCAI-9"}},
 		{"old parent parameter", "step=new&preset=10519&parent=1", []string{"DCAI-1", "DCAI-3", "DCAI-9"}},
-		{"Epic check is project-wide", "step=epic-check&preset=10519&period=since&tech=non-technical", []string{"DCAI-6"}},
+		{"Epic check is project-wide", "step=epic-check&preset=10519&period=since", []string{"DCAI-6"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			page := get(t, base+"&"+tc.query)
@@ -301,16 +301,25 @@ func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
 
 	page := get(t, base+"&step=backlog&preset=10519&period=since&tech=technical&level=unparented&ticket=DCAI-2")
 	for _, want := range []string{
-		`data-ticket="DCAI-1"`, "Zeitraum: Seit Stichtag · Ebene: Ohne Parent · Technical: nur Technical",
-		`level=unparented&amp;period=since&amp;preset=10519&amp;step=overview&amp;tech=technical#prio-filter-controls`,
-		`level=unparented&amp;period=since&amp;preset=10519&amp;step=backlog&amp;tech=technical&amp;ticket=DCAI-3" data-prio-next`,
+		`data-ticket="DCAI-1"`, "Jira-Filter: Seit letztem Prio-Meeting · Ebene: Ohne Parent · Nur seit Stichtag",
+		`level=unparented&amp;period=since&amp;preset=10519&amp;step=overview#prio-filter-controls`,
+		`level=unparented&amp;period=since&amp;preset=10519&amp;step=backlog&amp;ticket=DCAI-3" data-prio-next`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("filtered agenda missing %q", want)
 		}
 	}
-	page = get(t, base+"&preset=10519")
+	if strings.Contains(page, "tech=technical") || strings.Contains(page, `name="tech"`) {
+		t.Error("retired Technical filter should not propagate")
+	}
+	page = get(t, base+"&preset=10519&period=since&tech=technical")
 	if !strings.Contains(page, `value="10519" data-description="Freigegebene Jira-Auswahl" selected`) {
 		t.Error("explicit legacy Jira preset should remain selected and show its description")
+	}
+	if !strings.Contains(page, `name="period" value="since" class="checkbox" data-prio-filter checked`) {
+		t.Error("the cutoff checkbox should reflect the URL")
+	}
+	if strings.Contains(page, `id="prio-technical"`) || strings.Contains(page, "Filter anwenden") {
+		t.Error("the overview should render only the three instant filters")
 	}
 }

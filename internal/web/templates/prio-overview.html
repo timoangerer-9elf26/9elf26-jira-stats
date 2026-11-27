@@ -1,15 +1,9 @@
 {{define "prio-overview"}}
-<details class="app-surface mt-3 p-3" data-testid="prio-filters">
-  <summary class="cursor-pointer text-sm font-semibold">Filter · <span data-prio-filter-summary>{{.FilterSummary}}</span></summary>
+<details class="group app-surface mt-3 p-3" data-testid="prio-filters">
+  <summary class="cursor-pointer text-sm font-semibold">Filter<span class="group-open:hidden"> · <span data-prio-filter-summary>{{.FilterSummary}}</span></span></summary>
   <form id="prio-filter-controls" action="/prio" method="get" class="mt-3 grid min-w-0 gap-3 sm:grid-cols-2" data-prio-filters>
     {{range .FilterParams}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
-    <div class="grid gap-1">
-      <label for="prio-period" class="label">Zeitraum</label>
-      <select id="prio-period" name="period" class="select w-full" data-prio-filter>
-        <option value="all"{{if eq .Filters.Period.Value "all"}} selected{{end}}>Alle</option>
-        <option value="since"{{if eq .Filters.Period.Value "since"}} selected{{end}}>Seit Stichtag</option>
-      </select>
-    </div>
+    {{template "prio-preset-picker" .}}
     <fieldset class="min-w-0">
       <legend class="label mb-1">Ebene</legend>
       <div class="prio-level">
@@ -18,20 +12,12 @@
         {{template "prio-level-option" (dict "Value" "all" "Label" "Alle" "Selected" .Filters.Level.Value)}}
       </div>
     </fieldset>
-    <div class="grid gap-1">
-      <label for="prio-technical" class="label">Technical</label>
-      <select id="prio-technical" name="tech" class="select w-full" data-prio-filter>
-        <option value="all"{{if eq .Filters.Technical.Value "all"}} selected{{end}}>egal</option>
-        <option value="non-technical"{{if eq .Filters.Technical.Value "non-technical"}} selected{{end}}>ausblenden</option>
-        <option value="technical"{{if eq .Filters.Technical.Value "technical"}} selected{{end}}>nur Technical</option>
-      </select>
-    </div>
-    {{template "prio-preset-picker" .}}
-    <div class="flex flex-wrap items-center gap-2 sm:col-span-2">
-      <button type="submit" class="btn" data-variant="outline">Filter anwenden</button>
-      <a class="btn" data-variant="ghost" href="{{.ResetHref}}" data-prio-filter-reset>Filter zurücksetzen</a>
-      <span class="text-sm text-muted-foreground" role="status" data-prio-filter-status></span>
-    </div>
+    <label class="inline-flex items-center gap-2 text-sm font-medium" for="prio-since-cutoff">
+      <input type="checkbox" id="prio-since-cutoff" name="period" value="since" class="checkbox" data-prio-filter{{if .Filters.SinceCutoff}} checked{{end}}>
+      Nur seit Stichtag
+    </label>
+    <span class="min-h-5 text-sm text-muted-foreground" role="status" data-prio-filter-status></span>
+    <noscript><button type="submit" class="btn" data-variant="outline">Filter übernehmen</button></noscript>
   </form>
 </details>
 {{template "prio-preset-error" .}}

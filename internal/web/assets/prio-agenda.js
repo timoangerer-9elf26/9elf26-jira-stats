@@ -147,7 +147,7 @@
       if (container === view) input.dataset.filterparam = '';
       container.prepend(input);
     }
-    for (const link of view.querySelectorAll('[data-prio-page], [data-prio-share-cutoff], [data-prio-filter-reset], [data-prio-clear-preset]')) {
+    for (const link of view.querySelectorAll('[data-prio-page], [data-prio-share-cutoff], [data-prio-clear-preset]')) {
       link.href = withTicket(link.href, ticket);
     }
     for (const option of view.querySelectorAll('[data-prio-sort] option')) {
@@ -185,9 +185,9 @@
       nextFocus = '[data-prio-next]';
     } else if (target.closest('[data-prio-prev]')) {
       nextFocus = '[data-prio-prev]';
-    } else if (target.closest('[data-prio-edit-filters], [data-prio-filter-reset]')) {
+    } else if (target.closest('[data-prio-edit-filters]')) {
       filtersOpen = true;
-      nextFocus = '#prio-period';
+      nextFocus = '#prio-preset';
     } else if (target.closest('[data-prio-step]')) {
       nextFocus = '[aria-current="step"]';
     } else if (target.closest('[data-prio-page]')) {
@@ -213,12 +213,11 @@
   }, true);
 
   function updateFilterSummary(form) {
-    const {period, tech, level, preset} = form.elements;
+    const {period, preset} = form.elements;
     const levelLabel = form.querySelector('[name="level"]:checked').nextElementSibling.textContent;
     const selectedPreset = preset.selectedOptions[0];
-    const parts = ['Zeitraum: ' + period.selectedOptions[0].text, 'Ebene: ' + levelLabel];
-    if (tech.value !== 'all') parts.push('Technical: ' + tech.selectedOptions[0].text);
-    if (preset.value !== 'all') parts.push('Jira: ' + selectedPreset.text);
+    const parts = ['Jira-Filter: ' + selectedPreset.text, 'Ebene: ' + levelLabel];
+    if (period.checked) parts.push('Nur seit Stichtag');
     form.closest('details').querySelector('[data-prio-filter-summary]').textContent = parts.join(' · ');
     form.querySelector('[data-prio-preset-description]').textContent = selectedPreset.dataset.description || '';
   }
@@ -324,14 +323,17 @@
         focused?.id ? `#${CSS.escape(focused.id)}` : '';
     }
   });
+  document.addEventListener('htmx:afterSwap', event => {
+    const {target} = event.detail;
+    // Restore the disclosure and scroll before the new agenda can paint.
+    if (target === panel || target.matches('[data-prio-agenda]')) restoreView();
+  });
   document.addEventListener('htmx:afterSettle', event => {
     const view = agenda();
     const {target} = event.detail;
     if (!view || !target) return;
     if (target.id === 'prio-drawer-slot' && view.contains(target)) {
       syncDrawerSelection(view);
-      restoreView();
-    } else if (target === panel || target.matches('[data-prio-agenda]')) {
       restoreView();
     } else if (target.matches('[data-prio-controls]') && view.dataset.ticket === target.dataset.prioControls) {
       restoreFocus(view);

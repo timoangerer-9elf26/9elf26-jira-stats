@@ -125,56 +125,41 @@ be changed on.
 
 ## Prio filters
 
-A **status select** plus **two two-state toggles** on the [Prio view](#prio-view),
-reusing the [Board's](#board-filters) URL-encoded, fragment-swapping filter
-scaffolding. Each control is ANDed with the others. Together they open a bare
-`/prio` on the narrowed, prioritisable slice — **planned, non-technical,
-top-of-tree work** — rather than the raw project, and every control encodes only
-its *non-default* state, so a bare `/prio` carries no params at all.
+The **Übersicht** combines three URL-encoded controls. Each change applies
+immediately and the results stay visible while the filter request runs.
 
-The controls sit against the **right edge** of the filter bar; the card itself
-stays full-width, keeping its alignment with the page header and the table.
-They read left-to-right in registry order:
+- **Jira-Filter** (`preset=<Jira filter ID>`) defaults to **Keiner**, which
+  uses the local Jira projection. An optional shared **Planning** filter
+  restricts the results to its Jira search, and the picker shows its description.
+- **Ebene** (`level=unparented|all`) defaults to **Nur Epics**. **Ohne Parent**
+  includes all Epics and tickets without a parent. **Alle** includes every level.
+- **Nur seit Stichtag** (`period=since`) is off by default. When checked it
+  keeps tickets created, resolved, or changed in status or priority after the
+  selected cutoff. This checkbox is independent of the Jira filter's own JQL.
 
-- **Status** (`status=doing|done|all`) — a native `<select>`, the bar's first
-  control and its only non-pill one. It picks **one** of four categories, so the
-  table is always about exactly one phase of the workflow (see the category map
-  below). **Planned** is the default and is *never* encoded — a bare `/prio`
-  means Planned, and so does an unrecognised value (`?status=nonsense`, or the
-  retired `not-done` / `not-started` params an old bookmark carries, which are
-  now inert). Unlike the pills it carries its value in the control itself, so
-  changing it round-trips the *other* filters via `hx-include` and its own value
-  rides along as the requesting element.
-- **Non-Technical** (`non-technical=0` turns it off) — default **ON**. On hides
-  tickets carrying the exact Jira label **`Technical`**, leaving only
-  non-technical work; off shows every ticket. (There is no positive
-  `non-technical` label — "non-technical" is simply the absence of `Technical`.)
-- **No parent** (`no-parent=0` turns it off) — default **ON**. On narrows to
-  the top of the issue tree: tickets whose **parent is empty**, which today
-  means every Epic plus the unparented Tasks, Bugs and Stories. The rule is
-  literally "has no parent", not "is an Epic or has no parent" — the two select
-  the same rows today (no DCAI Epic has a parent), but an Epic filed under an
-  Initiative would genuinely stop being top-of-tree and drops out. Reads
-  `issue.parent_key`, synced since migration `00008` and so needing no resync.
-  The table shows no parent column, so it does not surface *why* a row
-  qualified; a parent/epic pill column is a separate feature. It is on by
-  default because parented tickets are already prioritised by whatever they
-  hang under, so the default view is the work nothing else is ordering.
+**Fertig**, **Neu**, and **Backlog** carry these choices forward. Fertig and Neu
+also enforce their workflow cutoff. **Epic-Prüfung** always considers the whole
+project. Stored agenda links with `period=since` or an old parent parameter
+still work. Agenda links ignore retired Technical parameters. Technical labels
+on tickets still render.
+
+The separate historical Prio table remains available for its existing status
+and toggle bookmarks. Those controls apply only to that table.
 
 ### The Prio status categories
 
 | Category | Statuses |
 | --- | --- |
-| **Planned** (default) | Triage, Refinement, Ready To Do |
+| **Planned** | Triage, Refinement, Ready To Do |
 | **Doing** | In Progress, Review / Testing |
 | **Done** | DONE (This Sprint), Ready for Release, Released / Deployed |
-| **All** | all nine statuses, **Canceled** included |
+| **Other** | Canceled and ungrouped statuses |
 
 Membership is an **explicit status set in our own code**, not Jira's
 `status_category` — as [Ticket status buckets](#ticket-status-buckets) records,
 live Jira files Canceled under `Done` and Triage under `To Do`, so a
-category-derived map would be wrong. **Canceled belongs to no category** and
-surfaces only under All. **Ready for Release is a done state** despite the name.
+category-derived map would be wrong. **Ready for Release is a done state**
+despite the name.
 
 This is a **second, Prio-local partition, deliberately different from the
 project-wide [ticket status buckets](#ticket-status-buckets)** (Triage / Open
@@ -184,17 +169,10 @@ prioritisation surface an untriaged ticket is exactly the unprioritised work you
 want to see, whereas the sprint rollups rightly treat Triage as pre-sprint and
 exclude it from every count.
 
-The select replaced two overlapping toggles, **Not done** and **Not started**
-(`docs/adr/0011`, superseding that part of `docs/adr/0009`): Not started was a
-strict subset of Not done, so no combination of the two could express "only work
-in flight" or "only finished work". A single-select over categories makes each
-phase of the workflow reachable in one move.
-
-So the whole project is `?status=all&non-technical=0&no-parent=0`.
-
-Rows are sorted by **priority**, Highest→Lowest, ties broken by issue key. The
-DCAI project uses the standard five-level priority scheme (Highest, High,
-Medium, Low, Lowest); every issue has a priority set.
+The overview defaults to priority order, Highest to Lowest, breaking ties by
+issue key. It can also sort by recent status change or by Jira order when
+a Jira filter is selected. The DCAI project uses five priority levels
+(Highest, High, Medium, Low, Lowest).
 
 ## Daily view
 
