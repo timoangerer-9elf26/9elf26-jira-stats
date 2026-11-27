@@ -14,7 +14,7 @@ and the cost research in `docs/research/aws-hosting-internal-tooling.md`.
 | App | `jira-stats.service` (systemd), binary `/opt/jira-stats/jira-stats`, binds `127.0.0.1:8080` |
 | Reverse proxy | stock Caddy (`caddy.service`), `/etc/caddy/Caddyfile`, TLS via Let's Encrypt (HTTP-01, auto-renew) |
 | DNS | `jira-stats.in.9elf26.ai` A → `63.185.210.121` in the delegated zone `in.9elf26.ai` (`Z087691143G63LUY1OIN`) |
-| Secrets | The instance role reads SSM SecureString values at startup. The service needs `JIRA_API_TOKEN`, `JIRA_OAUTH_CLIENT_SECRET` and `JIRA_OAUTH_TOKEN_KEY` for OAuth-enabled releases. |
+| Secrets | The instance role reads SSM SecureString values at startup. Runtime copies include `JIRA_API_TOKEN`, `JIRA_OAUTH_CLIENT_ID`, `JIRA_OAUTH_CLIENT_SECRET`, and `JIRA_OAUTH_TOKEN_KEY`. |
 | Non-secret config | `/etc/jira-stats/config.env` |
 
 Operator access is via **SSM Session Manager** (no SSH / no public port 22):
@@ -36,12 +36,14 @@ and passes the public host to the app. The browser receives Secure, HttpOnly,
 host-only cookies and uses a top-level callback navigation.
 
 Provision all six [OAuth settings](../../README.md#atlassian-sign-in) in the
-systemd service environment before deploying the OAuth build. Set the
-client ID, Cloud ID, callback and comma-separated allowlist in deployment
-configuration. Set the client secret and token key through the instance’s
-secret loader, with access to the corresponding SecureString values. Preserve
-the encryption key across restarts and keep it separate from the database and
-its backups. The app uses one running process per SQLite database to serialize
+systemd service environment before deploying the OAuth build. Set the Cloud ID,
+callback, and comma-separated allowlist in deployment configuration. The
+`jira-stats Atlassian OAuth (3LO)` item in the 1Password vault `Agent Credentials`
+is the source and backup for the OAuth client ID, client secret, and token
+encryption key. Store identical runtime copies in the production SSM
+SecureStrings read by the instance’s secret loader at startup. Preserve the
+encryption key across restarts and keep it separate from the database and its
+backups. The app uses one running process per SQLite database to serialize
 refreshes by account. The host needs IANA time zone data (`tzdata`) for Jira
 user time zones and `Europe/Berlin`. Keep the SQLite path writable and persistent
 across releases. Avoid logging callback query strings, which carry the code
@@ -51,6 +53,16 @@ Migration `00012` creates the Auth tables on startup. Existing shared-login
 sessions require a new Atlassian sign-in. If OAuth configuration is missing or
 invalid, the live binary exits at startup. The existing Jira service account
 continues to run the background sync and full resync.
+
+To recover an unavailable or compromised client secret, rotate it in the
+Atlassian developer console and update both 1Password and SSM. If the runtime
+encryption key is missing, restore the same key from the named 1Password item.
+If the original key is lost, generate a replacement, update both copies, and
+clear the unreadable grants and their sessions in maintenance with the service
+stopped. Users then sign in again to create grants encrypted with the new key.
+
+For reporting setup, retention, and the proof required before sharing the app,
+follow [Jira privacy reporting](jira-privacy.md).
 
 ## Redeploy a new build (single step)
 

@@ -26,7 +26,8 @@ type Issue struct {
 	CreatedAt time.Time
 	// Creator is the display name of the issue's Jira Creator — the immutable
 	// author, NOT the (mutable) Reporter. "" when Jira reported no creator.
-	Creator string
+	Creator          string
+	CreatorAccountID string
 	// ActiveSprint is the name of the ACTIVE sprint (state=="active") the issue
 	// belongs to, or "" when the issue is in no active sprint (closed/future/none).
 	// This is per-issue MEMBERSHIP only; the sprint's window (activation instant)

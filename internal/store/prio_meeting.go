@@ -38,8 +38,10 @@ func (s *Store) LastPrioMeeting() (PrioMeeting, error) {
 func (s *Store) CompletePrioMeeting(window int64, endedAt time.Time, accountID string) error {
 	_, err := s.db.Exec(`
 		INSERT INTO prio_meeting (ended_at, account_id)
-		SELECT ?, ? WHERE COALESCE((SELECT MAX(id) FROM prio_meeting), 0) = ?`,
-		endedAt.UTC().Format(time.RFC3339Nano), accountID, window)
+		SELECT ?, CASE WHEN EXISTS (SELECT 1 FROM jira_privacy_state WHERE account_hash = ? AND closed = 1)
+		               THEN '' ELSE ? END
+		WHERE COALESCE((SELECT MAX(id) FROM prio_meeting), 0) = ?`,
+		endedAt.UTC().Format(time.RFC3339Nano), privacyHash(accountID), reportableID(accountID), window)
 	if err != nil {
 		return fmt.Errorf("complete Prio meeting: %w", err)
 	}
@@ -57,8 +59,11 @@ type PrioMeetingChange struct {
 func (s *Store) RecordPrioMeetingChange(change PrioMeetingChange) error {
 	_, err := s.db.Exec(`
 		INSERT INTO prio_meeting_change (meeting_window, issue_key, label, account_id, occurred_at)
-		VALUES (COALESCE((SELECT MAX(id) FROM prio_meeting), 0), ?, ?, ?, ?)`,
-		change.IssueKey, change.Label, change.AccountID, change.OccurredAt.UTC().Format(time.RFC3339Nano))
+		VALUES (COALESCE((SELECT MAX(id) FROM prio_meeting), 0), ?, ?,
+		        CASE WHEN EXISTS (SELECT 1 FROM jira_privacy_state WHERE account_hash = ? AND closed = 1)
+		             THEN '' ELSE ? END, ?)`,
+		change.IssueKey, change.Label, privacyHash(change.AccountID), reportableID(change.AccountID),
+		change.OccurredAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
 

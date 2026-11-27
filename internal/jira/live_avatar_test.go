@@ -19,6 +19,7 @@ func TestToIssueParsesAssigneeAvatarURL(t *testing.T) {
         "issuetype": {"name": "Task"},
         "status": {"name": "In Progress", "statusCategory": {"name": "In Progress"}},
         "assignee": {
+          "accountId": "acct-ada",
           "displayName": "Ada Lovelace",
           "avatarUrls": {
             "48x48": "https://avatar.example/ada/48.png",

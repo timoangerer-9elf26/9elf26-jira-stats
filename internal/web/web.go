@@ -201,7 +201,7 @@ type Server struct {
 	version          string
 	auth             *auth.Service
 	fakeJira         jira.Client
-	prioFiltersCache prioCache[string, []jira.PlanningPreset]
+	prioFiltersCache prioCache[[32]byte, []jira.PlanningPreset]
 	prioKeysCache    prioSearchCache
 }
 

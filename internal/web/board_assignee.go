@@ -81,7 +81,7 @@ func (s *Server) handleBoardAssignee(w http.ResponseWriter, r *http.Request) {
 		edit.Error = writeError
 	default:
 		if _, err := s.assigner.SetAssignee(r.Context(), key, accountID); err != nil {
-			edit.Error = assignWriteOutcome(key, accountID, err)
+			edit.Error = assignWriteOutcome(key, err)
 		}
 	}
 	s.renderBoardWith(w, assignFilters(r.PostForm), "board-panel", edit)
@@ -98,12 +98,12 @@ func (s *Server) handleBoardAssignee(w http.ResponseWriter, r *http.Request) {
 // inherits it for free: the response IS the board re-rendered from the
 // projection, so the user sees the board — one sync cycle stale on this one card
 // at worst, never a claim that nothing happened. The next cycle reconciles it.
-func assignWriteOutcome(key, accountID string, err error) string {
+func assignWriteOutcome(key string, err error) string {
 	if errors.Is(err, sync.ErrWriteLanded) {
-		log.Printf("web: board assignee %s=%q landed in Jira but was not reconciled; rendering the projection: %v", key, accountID, err)
+		log.Printf("web: board assignee %s landed in Jira but was not reconciled; rendering the projection", key)
 		return ""
 	}
-	log.Printf("web: board assignee write %s=%q failed: %v", key, accountID, err)
+	log.Printf("web: board assignee write %s failed", key)
 	return writeError
 }
 
