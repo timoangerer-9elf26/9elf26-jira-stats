@@ -108,8 +108,11 @@ button:not(:disabled) {
   }
 }
 
-.prio-table-label {
+.prio-table-label,
+.prio-marker {
   display: inline-block;
+  height: auto;
+  min-height: 1.25rem;
   max-width: 100%;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -192,12 +195,6 @@ button:not(:disabled) {
 .prio-level input:focus-visible + span {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
-}
-
-.prio-marker {
-  max-width: 100%;
-  white-space: normal;
-  overflow-wrap: anywhere;
 }
 
 /* The selected view remains visible while an agenda navigation is in flight. */
