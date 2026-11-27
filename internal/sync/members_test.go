@@ -61,8 +61,8 @@ func TestBackfillRefreshesProjectMembers(t *testing.T) {
 // only ever be correct straight after a full resync.
 func TestIncrementalCycleRefreshesProjectMembers(t *testing.T) {
 	client := &memberClient{members: []jira.ProjectMember{adaMember()}}
-	// A non-empty store forces the incremental path rather than the cold backfill.
-	store := &recordingStore{saved: []jira.Issue{{Key: "DCAI-1"}}}
+	// An existing projection with a watermark takes the incremental path.
+	store := &recordingStore{saved: []jira.Issue{{Key: "DCAI-1"}}, lastSync: time.Now()}
 	s := NewSyncer(client, store, time.Minute)
 
 	if err := s.Cycle(context.Background()); err != nil {
@@ -81,7 +81,7 @@ func TestIncrementalCycleRefreshesProjectMembers(t *testing.T) {
 // which replaces wholesale.
 func TestCycleHandsJirasAnswerStraightToTheStore(t *testing.T) {
 	client := &memberClient{members: []jira.ProjectMember{adaMember(), {AccountID: "acct-alan", DisplayName: "Alan"}}}
-	store := &recordingStore{saved: []jira.Issue{{Key: "DCAI-1"}}}
+	store := &recordingStore{saved: []jira.Issue{{Key: "DCAI-1"}}, lastSync: time.Now()}
 	s := NewSyncer(client, store, time.Minute)
 
 	if err := s.Cycle(context.Background()); err != nil {
@@ -130,7 +130,7 @@ func TestFailedMemberFetchStillSyncsIncrementally(t *testing.T) {
 		updated: []jira.Issue{{Key: "DCAI-2", Type: "Bug", Summary: "Changed"}},
 		err:     errors.New("jira: you do not have permission to browse users"),
 	}
-	store := &recordingStore{saved: []jira.Issue{{Key: "DCAI-1"}}}
+	store := &recordingStore{saved: []jira.Issue{{Key: "DCAI-1"}}, lastSync: time.Now()}
 	s := NewSyncer(client, store, time.Minute)
 
 	if err := s.Cycle(context.Background()); err != nil {
