@@ -133,7 +133,7 @@ func (c *prioSearchCache) invalidate(accountID string) {
 	}
 }
 
-func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, q url.Values) []string {
+func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, _ url.Values) []string {
 	if view.Preset == prioLocalPreset {
 		view.JiraSearchHref = s.jiraSearchURL("project = " + jira.PrioProject)
 	}
@@ -161,11 +161,13 @@ func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, q url
 		s.prioFiltersCache.put(account, filters, s.now())
 	}
 	for _, filter := range filters {
-		if filter.ID != prioDefaultPreset {
-			view.PresetOptions = append(view.PresetOptions, prioAgendaOption{
-				Label: filter.Name, Href: prioHref(q, "preset", filter.ID), Active: filter.ID == view.Preset,
-			})
+		label := filter.Name
+		if filter.ID == prioDefaultPreset {
+			label = "Seit letztem Prio-Meeting"
 		}
+		view.PresetOptions = append(view.PresetOptions, prioAgendaOption{
+			Label: label, Value: filter.ID, Description: filter.Description, Active: filter.ID == view.Preset,
+		})
 	}
 	if view.Preset == prioLocalPreset {
 		return nil

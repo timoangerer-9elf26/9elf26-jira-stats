@@ -76,9 +76,9 @@ func TestPrioOverviewRunsTheSelectedPresetAndRendersLocalRows(t *testing.T) {
 	client := jira.NewBearerClient(jira.Config{BaseURL: jiraServer.URL}, "personal", jiraServer.Client())
 	app := newTestAppWith(t, fixture, now, web.WithClock(func() time.Time { return time.Unix(0, clock.Load()) }), web.WithLocation(location), web.WithJiraBaseURL(jiraServer.URL), web.WithFakeJira(client))
 
-	const first = "cutoff=2026-03-08T07:59&ticket=DCAI-2"
-	page := get(t, app.URL+"/prio?"+first)
-	assertOrder(t, page, "Seit letztem Prio-Meeting", "Alle Tickets", "Planning Epics")
+	const first = "cutoff=2026-03-08T07:59&ticket=DCAI-2&level=all"
+	page := get(t, app.URL+"/prio?"+first+"&preset=10519")
+	assertOrder(t, page, "Keiner", `<option value="10519"`, "Planning Epics")
 	assertOrder(t, page, `data-key="DCAI-2"`, `data-key="DCAI-1"`, `data-key="DCAI-4"`)
 	for _, want := range []string{"DCAI-404", "/browse/DCAI-404", "synchronisiert", "Jira-Reihenfolge", "prio-drawer"} {
 		if !strings.Contains(page, want) {
@@ -94,11 +94,11 @@ func TestPrioOverviewRunsTheSelectedPresetAndRendersLocalRows(t *testing.T) {
 	if strings.Contains(page, `data-key="DCAI-3"`) || strings.Contains(page, "OTHER-12") {
 		t.Fatal("overview included a ticket outside the DCAI preset results")
 	}
-	page = get(t, app.URL+"/prio/results?"+first+"&sort=priority")
+	page = get(t, app.URL+"/prio/results?"+first+"&preset=10519&sort=priority")
 	assertOrder(t, page, `data-key="DCAI-1"`, `data-key="DCAI-4"`, `data-key="DCAI-2"`)
-	page = get(t, app.URL+"/prio/results?"+first+"&sort=recent")
+	page = get(t, app.URL+"/prio/results?"+first+"&preset=10519&sort=recent")
 	assertOrder(t, page, `data-key="DCAI-4"`, `data-key="DCAI-2"`, `data-key="DCAI-1"`)
-	get(t, app.URL+"/prio?cutoff=2026-03-08T08:00")
+	get(t, app.URL+"/prio?cutoff=2026-03-08T08:00&preset=10519")
 	get(t, app.URL+"/prio?"+first+"&preset=22")
 	get(t, app.URL+"/prio?cutoff=2026-03-09T08:00&preset=22")
 	page = get(t, app.URL+"/prio?"+first+"&preset=23")
@@ -177,7 +177,7 @@ func TestPrioPresetCachesAreIsolatedByJiraAccount(t *testing.T) {
 		session    *http.Cookie
 		own, other string
 	}{{first, "1", "2"}, {second, "2", "1"}, {first, "1", "2"}, {second, "2", "1"}} {
-		req, err := http.NewRequest(http.MethodGet, app.URL+"/prio", nil)
+		req, err := http.NewRequest(http.MethodGet, app.URL+"/prio?preset=10519", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

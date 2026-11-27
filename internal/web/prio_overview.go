@@ -1,7 +1,6 @@
 package web
 
 import (
-	"context"
 	"net/url"
 	"slices"
 
@@ -14,30 +13,11 @@ type prioGroup struct {
 }
 
 type prioAgendaOption struct {
-	Label, Href string
-	Active      bool
+	Label, Href, Value, Description string
+	Active                          bool
 }
 
-func keepPrioOverviewRow(q url.Values, issue store.PrioIssue) bool {
-	if q.Get("parent") == "1" && issue.ParentKey != "" {
-		return false
-	}
-	technical := slices.Contains(issue.Labels, technicalLabel)
-	switch q.Get("tech") {
-	case "technical":
-		if !technical {
-			return false
-		}
-	case "non-technical":
-		if technical {
-			return false
-		}
-	}
-	return true
-}
-
-func (s *Server) populatePrioOverview(ctx context.Context, view *prioAgendaView, q url.Values, rows []prioRow, issues []store.PrioIssue) error {
-	keys := s.prioPresetKeys(ctx, view, q)
+func (s *Server) populatePrioOverview(view *prioAgendaView, q url.Values, rows []prioRow, issues []store.PrioIssue, keys []string) error {
 	if view.Preset != prioLocalPreset {
 		rows = s.orderPrioPresetRows(view, rows, keys, issues)
 	}
@@ -79,17 +59,6 @@ func (s *Server) populatePrioOverview(ctx context.Context, view *prioAgendaView,
 	}
 	if view.JiraOrder {
 		view.SortOptions = append([]prioAgendaOption{{Label: "Jira-Reihenfolge", Href: prioHref(q, "sort", "jira"), Active: sort != "priority" && sort != "recent"}}, view.SortOptions...)
-	}
-	tech := q.Get("tech")
-	view.TechnicalOptions = []prioAgendaOption{
-		{Label: "Nicht technisch", Href: prioHref(q, "tech", "non-technical"), Active: tech == "non-technical"},
-		{Label: "Technisch", Href: prioHref(q, "tech", "technical"), Active: tech == "technical"},
-		{Label: "Alle", Href: prioHref(q, "tech", ""), Active: tech != "technical" && tech != "non-technical"},
-	}
-	view.ParentHref = prioHref(q, "parent", "1")
-	view.ParentOnly = q.Get("parent") == "1"
-	if view.ParentOnly {
-		view.ParentHref = prioHref(q, "parent", "")
 	}
 	view.CloseHref = prioHref(q, "ticket", "")
 	return nil

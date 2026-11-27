@@ -1,28 +1,51 @@
 {{define "prio-overview"}}
 <details class="app-surface mt-3 p-3" data-testid="prio-filters">
-  <summary class="cursor-pointer text-sm font-semibold">Filter · {{if eq .Preset "10519"}}Seit letztem Prio-Meeting{{else if eq .Preset "all"}}Alle Tickets{{else}}{{range .PresetOptions}}{{if .Active}}{{.Label}}{{end}}{{end}}{{end}}</summary>
-  <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-  <div class="flex flex-wrap gap-1">
-    <a class="btn" data-variant="{{if eq .Preset "10519"}}secondary{{else}}outline{{end}}" href="{{.RecentHref}}" {{if eq .Preset "10519"}}aria-current="true"{{end}}>Seit letztem Prio-Meeting</a>
-    <a class="btn" data-variant="{{if eq .Preset "all"}}secondary{{else}}outline{{end}}" href="{{.AllHref}}" {{if eq .Preset "all"}}aria-current="true"{{end}}>Alle Tickets</a>
-    {{range .PresetOptions}}
-    <a class="btn" data-variant="{{if .Active}}secondary{{else}}outline{{end}}" href="{{.Href}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>
-    {{end}}
-  </div>
-  <div class="flex flex-wrap items-center gap-1">
-    {{range .TechnicalOptions}}
-    <a class="btn" data-variant="{{if .Active}}secondary{{else}}outline{{end}}" href="{{.Href}}"{{if .Active}} aria-current="true"{{end}}>{{.Label}}</a>
-    {{end}}
-    <a class="btn" data-variant="{{if .ParentOnly}}secondary{{else}}outline{{end}}" href="{{.ParentHref}}"{{if .ParentOnly}} aria-current="true"{{end}}>Nur ohne Parent</a>
-  </div>
-  </div>
+  <summary class="cursor-pointer text-sm font-semibold">Filter · <span data-prio-filter-summary>{{.FilterSummary}}</span></summary>
+  <form id="prio-filter-controls" action="/prio" method="get" class="mt-3 grid min-w-0 gap-3 sm:grid-cols-2" data-prio-filters>
+    {{range .FilterParams}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
+    <div class="grid gap-1">
+      <label for="prio-period" class="label">Zeitraum</label>
+      <select id="prio-period" name="period" class="select w-full" data-prio-filter>
+        <option value="all"{{if eq .Filters.Period.Value "all"}} selected{{end}}>Alle</option>
+        <option value="since"{{if eq .Filters.Period.Value "since"}} selected{{end}}>Seit Stichtag</option>
+      </select>
+    </div>
+    <fieldset class="min-w-0">
+      <legend class="label mb-1">Ebene</legend>
+      <div class="prio-level">
+        {{template "prio-level-option" (dict "Value" "epic" "Label" "Nur Epics" "Selected" .Filters.Level.Value)}}
+        {{template "prio-level-option" (dict "Value" "unparented" "Label" "Ohne Parent" "Selected" .Filters.Level.Value)}}
+        {{template "prio-level-option" (dict "Value" "all" "Label" "Alle" "Selected" .Filters.Level.Value)}}
+      </div>
+    </fieldset>
+    <div class="grid gap-1">
+      <label for="prio-technical" class="label">Technical</label>
+      <select id="prio-technical" name="tech" class="select w-full" data-prio-filter>
+        <option value="all"{{if eq .Filters.Technical.Value "all"}} selected{{end}}>egal</option>
+        <option value="non-technical"{{if eq .Filters.Technical.Value "non-technical"}} selected{{end}}>ausblenden</option>
+        <option value="technical"{{if eq .Filters.Technical.Value "technical"}} selected{{end}}>nur Technical</option>
+      </select>
+    </div>
+    <div class="grid min-w-0 gap-1">
+      <label for="prio-preset" class="label">Jira-Filter</label>
+      <select id="prio-preset" name="preset" class="select w-full min-w-0" data-prio-filter aria-describedby="prio-preset-description">
+        <option value="all" data-description="Tickets aus dem lokalen Jira-Abbild."{{if eq .Preset "all"}} selected{{end}}>Keiner</option>
+        {{range .PresetOptions}}<option value="{{.Value}}" data-description="{{.Description}}"{{if .Active}} selected{{end}}>{{.Label}}</option>{{end}}
+        {{if and (ne .Preset "all") (not .JiraOrder) .PresetError}}
+        {{/* Preserve an unavailable shared selection when the catalogue does not contain it. */}}
+        {{if not .Filters.Jira.Active}}<option value="{{.Preset}}" selected>{{.Filters.Jira.Label}}</option>{{end}}
+        {{end}}
+      </select>
+      <p id="prio-preset-description" class="break-words text-xs text-muted-foreground" data-prio-preset-description>{{.Filters.Jira.Description}}</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2 sm:col-span-2">
+      <button type="submit" class="btn" data-variant="outline">Filter anwenden</button>
+      <a class="btn" data-variant="ghost" href="{{.ResetHref}}" data-prio-filter-reset>Filter zurücksetzen</a>
+      <span class="text-sm text-muted-foreground" role="status" data-prio-filter-status></span>
+    </div>
+  </form>
 </details>
-{{if .PresetError}}
-<div class="app-surface mt-3 flex flex-wrap items-center gap-3 p-3" role="status">
-  <p class="text-sm">{{.PresetError}}{{if eq .Preset "all"}} Die Ansicht zeigt den letzten lokalen Stand.{{end}}</p>
-  {{if ne .Preset "all"}}<a class="btn" data-variant="outline" href="{{.AllHref}}">Alle Tickets · lokaler Stand</a>{{end}}
-</div>
-{{end}}
+{{template "prio-preset-error" .}}
 <div class="my-3 flex flex-wrap items-center justify-between gap-2">
   <p class="text-sm text-muted-foreground">{{.OverviewCount}} von {{.IssueCount}} Tickets · DCAI{{if .Missing}} · {{len .Missing}} ausstehend{{end}}</p>
   <div class="flex flex-wrap items-center gap-2">
@@ -92,5 +115,21 @@
   </div>
   {{template "prio-ticket-panel" .}}
 </aside>
+{{end}}
+{{end}}
+
+{{define "prio-level-option"}}
+<label>
+  <input type="radio" name="level" class="sr-only" id="prio-level-{{.Value}}" value="{{.Value}}" data-prio-filter{{if eq .Value .Selected}} checked{{end}}>
+  <span>{{.Label}}</span>
+</label>
+{{end}}
+
+{{define "prio-preset-error"}}
+{{if .PresetError}}
+<div class="app-surface mt-3 flex flex-wrap items-center gap-3 p-3" role="status">
+  <p class="text-sm">{{.PresetError}}{{if eq .Preset "all"}} Die Ansicht zeigt den letzten lokalen Stand.{{end}}</p>
+  {{if ne .Preset "all"}}<a class="btn" data-variant="outline" href="{{.AllHref}}">Jira-Filter entfernen</a>{{end}}
+</div>
 {{end}}
 {{end}}

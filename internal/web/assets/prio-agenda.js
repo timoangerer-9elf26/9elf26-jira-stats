@@ -18,6 +18,8 @@
   let nextFocus = '';
   let closeTicket = '';
   let editFieldsOpen = false;
+  let filtersOpen = false;
+  let filterRequest;
   let renderedStep = agenda().dataset.step;
 
   function saveState() {
@@ -82,6 +84,11 @@
       if (fields) fields.open = true;
       editFieldsOpen = false;
     }
+    const filterForm = view.querySelector('[data-prio-filters]');
+    if (filterForm && (filtersOpen || location.hash === '#prio-filter-controls')) {
+      filterForm.closest('details').open = true;
+    }
+    filtersOpen = false;
     if (nextFocus) {
       const focus = view.querySelector(nextFocus) || view.querySelector('[aria-current="step"]');
       focus?.focus({preventScroll: true});
@@ -130,6 +137,9 @@
       nextFocus = '[data-prio-next]';
     } else if (target.closest('[data-prio-prev]')) {
       nextFocus = '[data-prio-prev]';
+    } else if (target.closest('[data-prio-edit-filters], [data-prio-filter-reset]')) {
+      filtersOpen = true;
+      nextFocus = '#prio-period';
     } else if (target.closest('[data-prio-step]')) {
       nextFocus = '[aria-current="step"]';
     } else if (target.closest('[data-prio-queue-key]')) {
@@ -152,8 +162,48 @@
     }
   }, true);
 
+  function updateFilterSummary(form) {
+    const {period, tech, level, preset} = form.elements;
+    const levelLabel = form.querySelector('[name="level"]:checked').nextElementSibling.textContent;
+    const selectedPreset = preset.selectedOptions[0];
+    const parts = ['Zeitraum: ' + period.selectedOptions[0].text, 'Ebene: ' + levelLabel];
+    if (tech.value !== 'all') parts.push('Technical: ' + tech.selectedOptions[0].text);
+    if (preset.value !== 'all') parts.push('Jira: ' + selectedPreset.text);
+    form.closest('details').querySelector('[data-prio-filter-summary]').textContent = parts.join(' · ');
+    form.querySelector('[data-prio-preset-description]').textContent = selectedPreset.dataset.description || '';
+  }
+
   panel.addEventListener('change', event => {
-    if (event.target.matches('[data-prio-sort]')) window.location.assign(event.target.value);
+    const control = event.target;
+    if (control.matches('[data-prio-filter]')) {
+      const form = control.form;
+      updateFilterSummary(form);
+      form.requestSubmit();
+    }
+    if (control.matches('[data-prio-sort]')) window.location.assign(control.value);
+  });
+
+  panel.addEventListener('submit', event => {
+    if (!event.target.matches('[data-prio-filters]')) return;
+    // Keep the newest choice when Arrow keys or successive clicks change filters
+    // in flight. Leave the agenda's shared request lock in place for ticket edits.
+    if (filterRequest) filterRequest.abort();
+    const focused = document.activeElement;
+    filtersOpen = true;
+    if (event.target.contains(focused) && focused.id) nextFocus = '#' + CSS.escape(focused.id);
+  }, true);
+
+  document.addEventListener('htmx:beforeRequest', event => {
+    const {elt, xhr} = event.detail;
+    if (!elt.matches('[data-prio-filters]')) return;
+    filterRequest = xhr;
+    const status = elt.querySelector('[data-prio-filter-status]');
+    status.textContent = 'Filter werden angewendet …';
+    xhr.addEventListener('loadend', () => {
+      if (filterRequest !== xhr) return;
+      filterRequest = undefined;
+      status.textContent = xhr.status >= 200 && xhr.status < 400 ? '' : 'Filter konnten nicht angewendet werden.';
+    });
   });
 
   document.addEventListener('keydown', event => {

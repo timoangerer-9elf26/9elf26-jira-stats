@@ -138,7 +138,7 @@ func TestDenseDatasetStressesAllViews(t *testing.T) {
 	})
 
 	t.Run("prio overview exercises all current status groups", func(t *testing.T) {
-		body := get(t, app.URL+"/prio?preset=all")
+		body := get(t, app.URL+"/prio?preset=all&level=all")
 		assertOrder(t, body,
 			`data-prio-group="planned"`, `data-key="DCAI-T1"`,
 			`data-prio-group="doing"`,

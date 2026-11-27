@@ -67,7 +67,7 @@
 {{end}}
 
 {{define "prio-ticket-params"}}
-  {{range .}}<input type="hidden" name="{{if eq .Name "parent"}}parent-filter{{else}}{{.Name}}{{end}}" value="{{.Value}}">{{end}}
+  {{range .}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
 {{end}}
 
 {{define "prio-ticket-feedback"}}
