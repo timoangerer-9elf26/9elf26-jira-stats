@@ -15,8 +15,7 @@
   {{if .CanWrite}}<div id="prio-ticket-feedback" class="empty:hidden" aria-live="polite"></div>{{end}}
 </header>
 <div{{if .Focused}} class="app-scroll lg:max-h-[65vh] lg:overflow-y-auto" data-prio-scroll="ticket"{{end}}>
-  {{if .EpicSuggestion}}{{template "prio-epic-suggestion" .}}{{end}}
-  {{if .CanWrite}}<div class="border-b border-border p-5">{{template "prio-ticket-actions" .}}</div>{{end}}
+  {{template "prio-ticket-controls" .}}
   <section class="space-y-2 border-b border-border p-5 text-sm" aria-label="Ticketdaten">
     <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">
       <dt>Zuweisung</dt><dd>{{if .Detail.Assignee}}{{.Detail.Assignee}}{{else}}Nicht zugewiesen{{end}}</dd>
@@ -66,8 +65,17 @@
 </div>
 {{end}}
 
+{{define "prio-ticket-controls"}}
+<div id="prio-controls-{{.Row.Key}}" data-prio-controls="{{.Row.Key}}"{{if .PreserveControls}} hx-preserve{{end}}{{if .ControlsPending}} hx-get="{{.ControlsHref}}" hx-trigger="load"
+     hx-target="this" hx-swap="outerHTML" hx-sync="this:replace" hx-push-url="false"{{end}}>
+  {{if .EpicSuggestion}}{{template "prio-epic-suggestion" .}}{{end}}
+  {{if .ControlsPending}}<p class="px-5 py-2 text-sm text-muted-foreground" role="status">Jira-Bearbeitungsoptionen werden geladen …</p>
+  {{else if .CanWrite}}<div class="border-b border-border p-5">{{template "prio-ticket-actions" .}}</div>{{end}}
+</div>
+{{end}}
+
 {{define "prio-ticket-params"}}
-  {{range .}}<input type="hidden" name="{{if eq .Name "parent"}}parent-filter{{else}}{{.Name}}{{end}}" value="{{.Value}}">{{end}}
+  {{range .}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}
 {{end}}
 
 {{define "prio-ticket-feedback"}}
@@ -75,8 +83,10 @@
 {{end}}
 
 {{define "prio-ticket-result"}}
+<div id="prio-ticket-result"{{if .Preserve}} hx-preserve{{end}}>
   {{template "prio-ticket-feedback" .}}
   {{if .CreatedHref}}<p class="mt-2 text-sm" role="status"><a class="underline" href="{{.CreatedHref}}">{{.Change}} ↗</a></p>{{else if and .Change (not .Message)}}<p class="mt-2 text-sm" role="status">{{.Change}}</p>{{end}}
+</div>
 {{end}}
 
 {{define "prio-ticket-actions"}}

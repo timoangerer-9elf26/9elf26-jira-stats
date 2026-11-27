@@ -26,6 +26,7 @@ func WithPrioIssueRefresher(refresher prioIssueRefresher) Option {
 
 type prioTicketResult struct {
 	Message, Change, CreatedHref string
+	Preserve                     bool
 }
 
 type prioTicketResultKey struct{}
@@ -57,14 +58,8 @@ func (s *Server) handlePrioTicket(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	action := r.PostForm.Get("action")
 	q := prioAgendaParams(r.PostForm)
-	if action == "parent" {
-		q.Del("parent")
-	}
-	if parentFilter := r.PostForm.Get("parent-filter"); parentFilter != "" {
-		q.Set("parent", parentFilter)
-	}
 	if !q.Has("preset") {
-		q.Set("preset", prioDefaultPreset)
+		q.Set("preset", prioLocalPreset)
 	}
 	key := r.PostForm.Get("key")
 	var result prioTicketResult

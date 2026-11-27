@@ -6,9 +6,9 @@
   <div class="flex flex-wrap gap-2">
     {{range .Transitions}}{{template "prio-ticket-transition" (dict "Transition" . "Panel" $)}}{{end}}
   </div>
-  {{else if $.CanWrite}}
+  {{else if and $.CanWrite (not $.ControlsPending) (not $.TransitionsUnavailable)}}
   <p class="text-muted-foreground">Kein passender Jira-Übergang verfügbar.</p>
-  {{else}}
+  {{else if not $.CanWrite}}
   <p class="text-muted-foreground">Persönliche Jira-Anmeldung erforderlich.</p>
   {{end}}
   <h4 class="font-semibold">Direkte Kinder ({{.ChildCount}})</h4>

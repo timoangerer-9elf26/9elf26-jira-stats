@@ -149,7 +149,8 @@ func TestPrioTicketPreservesFormattedDescriptionWhenEditingTitle(t *testing.T) {
 			t.Errorf("mutation response missing %q", want)
 		}
 	}
-	if strings.Contains(body, `name="description"`) {
+	controls := get(t, app.URL+"/prio/ticket/controls?step=backlog&ticket=DCAI-41")
+	if strings.Contains(controls, `name="description"`) {
 		t.Fatal("formatted ADF description was offered for plain text editing")
 	}
 	detail, found, err := app.Store.IssueDetail("DCAI-41")
@@ -166,7 +167,7 @@ func TestPrioTicketOffersComplexTransitionInJiraAndRefreshesSimpleTransition(t *
 		},
 	}
 	app := newWritablePrioApp(t, client)
-	res, err := http.Get(app.URL + "/prio/results?step=backlog&ticket=DCAI-41")
+	res, err := http.Get(app.URL + "/prio/ticket/controls?step=backlog&ticket=DCAI-41&level=all")
 	body := ticketResponse(t, res, err)
 	for _, want := range []string{"Canceled in Jira", "Pflichtfelder · Resolution", `name="transition" value="21"`} {
 		if !strings.Contains(body, want) {
@@ -252,14 +253,18 @@ func TestPrioTicketMutationRefreshesActiveJiraPreset(t *testing.T) {
 		Key: "DCAI-41", Type: "Task", Summary: "Panel example", Status: "Triage", Priority: "High",
 	}}}}
 	app := newWritablePrioApp(t, client)
-	res, err := http.Get(app.URL + "/prio/results?step=overview&preset=42&ticket=DCAI-41")
+	res, err := http.Get(app.URL + "/prio/preset-results?step=overview&preset=42&ticket=DCAI-41&level=all")
 	if body := ticketResponse(t, res, err); !strings.Contains(body, `data-key="DCAI-41"`) {
 		t.Fatal("preset did not initially include its matching issue")
 	}
-	body := postPrioTicket(t, app, url.Values{"key": {"DCAI-41"}, "step": {"overview"}, "preset": {"42"},
+	body := postPrioTicket(t, app, url.Values{"key": {"DCAI-41"}, "step": {"overview"}, "preset": {"42"}, "level": {"all"},
 		"action": {"priority"}, "priority": {"Medium"}})
-	if strings.Contains(body, `data-key="DCAI-41"`) || !strings.Contains(body, `data-ticket="DCAI-41"`) {
-		t.Fatal("preset membership or focused selection is stale after mutation")
+	if !strings.Contains(body, `data-ticket="DCAI-41"`) || !strings.Contains(body, "Jira-Filter wird geladen") {
+		t.Fatal("mutation response did not keep the selection and defer the refreshed Jira results")
+	}
+	body = get(t, app.URL+"/prio/preset-results?step=overview&preset=42&ticket=DCAI-41&level=all")
+	if strings.Contains(body, `data-key="DCAI-41"`) {
+		t.Fatal("preset membership is stale after mutation")
 	}
 }
 
@@ -272,13 +277,19 @@ func TestPrioTicketEditsParentWithoutReplacingParentFilter(t *testing.T) {
 	form := url.Values{"step": {"overview"}, "preset": {"all"}, "key": {"DCAI-41"},
 		"parent-filter": {"1"}, "action": {"parent"}, "parent": {"DCAI-40"}}
 	body := postPrioTicket(t, app, form)
-	for _, want := range []string{`data-ticket="DCAI-41"`, `name="parent-filter" value="1"`, `value="DCAI-40" selected`, "DCAI-40 · Projected parent", "Parent geändert"} {
+	for _, want := range []string{`data-ticket="DCAI-41"`, `name="level" value="unparented"`, "Parent geändert"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("parent update missing %q", want)
 		}
 	}
 	if strings.Contains(body, `data-key="DCAI-41"`) {
 		t.Fatal("issue with a parent still appears on the parent-only list")
+	}
+	controls := get(t, app.URL+"/prio/ticket/controls?step=overview&level=unparented&ticket=DCAI-41")
+	for _, want := range []string{`value="DCAI-40" selected`, "DCAI-40 · Projected parent"} {
+		if !strings.Contains(controls, want) {
+			t.Errorf("parent controls missing %q", want)
+		}
 	}
 	form.Set("parent", "DCAI-41")
 	body = postPrioTicket(t, app, form)
@@ -307,7 +318,7 @@ func TestPrioTicketHonorsJiraParentChoicesOverProjectedEpics(t *testing.T) {
 		{Key: "DCAI-43", Type: "Epic", Summary: "Unlisted parent"},
 	}}}
 	app := newWritablePrioApp(t, client)
-	page := get(t, app.URL+"/prio?step=overview&preset=all&ticket=DCAI-41")
+	page := get(t, app.URL+"/prio/ticket/controls?step=overview&preset=all&ticket=DCAI-41")
 	_, selectHTML, found := strings.Cut(page, `id="prio-edit-parent"`)
 	selectHTML, _, _ = strings.Cut(selectHTML, "</select>")
 	if !found || !strings.Contains(selectHTML, `value="DCAI-40" selected`) ||

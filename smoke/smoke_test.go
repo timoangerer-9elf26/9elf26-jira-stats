@@ -266,7 +266,7 @@ func TestVersionStampIsServedAndShownInMarker(t *testing.T) {
 func TestStaticAssetsAreEmbedded(t *testing.T) {
 	base := startDashboard(t)
 
-	for _, path := range []string{"/static/output.css", "/static/htmx.min.js", "/static/sortable.min.js", "/static/board-drag.js", "/static/favicon.svg"} {
+	for _, path := range []string{"/static/output.css", "/static/htmx.min.js", "/static/sortable.min.js", "/static/board-drag.js", "/static/velocity.js", "/static/favicon.svg"} {
 		code, body := get(t, base+path)
 		if code != http.StatusOK {
 			t.Fatalf("GET %s: status %d", path, code)

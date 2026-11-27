@@ -104,7 +104,7 @@ func (s *Server) renderPrioWith(w http.ResponseWriter, ctx context.Context, q ur
 		}
 		if name == "prio-panel" || name == "prio-boosted" {
 			name = "prio-agenda"
-		} else {
+		} else if name != "prio-agenda-content" {
 			name = "prio-agenda.html"
 		}
 	}

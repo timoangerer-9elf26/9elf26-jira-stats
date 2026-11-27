@@ -19,6 +19,9 @@ type prioTicketPanel struct {
 	Links                   []prioTicketLink
 	Comments                []prioTicketComment
 	CanWrite                bool
+	ControlsPending         bool
+	PreserveControls        bool
+	TransitionsUnavailable  bool
 	MetadataError           string
 	Forms                   []prioTicketForm
 	Transitions             []prioTicketTransition
@@ -38,8 +41,18 @@ func (s *Server) prioTicketPanel(ctx context.Context, key string, changes []jira
 	row.Markers = prioEvents(detail.PrioIssue, changes, cutoff).markers()
 	panel := &prioTicketPanel{Row: row, Detail: detail, History: prioHistory(changes, cutoff, s.prioLocation)}
 	s.populatePrioTicket(panel)
-	s.populatePrioTicketActions(ctx, panel)
+	_, _, enabled := s.prioTicketClient(ctx)
+	panel.CanWrite = enabled && dcaiIssueKey.MatchString(key)
+	panel.ControlsPending = panel.CanWrite
 	return panel, nil
+}
+
+func (panel *prioTicketPanel) ControlsHref() string {
+	q := url.Values{"ticket": {panel.Row.Key}}
+	for _, param := range panel.Params {
+		q.Set(param.Name, param.Value)
+	}
+	return "/prio/ticket/controls?" + q.Encode()
 }
 
 type prioTicketLink struct {

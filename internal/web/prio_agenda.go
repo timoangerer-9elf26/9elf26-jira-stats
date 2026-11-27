@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/url"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
@@ -33,10 +32,14 @@ type prioAgendaView struct {
 	CanonicalHref                          string
 	MeetingChanges                         []prioMeetingChangeView
 	Groups                                 []prioGroup
+	Page                                   prioOverviewPage
 	IssueCount, OverviewCount              int
-	SortOptions, TechnicalOptions          []prioAgendaOption
-	ParentHref, CloseHref, ShareCutoffHref string
-	ParentOnly, InvalidCutoff              bool
+	SortOptions                            []prioAgendaOption
+	Filters                                prioAgendaFilters
+	FilterParams                           []filterParam
+	FilterSummary, FilterHref, ResetHref   string
+	CloseHref, ShareCutoffHref             string
+	InvalidCutoff                          bool
 	Current                                prioAgendaStep
 	Selected                               *prioTicketPanel
 	SelectedKey                            string
@@ -53,7 +56,7 @@ type prioAgendaView struct {
 	Meeting                                store.PrioMeeting
 	MeetingEnd, MeetingLabel               string
 	CanComplete                            bool
-	RecentHref, AllHref                    string
+	AllHref                                string
 	CanCreateEpic                          bool
 	TicketResult                           prioTicketResult
 }
@@ -63,7 +66,7 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	steps := []prioAgendaStep{
 		{ID: prioOverview, Label: "Übersicht", Total: 1},
 		{ID: prioEpicCheck, Label: "Epic-Prüfung", Heading: "Epic-Prüfung"},
-		{ID: prioDone, Label: "Fertig", Heading: "Fertig seit letztem Meeting (nur Epics)"},
+		{ID: prioDone, Label: "Fertig", Heading: "Fertig seit Stichtag"},
 		{ID: prioNew, Label: "Neu", Heading: "Neu seit Stichtag"},
 		{ID: prioBacklog, Label: "Backlog", Heading: "Backlog priorisieren"},
 	}
@@ -75,33 +78,19 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	}
 	step := steps[index].ID
 
-	cutoff := s.now().In(s.prioLocation).AddDate(0, 0, -7)
-	source := "Vor sieben Tagen"
-	meeting, err := s.rollups.LastPrioMeeting()
+	cutoffView, err := s.prioCutoff(q)
 	if err != nil {
 		return prioAgendaView{}, err
 	}
-	if meeting.ID != 0 {
-		cutoff = meeting.EndedAt
-		source = "Ende des letzten Meetings"
-	}
-	invalidCutoff := false
-	if requested, err := time.Parse(time.RFC3339Nano, q.Get("cutoff")); err == nil {
-		cutoff = requested
-		source = "Gewählter Stichtag"
-		q.Set("cutoff", requested.UTC().Format(time.RFC3339Nano))
-	} else if requested, err := time.ParseInLocation(prioCutoffInput, q.Get("cutoff"), s.prioLocation); err == nil && requested.In(s.prioLocation).Format(prioCutoffInput) == q.Get("cutoff") {
-		cutoff = requested
-		source = "Gewählter Stichtag"
-		q.Set("cutoff", requested.UTC().Format(time.RFC3339Nano))
-	} else {
-		invalidCutoff = q.Has("cutoff")
-		q.Del("cutoff")
+	meeting, cutoff := cutoffView.meeting, cutoffView.at
+	if step != prioOverview {
+		q.Del("page")
 	}
 	q.Set("step", step)
+	filters := prioAgendaFiltersFor(q)
 	preset := q.Get("preset")
 	if preset == "" {
-		preset = prioDefaultPreset
+		preset = prioLocalPreset
 	}
 	q.Set("preset", preset)
 
@@ -109,9 +98,9 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	view := prioAgendaView{
 		Meeting: meeting, CanComplete: identity.AccountID != "",
 		Step: step, Cutoff: cutoff, OldestFirst: q.Get("backlog-sort") == "age",
-		CutoffInput: cutoff.In(s.prioLocation).Format(prioCutoffInput), CutoffSource: source,
+		CutoffInput: cutoff.In(s.prioLocation).Format(prioCutoffInput), CutoffSource: cutoffView.source,
 		CutoffLabel: cutoff.In(s.prioLocation).Format("02.01.2006 15:04 MST"),
-		Overview:    step == prioOverview, Preset: preset, InvalidCutoff: invalidCutoff,
+		Overview:    step == prioOverview, Preset: preset, InvalidCutoff: cutoffView.invalid, Filters: filters,
 	}
 	view.MeetingChanges, err = s.prioMeetingChanges(meeting.ID)
 	if err != nil {
@@ -119,6 +108,12 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	}
 	_, _, view.CanCreateEpic = s.prioTicketClient(ctx)
 	view.TicketResult, _ = ctx.Value(prioTicketResultKey{}).(prioTicketResult)
+	presetLoad, loadingPreset := ctx.Value(prioPresetLoadKey{}).(prioPresetLoad)
+	view.TicketResult.Preserve = loadingPreset
+	var keys []string
+	if view.Overview || preset != prioLocalPreset {
+		keys = s.prioPresetKeys(ctx, &view, q)
+	}
 	issues, err := s.rollups.PrioIssues()
 	if err != nil {
 		return prioAgendaView{}, err
@@ -127,6 +122,12 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	if err != nil {
 		return prioAgendaView{}, err
 	}
+	presetMatches := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		presetMatches[key] = true
+	}
+	view.Filters.Jira = view.prioJiraFilterOption()
+	view.FilterSummary = view.Filters.summary()
 	suggestions := s.prioEpicSuggestions(issues)
 	var overviewRows []prioRow
 	var reviewedEpic prioRow
@@ -138,13 +139,20 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 		if step == prioEpicCheck && view.TicketResult.Change != "" && issue.Key == selection {
 			reviewedEpic = row
 		}
-		if view.Overview && keepPrioOverviewRow(q, issue) {
-			overviewRows = append(overviewRows, row)
-		}
 		if suggestions[issue.Key] != nil {
 			steps[1].Rows = append(steps[1].Rows, row)
 		}
-		if strings.EqualFold(issue.Type, "Epic") && events.DoneFromOpen {
+		if !filters.keeps(issue, events) {
+			continue
+		}
+		// The overview orders the Jira matches and also reports keys still missing locally.
+		if view.Overview {
+			overviewRows = append(overviewRows, row)
+		}
+		if preset != prioLocalPreset && !presetMatches[issue.Key] {
+			continue
+		}
+		if events.DoneFromOpen {
 			steps[2].Rows = append(steps[2].Rows, row)
 		}
 		if events.New {
@@ -163,9 +171,6 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 			selection = ""
 		}
 	}
-	for i := range overviewRows {
-		overviewRows[i].SelectHref = prioHref(q, "ticket", overviewRows[i].Key)
-	}
 	for i := range steps {
 		stepParams := prioAgendaParams(q)
 		stepParams.Del("ticket")
@@ -180,7 +185,9 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	for i := range current.Rows {
 		current.Rows[i].SelectHref = prioHref(q, "ticket", current.Rows[i].Key)
 	}
-	if step == prioEpicCheck && !slices.ContainsFunc(current.Rows, func(row prioRow) bool { return row.Key == selection }) {
+	keepSelection := step != prioEpicCheck && (view.PresetLoadingResults() || presetLoad.keepTicket ||
+		view.TicketResult.Change != "" || view.TicketResult.Message != "")
+	if !view.Overview && !keepSelection && !slices.ContainsFunc(current.Rows, func(row prioRow) bool { return row.Key == selection }) {
 		selection = ""
 		if reviewedEpic.Key != "" {
 			next := slices.IndexFunc(current.Rows, func(row prioRow) bool { return compareAgendaPriority(reviewedEpic, row) < 0 })
@@ -189,17 +196,10 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 			}
 		}
 	}
-	if selection != "" {
-		view.Selected, err = s.prioTicketPanel(ctx, selection, changes[selection], cutoff, edit)
-		if err != nil {
-			return prioAgendaView{}, err
-		}
-		if view.Selected == nil && index != 0 {
-			selection = ""
-		}
-	}
-	if index != 0 && selection == "" && len(current.Rows) > 0 {
+	if !view.Overview && selection == "" && len(current.Rows) > 0 {
 		selection = current.Rows[0].Key
+	}
+	if selection != "" {
 		view.Selected, err = s.prioTicketPanel(ctx, selection, changes[selection], cutoff, edit)
 		if err != nil {
 			return prioAgendaView{}, err
@@ -208,6 +208,7 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	selectedIndex := slices.IndexFunc(current.Rows, func(row prioRow) bool { return row.Key == selection })
 	if view.Selected != nil {
 		view.Selected.Focused = !view.Overview
+		view.Selected.PreserveControls = loadingPreset
 		view.Selected.Result = view.TicketResult
 		if step == prioEpicCheck && suggestions[selection] != nil {
 			view.Selected.showEpicSuggestion(suggestions[selection])
@@ -221,14 +222,21 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	}
 	view.Steps, view.Current = steps, current
 	if view.Overview {
-		if err := s.populatePrioOverview(ctx, &view, q, overviewRows, issues); err != nil {
+		if err := s.populatePrioOverview(&view, q, overviewRows, issues, keys); err != nil {
 			return prioAgendaView{}, err
 		}
 	}
 	view.CanonicalHref = "/prio?" + q.Encode()
 	view.ShareCutoffHref = prioHref(q, "cutoff", cutoff.UTC().Format(time.RFC3339Nano))
-	view.RecentHref = prioHref(q, "preset", prioDefaultPreset)
 	view.AllHref = prioHref(q, "preset", prioLocalPreset)
+	overviewParams := prioAgendaParams(q)
+	overviewParams.Del("ticket")
+	view.FilterHref = prioHref(overviewParams, "step", prioOverview) + "#prio-filter-controls"
+	resetParams := prioAgendaParams(q)
+	for _, name := range prioAgendaFilterNames {
+		resetParams.Del(name)
+	}
+	view.ResetHref = prioHref(resetParams, "step", prioOverview) + "#prio-filter-controls"
 	view.BacklogSortHref = prioHref(q, "backlog-sort", "age")
 	if view.OldestFirst {
 		view.BacklogSortHref = prioHref(q, "backlog-sort", "")
@@ -248,13 +256,13 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	} else if index+1 < len(steps) {
 		view.NextHref = steps[index+1].Href
 	}
-	for _, name := range prioAgendaParamNames {
-		if value := q.Get(name); value != "" {
-			param := filterParam{Name: name, Value: value}
-			view.Params = append(view.Params, param)
-			if name != "cutoff" {
-				view.CutoffParams = append(view.CutoffParams, param)
-			}
+	view.Params = prioParamsList(q)
+	for _, param := range view.Params {
+		if param.Name != "page" && !slices.Contains(prioAgendaFilterNames, param.Name) {
+			view.FilterParams = append(view.FilterParams, param)
+		}
+		if param.Name != "page" && param.Name != "cutoff" {
+			view.CutoffParams = append(view.CutoffParams, param)
 		}
 	}
 	if view.Selected != nil {
@@ -267,13 +275,28 @@ func (s *Server) prioAgenda(ctx context.Context, q url.Values, edit prioEdit) (p
 	return view, nil
 }
 
-var prioAgendaParamNames = []string{"step", "cutoff", "preset", "ticket", "sort", "backlog-sort", "tech", "parent"}
+var prioAgendaFilterNames = []string{"period", "level", "tech", "preset"}
+var prioAgendaParamNames = append([]string{"step", "cutoff", "ticket", "sort", "backlog-sort", "page"}, prioAgendaFilterNames...)
 
 func prioAgendaParams(q url.Values) url.Values {
 	params := make(url.Values, len(prioAgendaParamNames))
 	for _, name := range prioAgendaParamNames {
 		if value := q.Get(name); value != "" {
 			params.Set(name, value)
+		}
+	}
+	// Old agenda URLs used tech/parent and the original table used these
+	// toggle names. The short parameters take precedence when both are present.
+	if !params.Has("tech") && q.Has(nonTechnicalParam) && q.Get(nonTechnicalParam) != nonTechnicalOff {
+		params.Set("tech", "non-technical")
+	}
+	if !params.Has("level") {
+		switch {
+		case q.Get("parent-filter") == "1", q.Get("parent") == "1",
+			q.Has(noParentParam) && q.Get(noParentParam) != noParentOff:
+			params.Set("level", "unparented")
+		case q.Get("parent-filter") == "0", q.Get("parent") == "0", q.Get(noParentParam) == noParentOff:
+			params.Set("level", "all")
 		}
 	}
 	return params
@@ -283,6 +306,9 @@ func prioHref(q url.Values, name, value string) string {
 	params := make(url.Values, len(q)+1)
 	for name, values := range q {
 		params[name] = values
+	}
+	if name != "ticket" && name != "page" {
+		params.Del("page")
 	}
 	if value == "" {
 		params.Del(name)

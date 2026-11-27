@@ -780,7 +780,11 @@ func TestPrioAllTicketsRemainsAvailableWhenJiraTimezoneRefreshFails(t *testing.T
 	}
 	getPrio := func(preset string) string {
 		t.Helper()
-		req, err := http.NewRequest(http.MethodGet, app.URL+"/prio?preset="+preset, nil)
+		path := "/prio"
+		if preset != "all" {
+			path = "/prio/preset-results"
+		}
+		req, err := http.NewRequest(http.MethodGet, app.URL+path+"?level=all&preset="+preset, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -794,7 +798,7 @@ func TestPrioAllTicketsRemainsAvailableWhenJiraTimezoneRefreshFails(t *testing.T
 		t.Fatal("unmarked Jira preset depended on Jira Myself")
 	}
 	if body := getPrio("10519"); !strings.Contains(body, "Die Jira-Zeitzone konnte nicht geladen werden.") ||
-		!strings.Contains(body, "Alle Tickets · lokaler Stand") || myselfCalls.Load() != 2 || searchCalls.Load() != 1 {
+		!strings.Contains(body, "Jira-Filter entfernen") || myselfCalls.Load() != 2 || searchCalls.Load() != 1 {
 		t.Fatal("date-marked preset did not offer the local fallback when Jira Myself failed")
 	}
 }

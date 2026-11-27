@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -23,7 +24,7 @@ func TestPrioAgendaOpensAtOverviewWithBerlinFallback(t *testing.T) {
 	if !strings.Contains(body, `step=done" data-prio-next>Zur Besprechung`) {
 		t.Error("the overview should advance directly to Fertig")
 	}
-	for _, want := range []string{`value="2026-11-20T17:45"`, "Vor sieben Tagen", "Seit letztem Prio-Meeting", "Alle Tickets", "Meeting abschließen"} {
+	for _, want := range []string{`value="2026-11-20T17:45"`, "Vor sieben Tagen", "Keiner", "Nur Epics", "Meeting abschließen"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("overview missing %q", want)
 		}
@@ -107,12 +108,12 @@ func TestPrioAgendaQueuesUseProjectHistoryAndCurrentBacklog(t *testing.T) {
 		{Key: "DCAI-7", Type: "Task", Status: "Canceled", CreatedAt: before.Add(-time.Hour), Priority: "Highest"},
 	}}
 	app := newTestApp(t, fixture)
-	base := app.URL + "/prio?cutoff=2026-11-20T11:00&preset=all&step="
+	base := app.URL + "/prio?cutoff=2026-11-20T11:00&preset=all&level=all&step="
 	for _, tc := range []struct {
 		step string
 		want []string
 	}{
-		{"done", []string{"DCAI-1"}},
+		{"done", []string{"DCAI-1", "DCAI-4"}},
 		{"new", []string{"DCAI-5"}},
 		{"backlog", []string{"DCAI-5", "DCAI-6"}},
 		{"backlog&backlog-sort=age", []string{"DCAI-6", "DCAI-5"}},
@@ -149,9 +150,10 @@ func TestPrioAgendaOverviewGroupsReopenedTicketsAndKeepsHistory(t *testing.T) {
 		{Key: "DCAI-4", Type: "Task", Status: "Canceled"},
 	}}
 	app := newTestApp(t, fixture)
-	page := get(t, app.URL+"/prio?"+url.Values{
-		"cutoff": {cutoff.Format(time.RFC3339)}, "ticket": {"DCAI-2"}, "preset": {"all"},
-	}.Encode())
+	query := url.Values{
+		"cutoff": {cutoff.Format(time.RFC3339)}, "ticket": {"DCAI-2"}, "preset": {"all"}, "level": {"all"},
+	}
+	page := get(t, app.URL+"/prio?"+query.Encode())
 
 	assertOrder(t, page,
 		`data-prio-group="planned"`, `data-key="DCAI-1"`,
@@ -160,7 +162,8 @@ func TestPrioAgendaOverviewGroupsReopenedTicketsAndKeepsHistory(t *testing.T) {
 		`data-prio-group="other"`, `data-key="DCAI-4"`,
 	)
 	for _, want := range []string{
-		`value="2026-10-25T02:30"`, "Neu", "Status geändert", "Aufgelöst",
+		`value="2026-10-25T02:30"`, "Neu", "Aufgelöst",
+		`data-prio-marker="done">Fertig</span>`,
 		"↑ Prio geändert · Mittel → Hoch", "↓ Prio geändert · Hoch → Mittel",
 		"Änderungsverlauf seit Stichtag", "Lea Hoffmann", "25.10.2026 02:30",
 	} {
@@ -170,5 +173,144 @@ func TestPrioAgendaOverviewGroupsReopenedTicketsAndKeepsHistory(t *testing.T) {
 	}
 	if strings.Contains(page, "Niedrigste → Niedrig") {
 		t.Error("change at the cutoff should be excluded")
+	}
+	assertOrder(t, page, "Änderungsverlauf seit Stichtag", "Ready for Release → In Progress</li>", "In Progress → Ready for Release</li>")
+
+	query.Set("step", "done")
+	agenda := get(t, app.URL+"/prio?"+query.Encode())
+	const marker = `data-prio-marker="status">Status In Progress → In Progress</span>`
+	for _, view := range []struct {
+		name, body string
+	}{{"overview and ticket panel", page}, {"agenda queue and ticket panel", agenda}} {
+		if n := strings.Count(view.body, marker); n != 2 {
+			t.Errorf("%s has %d directional status markers, want 2", view.name, n)
+		}
+	}
+}
+
+func TestPrioStatusMarkerUsesCurrentStatusWithIncompleteHistory(t *testing.T) {
+	cutoff := time.Date(2026, time.November, 20, 10, 0, 0, 0, time.UTC)
+	after := cutoff.Add(time.Hour)
+	for _, tc := range []struct {
+		name, current string
+		changes       []jira.ChangelogEntry
+		want          string
+	}{
+		{
+			name: "single transition uses current status", current: "Review / Testing",
+			changes: []jira.ChangelogEntry{
+				{ID: "1", Field: "status", From: "Triage", To: "In Progress", Timestamp: cutoff},
+				{ID: "2", Field: "status", From: "In Progress", To: "Ready To Do", Timestamp: after},
+			},
+			want: "Status In Progress → Review / Testing",
+		},
+		{
+			name: "missing first source", current: "Review / Testing",
+			changes: []jira.ChangelogEntry{
+				{ID: "1", Field: "status", To: "Ready To Do", Timestamp: after},
+				{ID: "2", Field: "status", From: "Ready To Do", To: "Review / Testing", Timestamp: after.Add(time.Minute)},
+			},
+			want: "Status geändert",
+		},
+		{
+			name: "missing current status",
+			changes: []jira.ChangelogEntry{
+				{ID: "1", Field: "status", From: "In Progress", To: "Review / Testing", Timestamp: after},
+			},
+			want: "Status geändert",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app := newTestApp(t, &jira.FakeClient{Issues: []jira.Issue{
+				{Key: "DCAI-1", Type: "Task", Status: tc.current, Changelog: tc.changes},
+			}})
+			page := get(t, app.URL+"/prio?"+url.Values{
+				"cutoff": {cutoff.Format(time.RFC3339)}, "preset": {"all"}, "level": {"all"},
+			}.Encode())
+			if marker := `data-prio-marker="status">` + tc.want + "</span>"; !strings.Contains(page, marker) {
+				t.Errorf("overview missing %q", marker)
+			}
+		})
+	}
+}
+
+type agendaFilterJira struct{ *jira.FakeClient }
+
+func (agendaFilterJira) PlanningPresets(context.Context) ([]jira.PlanningPreset, error) {
+	return []jira.PlanningPreset{{
+		ID: "10519", Name: "Planning: seit letztem Meeting", Description: "Freigegebene Jira-Auswahl",
+		JQL: "project = DCAI",
+	}}, nil
+}
+
+func (agendaFilterJira) SearchIssueKeys(context.Context, string) ([]string, error) {
+	return []string{"DCAI-1", "DCAI-2", "DCAI-3", "DCAI-4", "DCAI-5", "DCAI-8", "DCAI-9"}, nil
+}
+
+func TestPrioAgendaFiltersComposeWithWorkflow(t *testing.T) {
+	cutoff := time.Date(2026, time.November, 20, 10, 0, 0, 0, time.UTC)
+	before, after := cutoff.Add(-time.Hour), cutoff.Add(time.Hour)
+	done := func(id string) []jira.ChangelogEntry {
+		return []jira.ChangelogEntry{{ID: id, Field: "status", From: "In Progress", To: "Ready for Release", Timestamp: after}}
+	}
+	technical := []string{"Technical"}
+	fixture := &jira.FakeClient{Issues: []jira.Issue{
+		{Key: "DCAI-1", Type: "Epic", Status: "Triage", Labels: technical, CreatedAt: after},
+		{Key: "DCAI-2", Type: "Epic", Status: "Triage", Labels: technical, CreatedAt: before, ParentKey: "DCAI-99"},
+		{Key: "DCAI-3", Type: "Task", Status: "Triage", Labels: technical, CreatedAt: after},
+		{Key: "DCAI-4", Type: "Epic", Status: "Ready for Release", Labels: technical, CreatedAt: before, Changelog: done("4")},
+		{Key: "DCAI-5", Type: "Task", Status: "Ready for Release", Labels: technical, CreatedAt: before, Changelog: done("5")},
+		{Key: "DCAI-6", Type: "Epic", Status: "Triage", Labels: technical, CreatedAt: after},
+		{Key: "DCAI-7", Type: "Task", Status: "In Progress", ParentKey: "DCAI-6"},
+		{Key: "DCAI-8", Type: "Task", Status: "Triage", Labels: technical, CreatedAt: after, ParentKey: "DCAI-6"},
+		{Key: "DCAI-9", Type: "Task", Status: "Triage", CreatedAt: after},
+	}}
+	app := newTestAppWith(t, fixture, cutoff.AddDate(0, 0, 7), web.WithFakeJira(agendaFilterJira{fixture}))
+	base := app.URL + "/prio?cutoff=" + url.QueryEscape(cutoff.Format(time.RFC3339))
+	get(t, app.URL+"/prio/preset-results?preset=10519")
+	for _, tc := range []struct {
+		name, query string
+		want        []string
+	}{
+		{"default Done", "step=done", []string{"DCAI-4"}},
+		{"default New", "step=new", []string{"DCAI-1", "DCAI-6"}},
+		{"default Backlog", "step=backlog", []string{"DCAI-1", "DCAI-2", "DCAI-6"}},
+		{"Jira and since", "step=backlog&preset=10519&period=since&tech=technical&level=unparented", []string{"DCAI-1", "DCAI-3"}},
+		{"Jira and all dates", "step=backlog&preset=10519&period=all&tech=technical&level=unparented", []string{"DCAI-1", "DCAI-2", "DCAI-3"}},
+		{"Fertig keeps its cutoff and transition", "step=done&preset=10519&period=all&level=all", []string{"DCAI-4", "DCAI-5"}},
+		{"Neu keeps creation cutoff", "step=new&preset=10519&period=all&level=all", []string{"DCAI-1", "DCAI-3", "DCAI-8", "DCAI-9"}},
+		{"Technical excluded", "step=new&preset=10519&tech=non-technical&level=all", []string{"DCAI-9"}},
+		{"old parent parameter", "step=new&preset=10519&parent=1", []string{"DCAI-1", "DCAI-3", "DCAI-9"}},
+		{"Epic check is project-wide", "step=epic-check&preset=10519&period=since&tech=non-technical", []string{"DCAI-6"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			page := get(t, base+"&"+tc.query)
+			if count := strings.Count(page, "data-prio-queue-key="); count != len(tc.want) {
+				t.Fatalf("queue has %d tickets, want %v", count, tc.want)
+			}
+			for _, key := range tc.want {
+				if !strings.Contains(page, `data-prio-queue-key="`+key+`"`) {
+					t.Errorf("queue missing %s", key)
+				}
+			}
+			if strings.Contains(tc.query, "step=epic-check") == strings.Contains(page, "data-prio-active-filters") {
+				t.Error("active filter summary should appear only on filtered steps")
+			}
+		})
+	}
+
+	page := get(t, base+"&step=backlog&preset=10519&period=since&tech=technical&level=unparented&ticket=DCAI-2")
+	for _, want := range []string{
+		`data-ticket="DCAI-1"`, "Zeitraum: Seit Stichtag · Ebene: Ohne Parent · Technical: nur Technical",
+		`level=unparented&amp;period=since&amp;preset=10519&amp;step=overview&amp;tech=technical#prio-filter-controls`,
+		`level=unparented&amp;period=since&amp;preset=10519&amp;step=backlog&amp;tech=technical&amp;ticket=DCAI-3" data-prio-next`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("filtered agenda missing %q", want)
+		}
+	}
+	page = get(t, base+"&preset=10519")
+	if !strings.Contains(page, `value="10519" data-description="Freigegebene Jira-Auswahl" selected`) {
+		t.Error("explicit legacy Jira preset should remain selected and show its description")
 	}
 }

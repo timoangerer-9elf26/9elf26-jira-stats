@@ -16,8 +16,9 @@ type prioMarker struct {
 }
 
 type prioIssueEvents struct {
-	New, StatusChanged, Done, DoneFromOpen, Resolved bool
-	PriorityChanges                                  []prioMarker
+	New, Done, DoneFromOpen, Resolved bool
+	StatusLabel                       string
+	PriorityChanges                   []prioMarker
 }
 
 func prioStatusGroup(status string) string {
@@ -40,7 +41,12 @@ func prioEvents(issue store.PrioIssue, changes []jira.ChangelogEntry, cutoff tim
 		}
 		switch change.Field {
 		case "status":
-			events.StatusChanged = true
+			if events.StatusLabel == "" {
+				events.StatusLabel = "Status geändert"
+				if strings.TrimSpace(change.From) != "" && strings.TrimSpace(issue.Status) != "" {
+					events.StatusLabel = "Status " + prioChangeDirection(change.From, issue.Status)
+				}
+			}
 			from, to := prioStatusGroup(change.From), prioStatusGroup(change.To)
 			if from != "done" && to == "done" {
 				events.Done = true
@@ -67,8 +73,8 @@ func (events prioIssueEvents) markers() []prioMarker {
 	if events.New {
 		markers = append(markers, prioMarker{"new", "Neu"})
 	}
-	if events.StatusChanged {
-		markers = append(markers, prioMarker{"status", "Status geändert"})
+	if events.StatusLabel != "" {
+		markers = append(markers, prioMarker{"status", events.StatusLabel})
 	}
 	if events.Done {
 		markers = append(markers, prioMarker{"done", "Fertig"})
@@ -85,10 +91,14 @@ func changeLabel(change jira.ChangelogEntry) string {
 	case "priority":
 		return "Prio geändert · " + prioLevelLabel(from) + " → " + prioLevelLabel(to)
 	case "resolution":
-		return "Auflösung · " + prioChangeValue(from) + " → " + prioChangeValue(to)
+		return "Auflösung · " + prioChangeDirection(from, to)
 	default:
-		return prioChangeValue(from) + " → " + prioChangeValue(to)
+		return prioChangeDirection(from, to)
 	}
+}
+
+func prioChangeDirection(from, to string) string {
+	return prioChangeValue(from) + " → " + prioChangeValue(to)
 }
 
 func prioLevelLabel(level string) string {

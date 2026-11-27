@@ -144,6 +144,9 @@ func (failingRollups) PrioIssues() ([]store.PrioIssue, error) {
 func (failingRollups) IssueChangesSince(_ time.Time) (map[string][]jira.ChangelogEntry, error) {
 	return nil, errBoom
 }
+func (failingRollups) IssueHistorySince(_ string, _ time.Time) ([]jira.ChangelogEntry, error) {
+	return nil, errBoom
+}
 func (failingRollups) LatestIssueStatusChanges() (map[string]time.Time, error) {
 	return nil, errBoom
 }

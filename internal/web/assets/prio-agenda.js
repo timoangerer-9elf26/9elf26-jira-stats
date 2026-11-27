@@ -18,6 +18,11 @@
   let nextFocus = '';
   let closeTicket = '';
   let editFieldsOpen = false;
+  let filtersOpen = false;
+  let lastJiraPreset = '';
+  let presetPrefetchPending = false;
+  let lastPresetPrefetch = -Infinity;
+  let filterRequest;
   let renderedStep = agenda().dataset.step;
 
   function saveState() {
@@ -77,16 +82,12 @@
       }
     }
     if (state.windowID !== windowID) state = loadState(windowID);
-    if (editFieldsOpen) {
-      const fields = view.querySelector('[data-prio-edit-fields]');
-      if (fields) fields.open = true;
-      editFieldsOpen = false;
+    const filterForm = view.querySelector('[data-prio-filters]');
+    if (filterForm && (filtersOpen || location.hash === '#prio-filter-controls')) {
+      filterForm.closest('details').open = true;
     }
-    if (nextFocus) {
-      const focus = view.querySelector(nextFocus) || view.querySelector('[aria-current="step"]');
-      focus?.focus({preventScroll: true});
-    }
-    nextFocus = '';
+    filtersOpen = false;
+    restoreFocus(view);
     const saved = state.scroll[step];
     if (saved) {
       for (const area of view.querySelectorAll('[data-prio-scroll]')) {
@@ -111,6 +112,57 @@
     renderProgress();
   }
 
+  function restoreFocus(view) {
+    const controlsPending = view.querySelector('[data-prio-controls][hx-get]');
+    if (editFieldsOpen && !controlsPending) {
+      const fields = view.querySelector('[data-prio-edit-fields]');
+      if (fields) fields.open = true;
+      editFieldsOpen = false;
+    }
+    if (nextFocus) {
+      const focus = view.querySelector(nextFocus);
+      if (!focus && controlsPending) return;
+      (focus || view.querySelector('[aria-current="step"]'))?.focus({preventScroll: true});
+      nextFocus = '';
+    }
+  }
+
+  function syncDrawerSelection(view) {
+    const ticket = view.querySelector('[data-prio-drawer-ticket]')?.dataset.prioDrawerTicket || '';
+    view.dataset.ticket = ticket;
+    const cutoffForm = view.querySelector('[data-prio-cutoff-form]');
+    const filterForm = view.querySelector('[data-prio-filters]');
+    const epicForm = view.querySelector('[data-prio-ticket-action="epic"]');
+    for (const container of [view, cutoffForm, filterForm, epicForm]) {
+      if (!container) continue;
+      container.querySelector(':scope > input[name="ticket"]')?.remove();
+      if (!ticket) continue;
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'ticket';
+      input.value = ticket;
+      if (container === view) input.dataset.filterparam = '';
+      container.prepend(input);
+    }
+    for (const link of view.querySelectorAll('[data-prio-page], [data-prio-share-cutoff], [data-prio-filter-reset], [data-prio-clear-preset]')) {
+      link.href = withTicket(link.href, ticket);
+    }
+    for (const option of view.querySelectorAll('[data-prio-sort] option')) {
+      option.value = withTicket(option.value, ticket);
+    }
+    for (const rowLink of view.querySelectorAll('[data-prio-ticket]')) {
+      if (rowLink.dataset.prioTicket === ticket) rowLink.setAttribute('aria-current', 'true');
+      else rowLink.removeAttribute('aria-current');
+    }
+  }
+
+  function withTicket(href, ticket) {
+    const url = new URL(href, location.href);
+    if (ticket) url.searchParams.set('ticket', ticket);
+    else url.searchParams.delete('ticket');
+    return url.pathname + url.search + url.hash;
+  }
+
   function markDiscussed(view) {
     const {step, ticket} = view.dataset;
     const key = step === 'overview' ? 'overview' : ticket;
@@ -130,8 +182,13 @@
       nextFocus = '[data-prio-next]';
     } else if (target.closest('[data-prio-prev]')) {
       nextFocus = '[data-prio-prev]';
+    } else if (target.closest('[data-prio-edit-filters], [data-prio-filter-reset]')) {
+      filtersOpen = true;
+      nextFocus = '#prio-period';
     } else if (target.closest('[data-prio-step]')) {
       nextFocus = '[aria-current="step"]';
+    } else if (target.closest('[data-prio-page]')) {
+      nextFocus = '[data-prio-page-number]';
     } else if (target.closest('[data-prio-queue-key]')) {
       nextFocus = '[data-prio-queue-key][aria-current="true"]';
     } else if (target.closest('[data-prio-ticket]')) {
@@ -152,8 +209,77 @@
     }
   }, true);
 
+  function updateFilterSummary(form) {
+    const {period, tech, level, preset} = form.elements;
+    const levelLabel = form.querySelector('[name="level"]:checked').nextElementSibling.textContent;
+    const selectedPreset = preset.selectedOptions[0];
+    const parts = ['Zeitraum: ' + period.selectedOptions[0].text, 'Ebene: ' + levelLabel];
+    if (tech.value !== 'all') parts.push('Technical: ' + tech.selectedOptions[0].text);
+    if (preset.value !== 'all') parts.push('Jira: ' + selectedPreset.text);
+    form.closest('details').querySelector('[data-prio-filter-summary]').textContent = parts.join(' · ');
+    form.querySelector('[data-prio-preset-description]').textContent = selectedPreset.dataset.description || '';
+  }
+
+  function prefetchJiraPreset(picker) {
+    if (!picker || presetPrefetchPending || performance.now() - lastPresetPrefetch < 15000) return;
+    const known = [picker.value, lastJiraPreset, '10519'];
+    const preset = known.find(id => /^\d+$/.test(id) && [...picker.options].some(option => option.value === id));
+    if (!preset) return;
+    const params = new URLSearchParams({preset});
+    const cutoff = agenda()?.querySelector(':scope > input[name="cutoff"]')?.value;
+    if (cutoff) params.set('cutoff', cutoff);
+    lastPresetPrefetch = performance.now();
+    presetPrefetchPending = true;
+    fetch('/prio/preset-prefetch?' + params, {priority: 'low', redirect: 'manual'})
+      .catch(() => { /* Selecting the filter still performs its normal request. */ })
+      .finally(() => { presetPrefetchPending = false; });
+  }
+
+  panel.addEventListener('focusin', event => {
+    if (event.target.matches('#prio-preset')) prefetchJiraPreset(event.target);
+  });
+  panel.addEventListener('toggle', event => {
+    if (event.target.matches('[data-testid="prio-filters"][open]')) {
+      prefetchJiraPreset(event.target.querySelector('#prio-preset'));
+    }
+  }, true);
+
   panel.addEventListener('change', event => {
-    if (event.target.matches('[data-prio-sort]')) window.location.assign(event.target.value);
+    const control = event.target;
+    if (control.matches('[data-prio-filter]')) {
+      if (control.id === 'prio-preset' && control.value !== 'all') lastJiraPreset = control.value;
+      const form = control.form;
+      updateFilterSummary(form);
+      form.requestSubmit();
+    }
+    if (control.matches('[data-prio-sort]')) window.location.assign(control.value);
+  });
+
+  panel.addEventListener('submit', event => {
+    if (!event.target.matches('[data-prio-filters]')) return;
+    // Keep the newest choice when Arrow keys or successive clicks change filters
+    // in flight. Leave the agenda's shared request lock in place for ticket edits.
+    if (filterRequest) filterRequest.abort();
+    const focused = document.activeElement;
+    filtersOpen = true;
+    if (event.target.contains(focused) && focused.id) nextFocus = '#' + CSS.escape(focused.id);
+  }, true);
+
+  document.addEventListener('htmx:beforeRequest', event => {
+    const {elt, xhr} = event.detail;
+    if (elt.matches('[data-prio-step], [data-prio-ticket], [data-prio-page]')) {
+      elt.setAttribute('aria-busy', 'true');
+      xhr.addEventListener('loadend', () => elt.removeAttribute('aria-busy'), {once: true});
+    }
+    if (!elt.matches('[data-prio-filters]')) return;
+    filterRequest = xhr;
+    const status = elt.querySelector('[data-prio-filter-status]');
+    status.textContent = 'Filter werden angewendet …';
+    xhr.addEventListener('loadend', () => {
+      if (filterRequest !== xhr) return;
+      filterRequest = undefined;
+      status.textContent = xhr.status >= 200 && xhr.status < 400 ? '' : 'Filter konnten nicht angewendet werden.';
+    });
   });
 
   document.addEventListener('keydown', event => {
@@ -177,7 +303,13 @@
     if (step && state.cells[step]) event.detail.parameters.ticket = state.cells[step];
   });
   document.addEventListener('htmx:beforeSwap', event => {
-    if (event.detail.target !== panel || !event.detail.shouldSwap) return;
+    const {target, shouldSwap} = event.detail;
+    if (!shouldSwap) return;
+    if (target.matches('[data-prio-agenda]')) {
+      filtersOpen = !!target.querySelector('[data-testid="prio-filters"][open]');
+    } else if (target !== panel && target.id !== 'prio-drawer-slot') {
+      return;
+    }
     rememberView();
     const form = event.detail.requestConfig.elt;
     const action = form?.dataset.prioTicketAction;
@@ -190,7 +322,19 @@
     }
   });
   document.addEventListener('htmx:afterSettle', event => {
-    if (event.detail.target === panel) restoreView();
+    const view = agenda();
+    const {target} = event.detail;
+    if (!view || !target) return;
+    if (target.id === 'prio-drawer-slot' && view.contains(target)) {
+      syncDrawerSelection(view);
+      restoreView();
+    } else if (target === panel || target.matches('[data-prio-agenda]')) {
+      restoreView();
+    } else if (target.matches('[data-prio-controls]') && view.dataset.ticket === target.dataset.prioControls) {
+      restoreFocus(view);
+    } else if (target.matches('[data-prio-preset-picker]')) {
+      prefetchJiraPreset(view.querySelector('[data-testid="prio-filters"][open] #prio-preset'));
+    }
   });
   document.addEventListener('htmx:historyRestore', restoreView);
   window.addEventListener('pagehide', rememberView);
