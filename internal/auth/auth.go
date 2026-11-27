@@ -35,8 +35,21 @@ var ErrSignIn = errors.New("Atlassian sign-in required")
 var ErrProjectAccess = errors.New("Jira project browse permission required")
 
 type Identity struct {
-	AccountID string
-	TimeZone  *time.Location
+	AccountID    string
+	TimeZone     *time.Location
+	loadTimeZone func(context.Context) (*time.Location, error)
+}
+
+// JiraTimeZone returns the actual Jira time zone, recovering it on demand
+// after a privacy update invalidates the saved value.
+func (i Identity) JiraTimeZone(ctx context.Context) (*time.Location, error) {
+	if i.TimeZone != nil {
+		return i.TimeZone, nil
+	}
+	if i.loadTimeZone != nil {
+		return i.loadTimeZone(ctx)
+	}
+	return nil, errors.New("Jira time zone unavailable")
 }
 
 type grant struct {
@@ -209,34 +222,54 @@ func (s *Service) Resolve(ctx context.Context, session string) (Identity, jira.C
 	lock.Lock()
 	defer lock.Unlock()
 
-	g, err := s.loadUsableGrant(ctx, account)
+	g, err := s.loadUsableGrant(ctx, account, "")
 	if err != nil {
 		return Identity{}, nil, err
 	}
-	if g.TimeZone == "" {
-		// A privacy update erased the timezone stored at login.
-		id, zone, err := s.provider.myself(ctx, g.AccessToken)
+	identity := Identity{AccountID: account}
+	if g.TimeZone != "" {
+		identity.TimeZone, err = jiraTimeZone(g.TimeZone)
 		if err != nil {
 			return Identity{}, nil, err
 		}
+	} else {
+		identity.loadTimeZone = func(ctx context.Context) (*time.Location, error) {
+			return s.refreshTimeZone(ctx, account)
+		}
+	}
+	return identity, s.provider.client(g.AccessToken), nil
+}
+
+func (s *Service) refreshTimeZone(ctx context.Context, account string) (*time.Location, error) {
+	s.exchanges.RLock()
+	defer s.exchanges.RUnlock()
+	lock := s.accounts[account]
+	lock.Lock()
+	defer lock.Unlock()
+
+	g, err := s.loadUsableGrant(ctx, account, "")
+	if err != nil {
+		return nil, err
+	}
+	if g.TimeZone == "" {
+		id, zone, err := s.provider.myself(ctx, g.AccessToken)
+		if err != nil {
+			return nil, err
+		}
 		if id != account {
-			return Identity{}, nil, ErrSignIn
+			return nil, ErrSignIn
 		}
 		g.TimeZone = zone
 		if err := s.saveGrant(ctx, account, g); err != nil {
-			return Identity{}, nil, err
+			return nil, err
 		}
 	}
-	zone, err := jiraTimeZone(g.TimeZone)
-	if err != nil {
-		return Identity{}, nil, err
-	}
-	return Identity{AccountID: account, TimeZone: zone}, s.provider.client(g.AccessToken), nil
+	return jiraTimeZone(g.TimeZone)
 }
 
 // loadUsableGrant shares the browser's rotating-grant logic with background
 // reporting. Callers hold the exchange read lock and the account lock.
-func (s *Service) loadUsableGrant(ctx context.Context, account string) (grant, error) {
+func (s *Service) loadUsableGrant(ctx context.Context, account, rejectedBearer string) (grant, error) {
 	envelope, err := s.store.OAuthGrant(ctx, account)
 	if errors.Is(err, sql.ErrNoRows) {
 		return grant{}, ErrSignIn
@@ -248,7 +281,7 @@ func (s *Service) loadUsableGrant(ctx context.Context, account string) (grant, e
 	if err != nil {
 		return grant{}, err
 	}
-	g, err = s.usableGrant(ctx, account, g)
+	g, err = s.usableGrant(ctx, account, g, rejectedBearer != "" && g.AccessToken == rejectedBearer)
 	if errors.Is(err, ErrSignIn) || errors.Is(err, ErrProjectAccess) {
 		if revokeErr := s.store.DeleteOAuthGrant(ctx, account); revokeErr != nil {
 			return grant{}, revokeErr
@@ -257,8 +290,8 @@ func (s *Service) loadUsableGrant(ctx context.Context, account string) (grant, e
 	return g, err
 }
 
-func (s *Service) usableGrant(ctx context.Context, account string, g grant) (grant, error) {
-	if time.Until(g.ExpiresAt) <= 30*time.Second && (!g.PendingSiteCheck || time.Now().After(g.ExpiresAt)) {
+func (s *Service) usableGrant(ctx context.Context, account string, g grant, forceRefresh bool) (grant, error) {
+	if forceRefresh || (time.Until(g.ExpiresAt) <= 30*time.Second && (!g.PendingSiteCheck || time.Now().After(g.ExpiresAt))) {
 		pair, err := s.provider.exchange(ctx, map[string]string{
 			"grant_type": "refresh_token", "refresh_token": g.RefreshToken,
 		})

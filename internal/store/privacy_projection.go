@@ -119,6 +119,9 @@ func protectMentions(raw json.RawMessage, ruleFor func(string) (identityRule, er
 				return nil
 			}
 			rule, err := ruleFor(id)
+			if id == "" {
+				rule.closed = true
+			}
 			if err != nil {
 				return err
 			}

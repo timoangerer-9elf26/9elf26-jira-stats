@@ -21,9 +21,9 @@ func TestToIssueParsesCreatedAndCreator(t *testing.T) {
         "summary": "Author a ticket",
         "issuetype": {"name": "Task"},
         "status": {"name": "Ready to Do", "statusCategory": {"name": "To Do"}},
-        "assignee": {"displayName": "Grace"},
+        "assignee": {"accountId": "acct-grace", "displayName": "Grace"},
         "created": "2026-07-14T09:30:00.000+0200",
-        "creator": {"displayName": "Ada"},
+        "creator": {"accountId": "acct-ada", "displayName": "Ada"},
         "customfield_10040": null,
         "customfield_10020": []
       },

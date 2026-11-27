@@ -1,7 +1,7 @@
 # Jira personal data reporting
 
-The live binary checks at startup and daily for accounts due for Atlassian
-Personal Data Reporting. It submits up to 90 Atlassian account IDs per request
+The live binary checks at startup, at persisted report deadlines, and daily
+for newly retained accounts. It submits up to 90 Atlassian account IDs per request
 with the oldest retrieval instant for each account, in UTC RFC 3339. Scheduling
 and rate-limit deadlines are stored in SQLite and survive restarts and full
 resyncs. The default cycle is seven days. Atlassian can supply a different cycle
@@ -10,6 +10,11 @@ The job uses the latest advertised cycle for subsequent batches and preserves
 each already reported account’s minimum interval. If a request’s outcome is
 ambiguous, SQLite retains the attempt for the known cycle to avoid resending
 early. The next eligible report can recover any actions from a lost response.
+A short SQLite lease limits reporting to one worker per database. A confirmed
+response is saved before applying its directives. The worker retries local
+application on startup and after write failures before sending another report.
+A report HTTP 401 triggers one token refresh and retry before trying another
+grant. A report HTTP 403 goes directly to the next grant.
 [Atlassian privacy guide](https://developer.atlassian.com/cloud/jira/platform/user-privacy-developer-guide/) ·
 [Atlassian Cycle-Period clarification](https://community.developer.atlassian.com/t/cycle-period-header-example/26940/2)
 
@@ -38,24 +43,25 @@ early. The next eligible report can recover any actions from a lost response.
   The operator-managed allowlist is access configuration. Remove a closed
   account from it as part of access administration.
 - An update clears stale names, avatars, cached meeting-panel author details,
-  and the encrypted grant's cached time zone. The next session lookup obtains
-  its current time zone from Jira Myself. The reporting worker refreshes
-  display profiles with Jira's Get user API and keeps unavailable profiles
-  suppressed while it retries. The permission to browse users and groups and
+  and the encrypted grant's cached time zone. A date-enabled Jira preset
+  recovers the time zone from Jira Myself on demand and offers the local All
+  Tickets view when it is unavailable. The worker refreshes display profiles
+  with Jira's Get user API independently of reporting backoff and keeps
+  unavailable profiles suppressed while it retries. The permission to browse users and groups and
   profile visibility determine what the reporting grant can retrieve. Audit
   account IDs remain stable across profile updates.
   [Jira Get user](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-users/#api-rest-api-3-user-get)
 - Free-form work content such as ticket titles, descriptions, and comment text
   follows Jira's retention. The automated user lookup and erasure cover
   structured account-linked fields. Jira content that identifies someone in
-  prose requires handling through the source ticket. The service keeps its
-  transient per-session Jira results in process memory.
+  prose requires handling through the source ticket. Prio's in-memory Jira
+  result caches use digested keys and evict entries after 45 seconds.
 
 Migration `00016` inventories identifiable legacy rows. It uses saved snapshot
 times, existing session timestamps, and the schema adoption dates as
 conservative bounds where the old schema lacks a retrieval time. It removes
-legacy name-only projection values that lack an account ID and schedules a
-historical fetch to repopulate those fields with linked IDs. Apply the normal
+legacy identities with missing or unreportable account IDs and schedules a
+historical fetch to repopulate fields where Jira supplies a reportable ID. Apply the normal
 retention and restricted access controls to database files, SQLite journals,
 and backups. When restoring an older backup, carry forward the current
 closure digests and reconcile affected identities before serving or syncing.

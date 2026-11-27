@@ -73,9 +73,9 @@ var searchPages = map[string]string{
             "summary": "Wire up the dashboard shell",
             "issuetype": {"name": "Story", "subtask": false},
             "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate", "name": "In Progress"}},
-            "assignee": {"displayName": "Ada"},
+            "assignee": {"accountId": "acct-ada", "displayName": "Ada"},
             "created": "2026-07-08T09:00:00.000+0200",
-            "creator": {"displayName": "Ada"},
+            "creator": {"accountId": "acct-ada", "displayName": "Ada"},
             "customfield_10040": {"value": "Large"},
             "customfield_10020": [
               {"name": "Sprint 41", "state": "closed", "startDate": "2026-07-06T07:00:00.000Z", "endDate": "2026-07-13T07:00:00.000Z"},
@@ -102,7 +102,7 @@ var searchPages = map[string]string{
             "status": {"name": "Ready to Do", "statusCategory": {"key": "new", "name": "To Do"}},
             "assignee": null,
             "created": "2026-07-09T09:00:00.000+0200",
-            "creator": {"displayName": "Grace"},
+            "creator": {"accountId": "acct-grace", "displayName": "Grace"},
             "customfield_10040": {"value": "Medium"},
             "customfield_10020": [{"name": "Sprint 42", "state": "active", "startDate": "2026-07-13T07:00:00.000Z", "endDate": "2026-07-20T07:00:00.000Z"}]
           },
@@ -128,9 +128,9 @@ var searchPages = map[string]string{
             "summary": "Rollup ignores no-estimate tickets",
             "issuetype": {"name": "Bug", "subtask": false},
             "status": {"name": "DONE (This Sprint)", "statusCategory": {"key": "done", "name": "Done"}},
-            "assignee": {"displayName": "Alan"},
+            "assignee": {"accountId": "acct-alan", "displayName": "Alan"},
             "created": "2026-07-10T09:00:00.000+0200",
-            "creator": {"displayName": "Alan"},
+            "creator": {"accountId": "acct-alan", "displayName": "Alan"},
             "customfield_10040": null,
             "customfield_10020": []
           },

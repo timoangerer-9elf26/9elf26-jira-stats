@@ -3,7 +3,10 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -126,9 +129,10 @@ func TestPrivacyMigrationInventoriesIdentifiableLegacyRows(t *testing.T) {
 		`INSERT INTO issue (key, type, summary, status, status_category, synced_at, assignee, assignee_account_id, creator, comments)
 		 VALUES ('DCAI-1', 'Epic', 'Existing ticket', 'Done', 'Done', '2026-01-05T09:00:00Z', 'Assignee', 'assignee-account', 'Name without ID',
 		         '[{"ID":"comment-1","Author":{"AccountID":"comment-account","DisplayName":"Comment Name"}},{"ID":"comment-2","Author":{"DisplayName":"Unlinked Author"}}]'),
-		        ('DCAI-2', 'Task', 'Older ticket', 'Done', 'Done', '2026-01-04T09:00:00Z', 'Unlinked Assignee', '', 'Unlinked Creator', NULL)`,
+		        ('DCAI-2', 'Task', 'Older ticket', 'Done', 'Done', '2026-01-04T09:00:00Z', 'Unlinked Assignee', 'UNKNOWN', 'Unlinked Creator', '[{"ID":"legacy","Author":{"AccountID":"bad id","DisplayName":"Invalid author"},"Body":{"type":"doc","content":[{"type":"mention","attrs":{"text":"Legacy mention"}},{"type":"mention","attrs":{"id":"bad id","text":"Invalid mention"}},{"type":"mention","attrs":{"id":"all","userType":"SPECIAL","text":"Everyone"}}]}}]')`,
 		`INSERT INTO status_transition (changelog_entry_id, issue_key, field, to_status, transitioned_at, author_account_id, author_display_name)
-		 VALUES ('old-entry', 'DCAI-1', 'status', 'Done', '2025-12-20T10:00:00Z', 'transition-account', 'Transition Name')`,
+		 VALUES ('old-entry', 'DCAI-1', 'status', 'Done', '2025-12-20T10:00:00Z', 'transition-account', 'Transition Name'),
+			        ('unknown-entry', 'DCAI-2', 'status', 'Done', '2025-12-21T10:00:00Z', '-1', 'Invalid change author')`,
 		`INSERT INTO prio_meeting (ended_at, account_id) VALUES ('2026-01-01T07:00:00Z', 'meeting-account')`,
 		`INSERT INTO prio_meeting_change (meeting_window, issue_key, label, account_id, occurred_at)
 		 VALUES (1, 'DCAI-1', 'Status', 'audit-account', '2026-01-02T07:00:00Z')`,
@@ -177,10 +181,74 @@ func TestPrivacyMigrationInventoriesIdentifiableLegacyRows(t *testing.T) {
 	}
 
 	old, found, err := st.IssueDetail("DCAI-2")
-	if err != nil || !found || old.Assignee != "" || old.Summary != "Older ticket" {
-		t.Fatalf("legacy name-only projection: %+v found=%v err=%v", old, found, err)
+	if err != nil || !found || old.Assignee != "" || old.AssigneeAccountID != "" || old.Summary != "Older ticket" ||
+		len(old.Comments) != 1 || old.Comments[0].Author != (jira.Person{}) {
+		t.Fatalf("legacy unreportable projection: %+v found=%v err=%v", old, found, err)
+	}
+	wantBody := `{"type":"doc","content":[{"type":"mention","attrs":{"id":"unknown"}},{"type":"mention","attrs":{"id":"unknown"}},{"type":"mention","attrs":{"id":"all","userType":"SPECIAL","text":"Everyone"}}]}`
+	if got := string(old.Comments[0].Body); got != wantBody {
+		t.Fatalf("migrated legacy mentions: %s", got)
+	}
+	changes, err := st.IssueChangesSince(time.Time{})
+	if history := changes["DCAI-2"]; err != nil || len(history) != 1 || history[0].Author != (jira.Person{}) ||
+		history[0].Timestamp.Format(time.RFC3339) != "2025-12-21T10:00:00Z" {
+		t.Fatalf("migrated legacy change: %+v err=%v", history, err)
+	}
+	members, err := st.ProjectMembers()
+	if err != nil || len(members) != 1 || members[0].AccountID != "member-account" {
+		t.Fatalf("migrated project members: %+v err=%v", members, err)
 	}
 	if _, hasWatermark, err := st.LastSync(); err != nil || hasWatermark {
 		t.Fatalf("migration should schedule a historical fetch: watermark=%v err=%v", hasWatermark, err)
+	}
+}
+
+func TestLiveHistoricalBackfillKeepsEventsWithoutUnreportableAuthors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/agile/1.0/board/1/sprint":
+			fmt.Fprint(w, `{"isLast":true,"values":[]}`)
+		case "/rest/api/3/user/assignable/search":
+			fmt.Fprint(w, `[]`)
+		case "/rest/api/3/search/jql":
+			fmt.Fprint(w, `{"isLast":true,"issues":[{
+				"key":"DCAI-4","fields":{"created":"2026-01-01T10:00:00Z",
+				"creator":{"displayName":"Legacy creator"},
+				"assignee":{"accountId":"UNKNOWN","displayName":"Legacy assignee","avatarUrls":{"48x48":"https://example.com/avatar"}},
+				"comment":{"total":1,"comments":[{"id":"c1","author":{"displayName":"Legacy commenter"},
+				"created":"2026-01-02T10:00:00Z","body":{"type":"doc","content":[]}}]}},
+				"changelog":{"total":1,"histories":[{"id":"h1","author":{"displayName":"Legacy editor"},
+				"created":"2026-01-03T10:00:00Z","items":[{"field":"status","fromString":"Open","toString":"Done"}]}]}
+			}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	st, err := Open(filepath.Join(t.TempDir(), "backfill.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	client := jira.NewLiveClient(jira.Config{BaseURL: server.URL, BoardID: "1", ProjectKey: "DCAI"})
+	if _, err := sync.Backfill(t.Context(), client, st); err != nil {
+		t.Fatal(err)
+	}
+	detail, found, err := st.IssueDetail("DCAI-4")
+	if err != nil || !found || detail.Assignee != "" || detail.AssigneeAccountID != "" || detail.AssigneeAvatarURL != "" ||
+		detail.CreatedAt.Format(time.RFC3339) != "2026-01-01T10:00:00Z" ||
+		len(detail.Comments) != 1 || detail.Comments[0].Author != (jira.Person{}) ||
+		detail.Comments[0].CreatedAt.Format(time.RFC3339) != "2026-01-02T10:00:00Z" {
+		t.Fatalf("historical ticket: %+v found=%v err=%v", detail, found, err)
+	}
+	if issue := readIssue(t, st, "DCAI-4"); issue.creator != "" {
+		t.Fatal("historical backfill persisted a creator without an account ID")
+	}
+	changes, err := st.IssueChangesSince(time.Time{})
+	history := changes["DCAI-4"]
+	if err != nil || len(history) != 1 || history[0].Author != (jira.Person{}) || history[0].To != "Done" ||
+		history[0].Timestamp.Format(time.RFC3339) != "2026-01-03T10:00:00Z" {
+		t.Fatalf("historical changes: %+v err=%v", history, err)
 	}
 }

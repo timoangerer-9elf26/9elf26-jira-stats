@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"net/url"
 	"regexp"
@@ -15,7 +16,10 @@ import (
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/store"
 )
 
-const prioPresetCacheTTL = 45 * time.Second
+const (
+	prioPresetCacheTTL   = 45 * time.Second
+	prioPresetCacheLimit = 256
+)
 
 type planningPresetClient interface {
 	PlanningPresets(context.Context) ([]jira.PlanningPreset, error)
@@ -31,23 +35,31 @@ type prioPresetView struct {
 
 type prioMissingTicket struct{ Key, Href string }
 
-type prioQueryKey struct{ account, jql string }
+type prioQueryKey struct{ account, jql [sha256.Size]byte }
 
 type prioCacheEntry[V any] struct {
 	value   V
 	expires time.Time
+	timer   *time.Timer
 }
 
 type prioCache[K comparable, V any] struct {
 	mu      sync.Mutex
-	entries map[K]prioCacheEntry[V]
+	entries map[K]*prioCacheEntry[V]
 }
 
 func (c *prioCache[K, V]) get(key K, now time.Time) (V, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	entry := c.entries[key]
-	return entry.value, now.Before(entry.expires)
+	return c.getLocked(key, now)
+}
+
+func (c *prioCache[K, V]) getLocked(key K, now time.Time) (V, bool) {
+	if entry := c.entries[key]; entry != nil && now.Before(entry.expires) {
+		return entry.value, true
+	}
+	var zero V
+	return zero, false
 }
 
 func (c *prioCache[K, V]) put(key K, value V, now time.Time) {
@@ -58,46 +70,65 @@ func (c *prioCache[K, V]) put(key K, value V, now time.Time) {
 
 func (c *prioCache[K, V]) putLocked(key K, value V, now time.Time) {
 	if c.entries == nil {
-		c.entries = make(map[K]prioCacheEntry[V])
+		c.entries = make(map[K]*prioCacheEntry[V])
 	}
-	for oldKey, entry := range c.entries {
-		if !now.Before(entry.expires) {
-			delete(c.entries, oldKey)
+	c.deleteLocked(key)
+	if len(c.entries) >= prioPresetCacheLimit {
+		var oldestKey K
+		var oldest time.Time
+		for candidate, entry := range c.entries {
+			if oldest.IsZero() || entry.expires.Before(oldest) {
+				oldestKey, oldest = candidate, entry.expires
+			}
 		}
+		c.deleteLocked(oldestKey)
 	}
-	c.entries[key] = prioCacheEntry[V]{value, now.Add(prioPresetCacheTTL)}
+	entry := &prioCacheEntry[V]{value: value, expires: now.Add(prioPresetCacheTTL)}
+	entry.timer = time.AfterFunc(prioPresetCacheTTL, func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.entries[key] == entry {
+			delete(c.entries, key)
+		}
+	})
+	c.entries[key] = entry
+}
+
+func (c *prioCache[K, V]) deleteLocked(key K) {
+	if previous := c.entries[key]; previous != nil {
+		previous.timer.Stop()
+		delete(c.entries, key)
+	}
 }
 
 type prioSearchCache struct {
 	prioCache[prioQueryKey, []string]
-	generation map[string]uint64
+	generation uint64
 }
 
 func (c *prioSearchCache) lookup(key prioQueryKey, now time.Time) ([]string, bool, uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	entry := c.entries[key]
-	return entry.value, now.Before(entry.expires), c.generation[key.account]
+	value, found := c.getLocked(key, now)
+	return value, found, c.generation
 }
 
 func (c *prioSearchCache) store(key prioQueryKey, value []string, now time.Time, generation uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.generation[key.account] == generation {
+	if c.generation == generation {
 		c.putLocked(key, value, now)
 	}
 }
 
 func (c *prioSearchCache) invalidate(accountID string) {
+	account := sha256.Sum256([]byte(accountID))
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.generation == nil {
-		c.generation = make(map[string]uint64)
-	}
-	c.generation[accountID]++
+	c.generation++
 	for query := range c.entries {
-		if query.account == accountID {
-			delete(c.entries, query)
+		if query.account == account {
+			c.deleteLocked(query)
 		}
 	}
 }
@@ -118,7 +149,8 @@ func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, q url
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	filters, cached := s.prioFiltersCache.get(identity.AccountID, s.now())
+	account := sha256.Sum256([]byte(identity.AccountID))
+	filters, cached := s.prioFiltersCache.get(account, s.now())
 	if !cached {
 		fetched, err := client.PlanningPresets(ctx)
 		if err != nil {
@@ -126,7 +158,7 @@ func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, q url
 			return nil
 		}
 		filters = fetched
-		s.prioFiltersCache.put(identity.AccountID, filters, s.now())
+		s.prioFiltersCache.put(account, filters, s.now())
 	}
 	for _, filter := range filters {
 		if filter.ID != prioDefaultPreset {
@@ -143,13 +175,23 @@ func (s *Server) prioPresetKeys(ctx context.Context, view *prioAgendaView, q url
 		view.PresetError = "Dieser Jira-Filter ist für dein Konto nicht verfügbar."
 		return nil
 	}
-	jql, err := prioPresetJQL(filters[i], view.Cutoff, identity.TimeZone)
+	filter := filters[i]
+	var loc *time.Location
+	if prioCutoffMarker.MatchString(filter.Description) {
+		var err error
+		loc, err = identity.JiraTimeZone(ctx)
+		if err != nil {
+			view.PresetError = "Die Jira-Zeitzone konnte nicht geladen werden."
+			return nil
+		}
+	}
+	jql, err := prioPresetJQL(filter, view.Cutoff, loc)
 	if err != nil {
 		view.PresetError = "Konfigurationsfehler im Jira-Filter. " + err.Error()
 		return nil
 	}
 	view.JiraSearchHref = s.jiraSearchURL(jql)
-	key := prioQueryKey{identity.AccountID, jql}
+	key := prioQueryKey{account, sha256.Sum256([]byte(jql))}
 	keys, cached, generation := s.prioKeysCache.lookup(key, s.now())
 	if !cached {
 		keys, err = client.SearchIssueKeys(ctx, jql)

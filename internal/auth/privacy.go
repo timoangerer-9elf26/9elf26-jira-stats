@@ -20,6 +20,8 @@ import (
 const (
 	privacyBatchSize     = 90
 	privacyCheckInterval = 24 * time.Hour
+	privacyClaimLease    = 2 * time.Minute
+	privacySendTimeout   = time.Minute
 )
 
 var errNoReportingGrant = errors.New("no usable stored Atlassian grant")
@@ -36,9 +38,10 @@ func NewPrivacyReporter(service *Service, owner string, now func() time.Time) *P
 	return &PrivacyReporter{service: service, owner: strings.TrimSpace(owner), now: now}
 }
 
-// Run checks at startup, then daily or at a server-directed retry time.
+// Run checks at startup, at persisted deadlines, and daily for discoveries.
 func (r *PrivacyReporter) Run(ctx context.Context) {
 	for ctx.Err() == nil {
+		started := r.now()
 		count, retryAt, err := r.Check(ctx)
 		if count > 0 {
 			log.Printf("jira privacy: successfully reported %d accounts", count)
@@ -47,8 +50,15 @@ func (r *PrivacyReporter) Run(ctx context.Context) {
 			log.Printf("jira privacy: %v", err)
 		}
 		delay := privacyCheckInterval
+		next, scheduleErr := r.service.store.NextPrivacyDeadline(ctx, started)
+		if scheduleErr != nil && ctx.Err() == nil {
+			log.Print("jira privacy: could not read next reporting deadline")
+		}
+		if !next.IsZero() {
+			delay = min(delay, max(time.Second, next.Sub(r.now())))
+		}
 		if !retryAt.IsZero() {
-			delay = max(time.Second, time.Until(retryAt))
+			delay = min(delay, max(time.Second, retryAt.Sub(r.now())))
 		}
 		timer := time.NewTimer(delay)
 		select {
@@ -65,31 +75,34 @@ func (r *PrivacyReporter) Check(ctx context.Context) (count int, retryAt time.Ti
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	defer func() { err = errors.Join(err, r.refreshProfiles(ctx)) }()
+
 	s := r.service
-	cycle, retryAt, err := s.store.PrivacyPoll(ctx)
-	if err != nil {
-		return 0, time.Time{}, errors.New("could not read reporting schedule")
-	}
-	if retryAt.After(r.now()) {
-		return 0, retryAt, nil
-	}
 	for {
+		applied, err := s.applyPendingPrivacyReport(ctx)
+		if err != nil {
+			return count, time.Time{}, errors.New("could not apply persisted Atlassian reporting response")
+		}
+		count += applied
+		retryAt, err := s.store.PrivacyRetryAt(ctx)
+		if err != nil {
+			return count, time.Time{}, errors.New("could not read reporting schedule")
+		}
+		if retryAt.After(r.now()) {
+			return count, retryAt, nil
+		}
 		batch, err := s.store.PrivacyDue(ctx, r.now(), privacyBatchSize)
 		if err != nil {
 			return count, time.Time{}, errors.New("could not read reporting inventory")
 		}
 		if len(batch) == 0 {
-			break
+			return count, time.Time{}, nil
 		}
-
-		nextCycle, deadline, err := r.submitBatch(ctx, batch, cycle)
+		deadline, err := r.submitBatch(ctx, batch)
 		if err != nil || !deadline.IsZero() {
 			return count, deadline, err
 		}
-		cycle = nextCycle
-		count += len(batch)
 	}
-	return count, time.Time{}, r.refreshProfiles(ctx)
 }
 
 func (r *PrivacyReporter) refreshProfiles(ctx context.Context) error {
@@ -105,7 +118,7 @@ func (r *PrivacyReporter) refreshProfiles(ctx context.Context) error {
 	// Each candidate's token can serve several profiles. If an account is
 	// invisible to that grant, another authorized grant can still supply it.
 	for _, candidate := range r.candidateAccounts() {
-		bearer, err := s.reportingBearer(ctx, candidate)
+		bearer, err := s.reportingBearer(ctx, candidate, "")
 		if err != nil {
 			continue
 		}
@@ -146,22 +159,22 @@ func (r *PrivacyReporter) candidateAccounts() []string {
 	return ids
 }
 
-func (s *Service) reportingBearer(ctx context.Context, account string) (string, error) {
+func (s *Service) reportingBearer(ctx context.Context, account, rejectedBearer string) (string, error) {
 	s.exchanges.RLock()
 	defer s.exchanges.RUnlock()
 	lock := s.accounts[account]
 	lock.Lock()
 	defer lock.Unlock()
-	g, err := s.loadUsableGrant(ctx, account)
+	g, err := s.loadUsableGrant(ctx, account, rejectedBearer)
 	return g.AccessToken, err
 }
 
-func (s *Service) applyPrivacyReport(ctx context.Context, now time.Time, cycle time.Duration, batch []store.PrivacyAccount, actions map[string]string) error {
+func (s *Service) applyPendingPrivacyReport(ctx context.Context) (int, error) {
 	// Prevent a rotating grant refresh from restoring profile data as it
 	// replaces the token pair. SQLite guards the projection and audit writes.
 	s.exchanges.Lock()
 	defer s.exchanges.Unlock()
-	return s.store.ApplyPrivacyReport(ctx, now, cycle, batch, actions, func(account string, encrypted []byte) []byte {
+	return s.store.ApplyPendingPrivacyReport(ctx, func(account string, encrypted []byte) []byte {
 		g, err := s.open(account, encrypted)
 		if err != nil {
 			return nil
@@ -176,71 +189,80 @@ func (s *Service) applyPrivacyReport(ctx context.Context, now time.Time, cycle t
 }
 
 type privacyResponse struct {
-	cycle     time.Duration
-	retry     string
-	limited   bool
-	rejected  bool
-	uncertain bool
-	actions   map[string]string
+	cycle        time.Duration
+	retry        string
+	limited      bool
+	rejected     bool
+	unauthorized bool
+	uncertain    bool
+	actions      map[string]string
 }
 
 // submitBatch owns one request's durable scheduling state, including the
 // interval between sending the report and committing Atlassian's answer.
-func (r *PrivacyReporter) submitBatch(ctx context.Context, batch []store.PrivacyAccount, cycle time.Duration) (time.Duration, time.Time, error) {
-	var attempted bool
-	var result privacyResponse
-	reportErr := errNoReportingGrant
-	for _, account := range r.candidateAccounts() {
-		bearer, err := r.service.reportingBearer(ctx, account)
-		if err != nil {
-			continue
-		}
-		now := r.now()
-		if err := r.service.store.ReservePrivacyBatch(ctx, batch, now, now.Add(cycle).Add(atlassianRequestTimeout)); err != nil {
-			reportErr = errors.New("could not reserve reporting batch")
-			break
-		}
-		attempted = true
-		result, reportErr = r.service.provider.reportAccounts(ctx, bearer, batch)
-		if !result.rejected {
-			break
-		}
-		reportErr = errNoReportingGrant
+func (r *PrivacyReporter) submitBatch(ctx context.Context, batch []store.PrivacyAccount) (time.Time, error) {
+	// Bound the entire exchange, including fallback grants, inside the
+	// database lease. Leave time for the durable acknowledgement.
+	sendCtx, stopSending := context.WithTimeout(ctx, privacySendTimeout)
+	defer stopSending()
+	now := r.now()
+	claim, cycle, err := r.service.store.ClaimPrivacyBatch(sendCtx, batch, now, now.Add(privacyClaimLease))
+	if err != nil {
+		return time.Time{}, errors.New("could not claim reporting batch")
 	}
-	if !attempted {
-		return cycle, time.Time{}, reportErr
+	if claim == "" {
+		return time.Time{}, nil
 	}
 
-	// Save a known result even during graceful shutdown.
+	result, reportErr := r.sendBatch(sendCtx, batch)
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	now := r.now()
+	now = r.now()
 	if result.uncertain {
-		if result.cycle > cycle {
-			if err := r.service.store.ReservePrivacyBatch(saveCtx, batch, now, now.Add(result.cycle)); err != nil {
-				return cycle, time.Time{}, errors.New("could not extend uncertain reporting deadline")
-			}
+		if err := r.service.store.FinishPrivacyBatch(saveCtx, claim, time.Time{}, true, now.Add(result.cycle)); err != nil {
+			return time.Time{}, errors.New("could not save uncertain reporting state")
 		}
-		return cycle, time.Time{}, reportErr
+		return time.Time{}, reportErr
 	}
 	if reportErr != nil || result.retry != "" || result.limited {
 		var deadline time.Time
 		if result.retry != "" || result.limited {
 			deadline = privacyRetryAt(now, result.retry)
 		}
-		if err := r.service.store.ReleasePrivacyBatch(saveCtx, batch, deadline); err != nil {
-			return cycle, deadline, errors.New("could not save reporting retry state")
+		if err := r.service.store.FinishPrivacyBatch(saveCtx, claim, deadline, false, time.Time{}); err != nil {
+			return deadline, errors.New("could not save reporting retry state")
 		}
-		return cycle, deadline, reportErr
+		return deadline, reportErr
 	}
 
 	if result.cycle != 0 {
 		cycle = result.cycle
 	}
-	if err := r.service.applyPrivacyReport(saveCtx, now, cycle, batch, result.actions); err != nil {
-		return cycle, time.Time{}, errors.New("could not apply Atlassian's reporting response")
+	if err := r.service.store.RecordPrivacyReport(saveCtx, claim, now, cycle, batch, result.actions); err != nil {
+		return time.Time{}, errors.New("could not record Atlassian's reporting response")
 	}
-	return cycle, time.Time{}, nil
+	return time.Time{}, nil
+}
+
+func (r *PrivacyReporter) sendBatch(ctx context.Context, batch []store.PrivacyAccount) (privacyResponse, error) {
+	for _, account := range r.candidateAccounts() {
+		bearer, err := r.service.reportingBearer(ctx, account, "")
+		if err != nil || ctx.Err() != nil {
+			continue
+		}
+		result, err := r.service.provider.reportAccounts(ctx, bearer, batch)
+		if result.unauthorized {
+			bearer, err = r.service.reportingBearer(ctx, account, bearer)
+			if err != nil || ctx.Err() != nil {
+				continue
+			}
+			result, err = r.service.provider.reportAccounts(ctx, bearer, batch)
+		}
+		if !result.rejected {
+			return result, err
+		}
+	}
+	return privacyResponse{}, errNoReportingGrant
 }
 
 func (p provider) reportAccounts(ctx context.Context, bearer string, batch []store.PrivacyAccount) (privacyResponse, error) {
@@ -265,7 +287,10 @@ func (p provider) reportAccounts(ctx context.Context, bearer string, batch []sto
 
 	var result privacyResponse
 	switch resp.StatusCode {
-	case http.StatusUnauthorized, http.StatusForbidden:
+	case http.StatusUnauthorized:
+		result.unauthorized = true
+		result.rejected = true
+	case http.StatusForbidden:
 		result.rejected = true
 	case http.StatusTooManyRequests:
 		result.limited, result.retry = true, resp.Header.Get("Retry-After")

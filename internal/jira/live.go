@@ -148,6 +148,9 @@ func (c *LiveClient) FetchProjectMembers(ctx context.Context) ([]ProjectMember, 
 			return nil, fmt.Errorf("jira assignable users: %w", err)
 		}
 		for _, dto := range page {
+			if !IsReportableAccountID(dto.AccountID) {
+				continue
+			}
 			users = append(users, AssignableUser{
 				AccountID:   dto.AccountID,
 				DisplayName: dto.DisplayName,
@@ -335,6 +338,7 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		return Issue{}, fmt.Errorf("comments for %s: %w", dto.Key, err)
 	}
 
+	assignee, creator := person(dto.Fields.Assignee), person(dto.Fields.Creator)
 	iss := Issue{
 		Key:               dto.Key,
 		Type:              dto.Fields.IssueType.Name,
@@ -343,9 +347,8 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		StatusCategory:    dto.Fields.Status.Category.Name,
 		Size:              mapSize(dto.Fields.Size),
 		Sprint:            currentSprint(dto.Fields.Sprint),
-		Assignee:          assigneeName(dto.Fields.Assignee),
-		AssigneeAccountID: person(dto.Fields.Assignee).AccountID,
-		AssigneeAvatarURL: assigneeAvatarURL(dto.Fields.Assignee),
+		Assignee:          assignee.DisplayName,
+		AssigneeAccountID: assignee.AccountID,
 		ParentKey:         parentKey(dto.Fields.Parent),
 		EpicColor:         dto.Fields.EpicColor,
 		Priority:          priorityName(dto.Fields.Priority),
@@ -355,10 +358,14 @@ func (c *LiveClient) toIssue(ctx context.Context, dto issueDTO) (Issue, error) {
 		Description:       nonNullJSON(dto.Fields.Description),
 		Comments:          comments,
 		Links:             toIssueLinks(dto.Fields.Links),
-		Creator:           assigneeName(dto.Fields.Creator),
-		CreatorAccountID:  person(dto.Fields.Creator).AccountID,
+		Creator:           creator.DisplayName,
+		CreatorAccountID:  creator.AccountID,
 		Changelog:         entries,
 		SprintChanges:     sprintChanges,
+	}
+
+	if assignee.AccountID != "" {
+		iss.AssigneeAvatarURL = largestAvatarURL(dto.Fields.Assignee.AvatarUrls)
 	}
 
 	// Record active-sprint MEMBERSHIP (name + id) only; the sprint's window comes
@@ -771,26 +778,10 @@ func (c *LiveClient) FetchUserProfile(ctx context.Context, account string) (Proj
 	if err := c.get(ctx, "/rest/api/3/user", query, &dto); err != nil {
 		return ProjectMember{}, errors.New("Jira user profile is unavailable")
 	}
-	if dto.AccountID != account || strings.TrimSpace(dto.DisplayName) == "" {
+	if dto.AccountID != account || !IsReportableAccountID(dto.AccountID) || strings.TrimSpace(dto.DisplayName) == "" {
 		return ProjectMember{}, errors.New("Jira user profile is incomplete")
 	}
 	return ProjectMember{AccountID: dto.AccountID, DisplayName: dto.DisplayName, AvatarURL: largestAvatarURL(dto.AvatarUrls)}, nil
-}
-
-func assigneeName(u *userDTO) string {
-	if u == nil {
-		return ""
-	}
-	return u.DisplayName
-}
-
-// assigneeAvatarURL returns the largest available avatar image URL for a user,
-// or "" when there is no user or no avatar.
-func assigneeAvatarURL(u *userDTO) string {
-	if u == nil {
-		return ""
-	}
-	return largestAvatarURL(u.AvatarUrls)
 }
 
 // largestAvatarURL picks the biggest avatar image Jira offers, for a crisp

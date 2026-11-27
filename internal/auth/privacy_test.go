@@ -1,6 +1,8 @@
 package auth_test
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +10,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,6 +168,11 @@ func TestPrivacyUpdateClearsAndRefreshesProfileWithoutChangingChronology(t *test
 	reports := 0
 	mux := privacyProvider(func(w http.ResponseWriter, r *http.Request) {
 		reports++
+		if reports > 1 {
+			w.Header().Set("Retry-After", "7200")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
 		fmt.Fprint(w, `{"accounts":[{"accountId":"updated-account","status":"updated"}]}`)
 	})
 	profileReads := 0
@@ -172,14 +181,19 @@ func TestPrivacyUpdateClearsAndRefreshesProfileWithoutChangingChronology(t *test
 			t.Error("profile lookup did not identify the requested account and grant")
 		}
 		profileReads++
-		if profileReads == 1 {
+		if profileReads <= 2 {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
 		fmt.Fprint(w, `{"accountId":"updated-account","displayName":"Current Name","avatarUrls":{"48x48":"https://example.com/current"}}`)
 	})
+	myselfAvailable := false
 	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/ex/jira/cloud/rest/api/3/myself" && reports > 0 {
+			if !myselfAvailable {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
 			fmt.Fprint(w, `{"accountId":"updated-account","timeZone":"UTC","active":true}`)
 			return
 		}
@@ -238,9 +252,16 @@ func TestPrivacyUpdateClearsAndRefreshesProfileWithoutChangingChronology(t *test
 		t.Fatalf("stale profile is still selectable: %+v err=%v", members, err)
 	}
 
+	if err := st.RecordPrioMeetingChange(store.PrioMeetingChange{IssueKey: issue.Key, Label: "Status", AccountID: "new-account", OccurredAt: now}); err != nil {
+		t.Fatal(err)
+	}
 	now = now.Add(24 * time.Hour)
-	if count, _, err := reporter.Check(t.Context()); err != nil || count != 0 || reports != 1 {
-		t.Fatalf("profile retry also reported accounts: count=%d reports=%d err=%v", count, reports, err)
+	if count, retry, err := reporter.Check(t.Context()); err != nil || count != 0 || reports != 2 || !retry.Equal(now.Add(2*time.Hour)) {
+		t.Fatalf("rate-limited report: count=%d reports=%d retry=%v err=%v", count, reports, retry, err)
+	}
+	now = now.Add(time.Hour)
+	if count, retry, err := reporter.Check(t.Context()); err != nil || count != 0 || reports != 2 || !retry.Equal(now.Add(time.Hour)) {
+		t.Fatalf("profile retry during report backoff: count=%d reports=%d retry=%v err=%v", count, reports, retry, err)
 	}
 	const freshAvatar = "https://example.com/current"
 	assertProfile("Current Name", freshAvatar)
@@ -250,8 +271,16 @@ func TestPrivacyUpdateClearsAndRefreshesProfileWithoutChangingChronology(t *test
 	if err != nil || len(members) != 1 || members[0].DisplayName != "Current Name" || members[0].AvatarURL != freshAvatar {
 		t.Fatalf("refreshed members: %+v err=%v", members, err)
 	}
-	if identity, _, err := service.Resolve(t.Context(), session); err != nil || identity.AccountID != account || identity.TimeZone.String() != "UTC" {
-		t.Fatalf("updated account lost its valid session: identity=%+v err=%v", identity, err)
+	identity, _, err := service.Resolve(t.Context(), session)
+	if err != nil || identity.AccountID != account || identity.TimeZone != nil {
+		t.Fatalf("updated account lost its valid session: account matches=%v err=%v", identity.AccountID == account, err)
+	}
+	if zone, err := identity.JiraTimeZone(t.Context()); err == nil || zone != nil {
+		t.Fatalf("unavailable Jira timezone gave zone=%v err=%v", zone, err)
+	}
+	myselfAvailable = true
+	if zone, err := identity.JiraTimeZone(t.Context()); err != nil || zone.String() != "UTC" {
+		t.Fatalf("timezone after recovery: zone=%v err=%v", zone, err)
 	}
 }
 
@@ -314,5 +343,231 @@ func TestPrivacyClosedDirectiveRevokesTheReportingOwnersSession(t *testing.T) {
 	last, err := st.LastPrioMeeting()
 	if err != nil || last.AccountID != "" || !last.EndedAt.Equal(started) {
 		t.Fatalf("closed account left attributable or altered history: %+v err=%v", last, err)
+	}
+}
+
+func TestConcurrentPrivacyReportersDoNotSendTheSameAccount(t *testing.T) {
+	const account = "owner-account"
+	requests := make(chan struct{}, 2)
+	release := make(chan struct{})
+	stub := httptest.NewServer(privacyProvider(func(w http.ResponseWriter, r *http.Request) {
+		requests <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer stub.Close()
+	path := filepath.Join(t.TempDir(), "workers.db")
+	_, first := openPrivacyAuth(t, path, stub.URL, account)
+	loginPrivacyUser(t, first, account)
+	_, second := openPrivacyAuth(t, path, stub.URL, account)
+
+	// Pause the first worker after it reads the due inventory so the
+	// second worker can claim those same accounts and start sending.
+	paused, resume := make(chan struct{}), make(chan struct{})
+	calls := 0
+	now := time.Now()
+	firstReporter := auth.NewPrivacyReporter(first, account, func() time.Time {
+		calls++
+		if calls == 3 {
+			close(paused)
+			<-resume
+		}
+		return now
+	})
+	firstDone := make(chan error, 1)
+	go func() { _, _, err := firstReporter.Check(t.Context()); firstDone <- err }()
+	defer func() {
+		select {
+		case <-resume:
+		default:
+			close(resume)
+		}
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	select {
+	case <-paused:
+	case err := <-firstDone:
+		t.Fatalf("first worker finished before attempting to send: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("first worker did not reach the claim")
+	}
+	secondReporter := auth.NewPrivacyReporter(second, account, func() time.Time { return now })
+	secondDone := make(chan error, 1)
+	go func() { _, _, err := secondReporter.Check(t.Context()); secondDone <- err }()
+	select {
+	case <-requests:
+	case err := <-secondDone:
+		t.Fatalf("second worker finished before sending: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("second worker did not send")
+	}
+	close(resume)
+	select {
+	case <-requests:
+		t.Fatal("two reporters sent the same account")
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("stale worker did not yield")
+	}
+	close(release)
+	if err := <-secondDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrivacyReportRefreshesUnauthorizedBearerAndSkipsRefreshOnForbidden(t *testing.T) {
+	const owner = "owner-account"
+	const fallback = "alternate-account"
+	for _, tc := range []struct {
+		name        string
+		status      int
+		freshStatus int
+		bearers     []string
+		refreshes   int
+	}{
+		{"401 then success", http.StatusUnauthorized, http.StatusNoContent, []string{owner, "fresh-owner"}, 1},
+		{"401 then 401", http.StatusUnauthorized, http.StatusUnauthorized, []string{owner, "fresh-owner", fallback}, 1},
+		{"403 then fallback", http.StatusForbidden, http.StatusNoContent, []string{owner, fallback}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var bearers []string
+			refreshes := 0
+			mux := privacyProvider(func(w http.ResponseWriter, r *http.Request) {
+				bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+				bearers = append(bearers, bearer)
+				switch bearer {
+				case owner:
+					w.WriteHeader(tc.status)
+				case "fresh-owner":
+					w.WriteHeader(tc.freshStatus)
+				default:
+					w.WriteHeader(http.StatusNoContent)
+				}
+			})
+			stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/oauth/token" {
+					var fields map[string]string
+					if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
+						t.Error(err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					if fields["grant_type"] == "refresh_token" {
+						refreshes++
+						if fields["refresh_token"] != "refresh-"+owner {
+							t.Error("unexpected refresh grant")
+						}
+						fmt.Fprint(w, `{"access_token":"fresh-owner","refresh_token":"next-owner","expires_in":3600}`)
+						return
+					}
+					id := fields["code"]
+					_ = json.NewEncoder(w).Encode(map[string]any{"access_token": id, "refresh_token": "refresh-" + id, "expires_in": 3600})
+					return
+				}
+				mux.ServeHTTP(w, r)
+			}))
+			defer stub.Close()
+			_, service := openPrivacyAuth(t, filepath.Join(t.TempDir(), "oauth.db"), stub.URL, owner+","+fallback)
+			loginPrivacyUser(t, service, owner)
+			loginPrivacyUser(t, service, fallback)
+
+			reporter := auth.NewPrivacyReporter(service, owner, time.Now)
+			if count, _, err := reporter.Check(t.Context()); err != nil || count != 2 {
+				t.Fatalf("report result: count=%d err=%v", count, err)
+			}
+			if !slices.Equal(bearers, tc.bearers) || refreshes != tc.refreshes {
+				t.Fatalf("unexpected report sequence and refresh count: %v, %d", bearers, refreshes)
+			}
+		})
+	}
+}
+
+func TestKnownPrivacyClosureSurvivesFailedProjectionAndRestart(t *testing.T) {
+	const account = "owner-account"
+	reports := 0
+	stub := httptest.NewServer(privacyProvider(func(w http.ResponseWriter, r *http.Request) {
+		reports++
+		fmt.Fprint(w, `{"accounts":[{"accountId":"owner-account","status":"closed"}]}`)
+	}))
+	defer stub.Close()
+	path := filepath.Join(t.TempDir(), "inbox.db")
+	st, service := openPrivacyAuth(t, path, stub.URL, account)
+	session := loginPrivacyUser(t, service, account)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TRIGGER block_projection BEFORE DELETE ON jira_auth_grant
+		BEGIN SELECT RAISE(ABORT, 'test projection failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	reporter := auth.NewPrivacyReporter(service, account, func() time.Time { return now })
+	if count, _, err := reporter.Check(t.Context()); err == nil || count != 0 || reports != 1 {
+		t.Fatalf("interrupted projection: count=%d reports=%d err=%v", count, reports, err)
+	}
+	if count, _, err := reporter.Check(t.Context()); err == nil || count != 0 || reports != 1 {
+		t.Fatalf("failed replay: count=%d reports=%d err=%v", count, reports, err)
+	}
+	if _, err := db.Exec("DROP TRIGGER block_projection"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, service = openPrivacyAuth(t, path, stub.URL, account)
+	reporter = auth.NewPrivacyReporter(service, account, func() time.Time { return now })
+	if count, _, err := reporter.Check(t.Context()); err != nil || count != 1 || reports != 1 {
+		t.Fatalf("replayed closure: count=%d reports=%d err=%v", count, reports, err)
+	}
+	if _, _, err := service.Resolve(t.Context(), session); !errors.Is(err, auth.ErrSignIn) {
+		t.Fatalf("replayed closure left a usable session: %v", err)
+	}
+}
+
+func TestPrivacyRunWakesAtPersistedAccountDeadlineAfterRestart(t *testing.T) {
+	const account = "owner-account"
+	requests := make(chan struct{}, 2)
+	stub := httptest.NewServer(privacyProvider(func(w http.ResponseWriter, r *http.Request) {
+		requests <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer stub.Close()
+	path := filepath.Join(t.TempDir(), "deadline.db")
+	st, service := openPrivacyAuth(t, path, stub.URL, account)
+	loginPrivacyUser(t, service, account)
+	// Make the next report due shortly after a new worker starts.
+	due := time.Now().Add(2 * time.Second)
+	reporter := auth.NewPrivacyReporter(service, account, func() time.Time { return due.Add(-7 * 24 * time.Hour) })
+	if count, _, err := reporter.Check(t.Context()); err != nil || count != 1 {
+		t.Fatalf("initial check: count=%d err=%v", count, err)
+	}
+	<-requests
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, service = openPrivacyAuth(t, path, stub.URL, account)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		auth.NewPrivacyReporter(service, account, time.Now).Run(ctx)
+	}()
+	defer func() { cancel(); <-done }()
+	select {
+	case <-requests:
+		if time.Now().Before(due) {
+			t.Fatal("reported before the persisted deadline")
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("reporter missed the persisted deadline")
 	}
 }

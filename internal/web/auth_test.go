@@ -725,3 +725,76 @@ func TestOAuthRejectsAllowlistedAccountWithoutProjectAccess(t *testing.T) {
 		t.Fatal("denied Jira account must see an access error and receive no session")
 	}
 }
+
+func TestPrioAllTicketsRemainsAvailableWhenJiraTimezoneRefreshFails(t *testing.T) {
+	var myselfCalls atomic.Int32
+	var searchCalls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			io.WriteString(w, `{"access_token":"access-1","refresh_token":"refresh-1","expires_in":3600}`)
+		case "/oauth/token/accessible-resources":
+			io.WriteString(w, `[{"id":"cloud-1","url":"https://site.example","scopes":["read:jira-work","write:jira-work","read:jira-user"]}]`)
+		case myPermissionsPath:
+			writeProjectPermission(t, w, r, validProjectPermission)
+		case "/ex/jira/cloud-1/rest/api/3/myself":
+			if myselfCalls.Add(1) > 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			io.WriteString(w, `{"accountId":"person-1","timeZone":"America/New_York","active":true}`)
+		case "/app/report-accounts/":
+			io.WriteString(w, `{"accounts":[{"accountId":"person-1","status":"updated"}]}`)
+		case "/ex/jira/cloud-1/rest/api/3/user":
+			w.WriteHeader(http.StatusForbidden)
+		case "/ex/jira/cloud-1/rest/api/3/filter/search":
+			writePlanningFilters(w,
+				jira.PlanningPreset{ID: "10519", Name: "Planning Recent", JQL: `project = DCAI AND status CHANGED AFTER "2026-11-20 00:00"`, Description: `stichtag: "2026-11-20 00:00"`},
+				jira.PlanningPreset{ID: "22", Name: "Planning All", JQL: "project = DCAI"})
+		case "/ex/jira/cloud-1/rest/api/3/search/jql":
+			searchCalls.Add(1)
+			io.WriteString(w, `{"issues":[{"key":"DCAI-1"}]}`)
+		default:
+			t.Errorf("unexpected Jira route: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer provider.Close()
+	var cfg auth.Config
+	app := newOAuthApp(t, provider, func(c *auth.Config) { cfg = *c })
+	dest, flow := startOAuth(t, app, "/prio?preset=all")
+	resp := callback(t, app, dest.Query().Get("state"), flow)
+	session := findCookie(resp, sessionCookie)
+	readResponse(t, resp, http.StatusFound)
+	if session == nil {
+		t.Fatal("OAuth callback did not create a session")
+	}
+
+	service, err := auth.New(app.Store, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter := auth.NewPrivacyReporter(service, "person-1", time.Now)
+	if _, _, err := reporter.Check(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	getPrio := func(preset string) string {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, app.URL+"/prio?preset="+preset, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.AddCookie(session)
+		return readResponse(t, response(t)(oauthClient(app).Do(req)), http.StatusOK)
+	}
+	if body := getPrio("all"); !strings.Contains(body, `data-key="DCAI-1"`) || myselfCalls.Load() != 1 {
+		t.Fatal("local All Tickets depended on Jira Myself")
+	}
+	if body := getPrio("22"); !strings.Contains(body, `data-key="DCAI-1"`) || myselfCalls.Load() != 1 || searchCalls.Load() != 1 {
+		t.Fatal("unmarked Jira preset depended on Jira Myself")
+	}
+	if body := getPrio("10519"); !strings.Contains(body, "Die Jira-Zeitzone konnte nicht geladen werden.") ||
+		!strings.Contains(body, "Alle Tickets · lokaler Stand") || myselfCalls.Load() != 2 || searchCalls.Load() != 1 {
+		t.Fatal("date-marked preset did not offer the local fallback when Jira Myself failed")
+	}
+}

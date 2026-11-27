@@ -108,7 +108,7 @@ func nonNullJSON(raw json.RawMessage) json.RawMessage {
 }
 
 func person(dto *userDTO) Person {
-	if dto == nil {
+	if dto == nil || !IsReportableAccountID(dto.AccountID) {
 		return Person{}
 	}
 	return Person{AccountID: dto.AccountID, DisplayName: dto.DisplayName}
