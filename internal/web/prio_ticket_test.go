@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -65,7 +66,7 @@ func postPrioTicket(t *testing.T, app *testApp, form url.Values) string {
 	return ticketResponse(t, res, err)
 }
 
-func newWritablePrioApp(t *testing.T, client *jira.FakeClient) *testApp {
+func newWritablePrioApp(t *testing.T, client jira.Client) *testApp {
 	t.Helper()
 	app := newTestApp(t, client)
 	server, err := web.NewServer(app.Store, web.WithFakeJira(client), web.WithJiraBaseURL("https://jira.example"),
@@ -192,5 +193,35 @@ func TestPrioTicketRejectsWriteOutsideProjectedDCAI(t *testing.T) {
 		if response.StatusCode != http.StatusNotFound {
 			t.Errorf("write to %s returned %d", key, response.StatusCode)
 		}
+	}
+}
+
+type casePlanningJira struct{ *jira.FakeClient }
+
+func (c casePlanningJira) PlanningPresets(context.Context) ([]jira.PlanningPreset, error) {
+	return []jira.PlanningPreset{{ID: "42", Name: "Planning: High priority", JQL: "project = DCAI AND priority = High"}}, nil
+}
+
+func (c casePlanningJira) SearchIssueKeys(ctx context.Context, _ string) ([]string, error) {
+	issue, err := c.FetchIssue(ctx, "DCAI-41")
+	if err != nil || issue.Priority != "High" {
+		return nil, err
+	}
+	return []string{issue.Key}, nil
+}
+
+func TestPrioTicketMutationRefreshesActiveJiraPreset(t *testing.T) {
+	client := casePlanningJira{&jira.FakeClient{Issues: []jira.Issue{{
+		Key: "DCAI-41", Type: "Task", Summary: "Panel example", Status: "Triage", Priority: "High",
+	}}}}
+	app := newWritablePrioApp(t, client)
+	res, err := http.Get(app.URL + "/prio/results?step=overview&preset=42&ticket=DCAI-41")
+	if body := ticketResponse(t, res, err); !strings.Contains(body, `data-key="DCAI-41"`) {
+		t.Fatal("preset did not initially include its matching issue")
+	}
+	body := postPrioTicket(t, app, url.Values{"key": {"DCAI-41"}, "step": {"overview"}, "preset": {"42"},
+		"action": {"priority"}, "priority": {"Medium"}})
+	if strings.Contains(body, `data-key="DCAI-41"`) || !strings.Contains(body, `data-ticket="DCAI-41"`) {
+		t.Fatal("preset membership or focused selection is stale after mutation")
 	}
 }

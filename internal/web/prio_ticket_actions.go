@@ -85,6 +85,7 @@ func (s *Server) handlePrioTicket(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		result.Message = err.Error()
 	default:
+		s.invalidatePrioSearches(identity.AccountID)
 		if dcaiIssueKey.MatchString(key) {
 			refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 			issue, refreshErr := s.prioRefresher.RefreshIssue(refreshCtx, client, key)
@@ -124,6 +125,18 @@ func (s *Server) handlePrioTicket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.renderPrioWith(w, context.WithValue(ctx, prioTicketResultKey{}, result), q, name, prioEdit{})
+}
+
+// A successful write can change Jira preset membership and ordering. The
+// response must re-run the signed-in person's search against their own Jira.
+func (s *Server) invalidatePrioSearches(accountID string) {
+	s.prioKeysCache.mu.Lock()
+	defer s.prioKeysCache.mu.Unlock()
+	for query := range s.prioKeysCache.entries {
+		if query.account == accountID {
+			delete(s.prioKeysCache.entries, query)
+		}
+	}
 }
 
 var errPrioFieldUnchanged = errors.New("unchanged")
