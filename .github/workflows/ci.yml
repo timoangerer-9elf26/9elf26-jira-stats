@@ -28,7 +28,8 @@ jobs:
     # there is nothing to build or test — skip straight to deploy. On push/PR
     # this always runs (the required-status-check gate on `main` depends on it).
     if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    # Playwright's pinned Chromium supports Ubuntu 24.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
