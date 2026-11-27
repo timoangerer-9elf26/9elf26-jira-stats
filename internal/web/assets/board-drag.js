@@ -72,6 +72,14 @@
     // filter below reads the same attribute.
     span.setAttribute("data-card-control", "");
     span.textContent = message;
+    if (card.href) {
+      var open = document.createElement("button");
+      open.type = "button";
+      open.setAttribute("data-open-card-in-jira", card.href);
+      open.style.textDecoration = "underline";
+      open.textContent = "Open in Jira";
+      span.append(" ", open);
+    }
     card.appendChild(span);
   }
 
@@ -100,7 +108,10 @@
     fetch("/board/move", {
       method: "POST",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "HX-Current-URL": window.location.href,
+      },
       body: body.toString(),
     })
       .then(function (res) {

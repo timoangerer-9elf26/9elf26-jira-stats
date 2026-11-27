@@ -34,6 +34,12 @@
   document.addEventListener("click", function (evt) {
     var t = evt.target;
     if (!t || !t.closest) return;
-    if (t.closest("[data-card-control]")) evt.preventDefault();
+    if (!t.closest("[data-card-control]")) return;
+    evt.preventDefault();
+    var openJira = t.closest("[data-open-card-in-jira]");
+    if (openJira) {
+      var href = openJira.getAttribute("data-open-card-in-jira");
+      if (href) window.open(href, "_blank", "noopener");
+    }
   });
 })();

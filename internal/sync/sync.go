@@ -139,9 +139,10 @@ func incremental(ctx context.Context, client jira.Client, store Store, since tim
 // time (less an overlap window that absorbs clock skew between the app and
 // Jira, so no change is missed at the boundary).
 type Syncer struct {
-	client  jira.Client
-	store   Store
-	overlap time.Duration
+	client         jira.Client
+	store          Store
+	overlap        time.Duration
+	personalWrites bool
 
 	// mu serializes the periodic Cycle and a full Resync so a resync (clear +
 	// re-backfill) never interleaves with an incremental cycle — only one sync
@@ -155,8 +156,28 @@ type Syncer struct {
 
 // NewSyncer builds a Syncer. overlap is the window subtracted from the last
 // sync time when bounding the incremental query (e.g. 2 minutes).
-func NewSyncer(client jira.Client, store Store, overlap time.Duration) *Syncer {
-	return &Syncer{client: client, store: store, overlap: overlap}
+func NewSyncer(client jira.Client, store Store, overlap time.Duration, opts ...func(*Syncer)) *Syncer {
+	s := &Syncer{client: client, store: store, overlap: overlap}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// RequirePersonalWrites prevents an interactive edit from using the background
+// service account when no personal client was attached to its request.
+func RequirePersonalWrites(s *Syncer) {
+	s.personalWrites = true
+}
+
+func (s *Syncer) writeClient(ctx context.Context) (jira.Client, error) {
+	if client, ok := jira.PersonalClientFromContext(ctx); ok {
+		return client, nil
+	}
+	if s.personalWrites {
+		return nil, errors.New("interactive Jira writes require a personal client")
+	}
+	return s.client, nil
 }
 
 // TriggerResync starts a full resync in the background and returns true, unless
@@ -194,10 +215,14 @@ func (s *Syncer) Resyncing() bool { return s.resyncing.Load() }
 // an in-flight cycle); only the SaveIssue persist is serialized with the sync
 // loop, so a resync's clear-and-rebuild never interleaves with this write.
 func (s *Syncer) SetEstimate(ctx context.Context, key, size string) (string, error) {
-	if err := s.client.UpdateIssueSize(ctx, key, size); err != nil {
+	client, err := s.writeClient(ctx)
+	if err != nil {
+		return "", err
+	}
+	if err := client.UpdateIssueSize(ctx, key, size); err != nil {
 		return "", fmt.Errorf("update size: %w", err)
 	}
-	iss, err := s.client.FetchIssue(ctx, key)
+	iss, err := client.FetchIssue(ctx, key)
 	if err != nil {
 		return "", fmt.Errorf("re-fetch issue: %w", err)
 	}
@@ -223,10 +248,14 @@ func (s *Syncer) SetEstimate(ctx context.Context, key, size string) (string, err
 // As with the other two writes, only the SaveIssue persist takes the sync mutex,
 // so the Jira round-trips never block on an in-flight cycle.
 func (s *Syncer) SetPriority(ctx context.Context, key, priority string) error {
-	if err := s.client.UpdateIssuePriority(ctx, key, priority); err != nil {
+	client, err := s.writeClient(ctx)
+	if err != nil {
+		return err
+	}
+	if err := client.UpdateIssuePriority(ctx, key, priority); err != nil {
 		return fmt.Errorf("update priority: %w", err)
 	}
-	iss, err := s.client.FetchIssue(ctx, key)
+	iss, err := client.FetchIssue(ctx, key)
 	if err != nil {
 		return fmt.Errorf("re-fetch issue: %w", err)
 	}
@@ -263,7 +292,11 @@ func (s *Syncer) SetPriority(ctx context.Context, key, priority string) error {
 // As with SetEstimate, only the SaveIssue persist takes the sync mutex, so the
 // Jira round-trips never block on an in-flight cycle.
 func (s *Syncer) SetStatus(ctx context.Context, key, statusID string) (string, error) {
-	offered, err := s.client.FetchTransitions(ctx, key)
+	client, err := s.writeClient(ctx)
+	if err != nil {
+		return "", err
+	}
+	offered, err := client.FetchTransitions(ctx, key)
 	if err != nil {
 		return "", fmt.Errorf("fetch transitions: %w", err)
 	}
@@ -271,10 +304,10 @@ func (s *Syncer) SetStatus(ctx context.Context, key, statusID string) (string, e
 	if err != nil {
 		return "", fmt.Errorf("transition for %s: %w", key, err)
 	}
-	if err := s.client.TransitionIssue(ctx, key, tr.ID); err != nil {
+	if err := client.TransitionIssue(ctx, key, tr.ID); err != nil {
 		return "", fmt.Errorf("transition issue: %w", err)
 	}
-	iss, err := s.client.FetchIssue(ctx, key)
+	iss, err := client.FetchIssue(ctx, key)
 	if err != nil {
 		return "", fmt.Errorf("re-fetch issue: %w", err)
 	}
@@ -310,10 +343,14 @@ var ErrWriteLanded = errors.New("the Jira write landed; the follow-up did not")
 // by then. The Jira round-trips deliberately run OUTSIDE the sync mutex — only
 // the persist takes it — so a slow Jira does not hold up a sync cycle.
 func (s *Syncer) SetAssignee(ctx context.Context, key, accountID string) (string, error) {
-	if err := s.client.UpdateIssueAssignee(ctx, key, accountID); err != nil {
+	client, err := s.writeClient(ctx)
+	if err != nil {
+		return "", err
+	}
+	if err := client.UpdateIssueAssignee(ctx, key, accountID); err != nil {
 		return "", fmt.Errorf("update assignee: %w", err)
 	}
-	iss, err := s.client.FetchIssue(ctx, key)
+	iss, err := client.FetchIssue(ctx, key)
 	if err != nil {
 		return "", fmt.Errorf("re-fetch issue: %w: %w", ErrWriteLanded, err)
 	}

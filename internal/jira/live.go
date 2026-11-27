@@ -52,13 +52,27 @@ type Config struct {
 // changelog expansion, and falls back to the paginated per-issue changelog
 // endpoint whenever a search-embedded changelog is truncated.
 type LiveClient struct {
-	cfg  Config
-	http *http.Client
+	cfg    Config
+	http   *http.Client
+	bearer string
 }
 
 // NewLiveClient builds a live client from config.
 func NewLiveClient(cfg Config) *LiveClient {
 	return &LiveClient{cfg: cfg, http: &http.Client{Timeout: 30 * time.Second}}
+}
+
+// NewBearerClient uses a personal access token with the Jira Cloud resource URL.
+func NewBearerClient(cfg Config, bearer string, httpClient *http.Client) *LiveClient {
+	return &LiveClient{cfg: cfg, bearer: bearer, http: httpClient}
+}
+
+func (c *LiveClient) authenticate(req *http.Request) {
+	if c.bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+c.bearer)
+		return
+	}
+	req.SetBasicAuth(c.cfg.Email, c.cfg.APIToken)
 }
 
 // FetchIssues walks the entire project via JQL search (expand=changelog),
@@ -377,7 +391,7 @@ func (c *LiveClient) get(ctx context.Context, path string, q url.Values, out any
 	if err != nil {
 		return err
 	}
-	req.SetBasicAuth(c.cfg.Email, c.cfg.APIToken)
+	c.authenticate(req)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.http.Do(req)
@@ -410,8 +424,7 @@ func (c *LiveClient) post(ctx context.Context, path string, body any) error {
 
 // write issues an authenticated request with a JSON body and expects a
 // no-content success (Jira answers 204 both to a successful issue edit and to a
-// performed transition). It is the write counterpart to get; the same basic-auth
-// token is reused.
+// performed transition). It is the write counterpart to get and uses the same credentials.
 func (c *LiveClient) write(ctx context.Context, method, path string, body any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
@@ -421,7 +434,7 @@ func (c *LiveClient) write(ctx context.Context, method, path string, body any) e
 	if err != nil {
 		return err
 	}
-	req.SetBasicAuth(c.cfg.Email, c.cfg.APIToken)
+	c.authenticate(req)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 

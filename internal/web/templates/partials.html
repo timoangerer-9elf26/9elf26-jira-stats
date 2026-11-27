@@ -271,7 +271,7 @@
   {{template "card-epic" .}}
   {{template "card-status" .}}
   <div class="mt-2 flex items-center justify-between gap-2">
-    {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "")}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
+    {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "" "Href" .Href)}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
     <span class="flex min-w-0 items-center gap-2">
       {{if .Activity}}<span class="shrink-0 text-xs tabular-nums text-slate-400" data-testid="card:{{.Key}}:activity">{{.Activity}}</span>{{end}}
       {{if .AssignEditable}}{{template "board-assignee" .}}{{else}}{{template "card-avatar" .}}{{end}}
@@ -282,7 +282,7 @@
        control and covered by that root's marker. Without it, clicking the error
        text follows the card's link to Jira: the exact silent hazard the marker
        exists for (#221, docs/adr/0012). */}}
-  {{if .AssignError}}<p data-card-control class="ba-error" data-testid="card:{{.Key}}:assignee-error" role="alert">{{.AssignError}}</p>{{end}}
+  {{if .AssignError}}<p data-card-control class="ba-error" data-testid="card:{{.Key}}:assignee-error" role="alert">{{.AssignError}}{{if .Href}} {{template "open-card-in-jira" .Href}}{{end}}</p>{{end}}
 {{if .Href}}</a>{{else}}</div>{{end}}
 {{end}}
 
@@ -383,8 +383,12 @@
     {{template "board-estimate-opt" (dict "Key" .Key "OptKey" "l" "Label" "L" "Size" "L" "Cur" .Size)}}
     {{template "board-estimate-opt" (dict "Key" .Key "OptKey" "none" "Label" "No estimate" "Size" "" "Cur" .Size)}}
   </span>
-  {{if .Error}}<span class="be-error" data-testid="card:{{.Key}}:estimate-error" role="alert">{{.Error}}</span>{{end}}
+  {{if .Error}}<span class="be-error" data-testid="card:{{.Key}}:estimate-error" role="alert">{{.Error}}{{if .Href}} {{template "open-card-in-jira" .Href}}{{end}}</span>{{end}}
 </span>
+{{end}}
+
+{{define "open-card-in-jira"}}
+<button type="button" data-open-card-in-jira="{{.}}" style="text-decoration:underline">Open in Jira</button>
 {{end}}
 
 {{/* board-estimate-opt is one choice in the estimate popover. It hx-posts the
@@ -1337,7 +1341,7 @@
   </div>
   <p class="mt-1.5 truncate text-sm text-slate-800" title="{{.Summary}}" data-testid="card:{{.Key}}:title">{{.Summary}}</p>
   <div class="mt-2 flex items-center justify-between gap-2 text-xs text-slate-400">
-    {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "")}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
+    {{if .Editable}}{{template "board-estimate" (dict "Key" .Key "Size" .RawSize "Display" .Size "Error" "" "Href" .Href)}}{{else}}{{template "size-chip" (dict "Label" "est" "Count" .Size "Testid" (printf "card:%s:size" .Key))}}{{end}}
     <span class="flex min-w-0 items-center gap-2">
       <span class="shrink-0 tabular-nums" data-testid="card:{{.Key}}:at">{{.LatestAt}}</span>
       {{template "card-avatar" .}}
@@ -1519,7 +1523,7 @@
     </button>
     {{end}}
   </div>
-  {{if .Error}}<span class="pri-error" data-testid="prio:{{.Key}}:priority-error" role="alert">{{.Error}}</span>{{end}}
+  {{if .Error}}<span class="pri-error" data-testid="prio:{{.Key}}:priority-error" role="alert">{{.Error}}{{if .Href}} <a href="{{.Href}}" target="_blank" rel="noopener">Open in Jira</a>{{end}}</span>{{end}}
 </span>
 {{- else -}}
 <span class="inline-flex items-center gap-1.5" data-testid="prio:{{.Key}}:priority">
