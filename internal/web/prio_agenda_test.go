@@ -149,9 +149,10 @@ func TestPrioAgendaOverviewGroupsReopenedTicketsAndKeepsHistory(t *testing.T) {
 		{Key: "DCAI-4", Type: "Task", Status: "Canceled"},
 	}}
 	app := newTestApp(t, fixture)
-	page := get(t, app.URL+"/prio?"+url.Values{
+	query := url.Values{
 		"cutoff": {cutoff.Format(time.RFC3339)}, "ticket": {"DCAI-2"}, "preset": {"all"},
-	}.Encode())
+	}
+	page := get(t, app.URL+"/prio?"+query.Encode())
 
 	assertOrder(t, page,
 		`data-prio-group="planned"`, `data-key="DCAI-1"`,
@@ -160,7 +161,8 @@ func TestPrioAgendaOverviewGroupsReopenedTicketsAndKeepsHistory(t *testing.T) {
 		`data-prio-group="other"`, `data-key="DCAI-4"`,
 	)
 	for _, want := range []string{
-		`value="2026-10-25T02:30"`, "Neu", "Status geändert", "Aufgelöst",
+		`value="2026-10-25T02:30"`, "Neu", "Aufgelöst",
+		`data-prio-marker="done">Fertig</span>`,
 		"↑ Prio geändert · Mittel → Hoch", "↓ Prio geändert · Hoch → Mittel",
 		"Änderungsverlauf seit Stichtag", "Lea Hoffmann", "25.10.2026 02:30",
 	} {
@@ -170,5 +172,63 @@ func TestPrioAgendaOverviewGroupsReopenedTicketsAndKeepsHistory(t *testing.T) {
 	}
 	if strings.Contains(page, "Niedrigste → Niedrig") {
 		t.Error("change at the cutoff should be excluded")
+	}
+	assertOrder(t, page, "Änderungsverlauf seit Stichtag", "Ready for Release → In Progress</li>", "In Progress → Ready for Release</li>")
+
+	query.Set("step", "done")
+	agenda := get(t, app.URL+"/prio?"+query.Encode())
+	const marker = `data-prio-marker="status">Status In Progress → In Progress</span>`
+	for _, view := range []struct {
+		name, body string
+	}{{"overview and ticket panel", page}, {"agenda queue and ticket panel", agenda}} {
+		if n := strings.Count(view.body, marker); n != 2 {
+			t.Errorf("%s has %d directional status markers, want 2", view.name, n)
+		}
+	}
+}
+
+func TestPrioStatusMarkerUsesCurrentStatusWithIncompleteHistory(t *testing.T) {
+	cutoff := time.Date(2026, time.November, 20, 10, 0, 0, 0, time.UTC)
+	after := cutoff.Add(time.Hour)
+	for _, tc := range []struct {
+		name, current string
+		changes       []jira.ChangelogEntry
+		want          string
+	}{
+		{
+			name: "single transition uses current status", current: "Review / Testing",
+			changes: []jira.ChangelogEntry{
+				{ID: "1", Field: "status", From: "Triage", To: "In Progress", Timestamp: cutoff},
+				{ID: "2", Field: "status", From: "In Progress", To: "Ready To Do", Timestamp: after},
+			},
+			want: "Status In Progress → Review / Testing",
+		},
+		{
+			name: "missing first source", current: "Review / Testing",
+			changes: []jira.ChangelogEntry{
+				{ID: "1", Field: "status", To: "Ready To Do", Timestamp: after},
+				{ID: "2", Field: "status", From: "Ready To Do", To: "Review / Testing", Timestamp: after.Add(time.Minute)},
+			},
+			want: "Status geändert",
+		},
+		{
+			name: "missing current status",
+			changes: []jira.ChangelogEntry{
+				{ID: "1", Field: "status", From: "In Progress", To: "Review / Testing", Timestamp: after},
+			},
+			want: "Status geändert",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app := newTestApp(t, &jira.FakeClient{Issues: []jira.Issue{
+				{Key: "DCAI-1", Type: "Task", Status: tc.current, Changelog: tc.changes},
+			}})
+			page := get(t, app.URL+"/prio?"+url.Values{
+				"cutoff": {cutoff.Format(time.RFC3339)}, "preset": {"all"},
+			}.Encode())
+			if marker := `data-prio-marker="status">` + tc.want + "</span>"; !strings.Contains(page, marker) {
+				t.Errorf("overview missing %q", marker)
+			}
+		})
 	}
 }
