@@ -28,7 +28,8 @@ jobs:
     # there is nothing to build or test — skip straight to deploy. On push/PR
     # this always runs (the required-status-check gate on `main` depends on it).
     if: github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    # Playwright's pinned Chromium supports Ubuntu 24.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -61,6 +62,13 @@ jobs:
       # fake Jira, assert every route serves. No credentials or services needed.
       - name: Smoke tests
         run: go test -tags smoke -count=1 ./smoke/
+
+      - name: Prio filter browser regression
+        run: |
+          npx playwright install --with-deps --only-shell chromium
+          make review-up
+          trap 'make review-down' EXIT
+          node e2e/prio-filter.mjs
 
   # Cut a release on every merge to main (docs/adr/0006). Gated behind
   # build-and-test via `needs`, so a red build never releases, and behind the

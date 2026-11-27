@@ -67,9 +67,15 @@ type prioView struct {
 
 // handlePrio renders the full standalone Prio page.
 func (s *Server) handlePrio(w http.ResponseWriter, r *http.Request) {
-	w.Header().Add("Vary", "HX-Boosted")
+	w.Header().Add("Vary", "HX-Boosted, HX-Trigger")
 	if r.Header.Get("HX-Boosted") == "true" && r.Header.Get("HX-History-Restore-Request") != "true" {
-		s.renderPrio(w, r, "prio-boosted")
+		q, ctx := r.URL.Query(), r.Context()
+		if r.Header.Get("HX-Trigger") == "prio-filter-controls" && jiraIssueID.MatchString(q.Get("preset")) {
+			// An interactive filter change already has results on screen. Keep
+			// them visible while Jira runs, then swap in the finished response.
+			ctx = context.WithValue(ctx, prioPresetLoadKey{}, prioPresetLoad{})
+		}
+		s.renderPrioWith(w, ctx, q, "prio-boosted", prioEdit{})
 		return
 	}
 	s.renderPrio(w, r, "prio.html")

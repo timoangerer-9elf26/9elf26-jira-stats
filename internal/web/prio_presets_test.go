@@ -19,6 +19,32 @@ import (
 	"github.com/timoangerer-9elf26/9elf26-jira-stats/internal/web"
 )
 
+func TestPrioOverviewFilterSwapReturnsReadyJiraResults(t *testing.T) {
+	fixture := &jira.FakeClient{Issues: []jira.Issue{
+		{Key: "DCAI-1", Type: "Epic", Status: "Triage"},
+	}}
+	app := newTestAppWith(t, fixture, time.Now(), web.WithFakeJira(agendaFilterJira{fixture}))
+	address := app.URL + "/prio?preset=10519"
+	if page := get(t, address); !strings.Contains(page, "data-prio-preset-loading") {
+		t.Fatal("a cold standalone page must still render progressively")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, address, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("HX-Boosted", "true")
+	req.Header.Set("HX-Trigger", "prio-filter-controls")
+	resp := response(t)(app.Client().Do(req))
+	page := readResponse(t, resp, http.StatusOK)
+	if !strings.Contains(page, `data-key="DCAI-1"`) || strings.Contains(page, "data-prio-preset-loading") {
+		t.Fatal("a filter swap must already contain its Jira results")
+	}
+	if got := resp.Header.Get("HX-Push-Url"); got != "/prio?preset=10519&step=overview" {
+		t.Errorf("push URL = %q", got)
+	}
+}
+
 func TestPrioOverviewRunsTheSelectedPresetAndRendersLocalRows(t *testing.T) {
 	const saved = `project = DCAI AND (status CHANGED AFTER "2026-11-20 00:00" OR priority CHANGED after '2026-11-20 00:00') AND status CHANGED BEFORE "2026-11-20 00:00" AND priority CHANGED AFTER "2026-11-20 00:01" AND status CHANGED AFTER startOfDay() AND summary ~ "AFTER \"2026-11-20 00:00\"" ORDER BY rank ASC`
 	const unmarked = `project = DCAI AND status CHANGED AFTER "2026-11-20 00:00"`
